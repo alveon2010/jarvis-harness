@@ -12,6 +12,7 @@ import { type PlanProgress, planProgressOf } from "../app/planProgress.ts";
 import { type Resumable, resumableOf } from "../app/resumable.ts";
 import type { Runtime } from "../app/runtime.ts";
 import type { RunTokens } from "../app/status.ts";
+import { type TimeSplit, timeSplitOf } from "../app/timeSplit.ts";
 import { type TryOut, tryOutOf } from "../app/tryOut.ts";
 import { type Change, changesIn, homePath } from "../cli/checkout.ts";
 import { changedFilesOf, type DocFacts, docFacts, reasonsOf } from "../cli/gate.ts";
@@ -528,6 +529,8 @@ export interface RunPage {
   readonly steps: readonly StepRow[];
   readonly tokens: RunTokens;
   readonly workedMs: number;
+  /** Where the run's time went: working, waiting for a person, on budget and the model, stopped. */
+  readonly time?: TimeSplit;
   readonly activity?: Activity;
   readonly card?: WaitCard;
   readonly terminal: boolean;
@@ -841,6 +844,7 @@ export async function runPage(
     steps: order.map(row),
     tokens,
     workedMs,
+    ...((t) => (t ? { time: t } : {}))(timeSplitOf(events, now, leaseLive)),
     ...(activity && run.state === "RUNNING" ? { activity } : {}),
     ...(run.state === "WAITING_HUMAN" ? { card: await waitCardOf(runtime, run, options.homeDir) } : {}),
     terminal: waitingCard(runtime, run.id) !== undefined,

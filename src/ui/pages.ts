@@ -6,6 +6,7 @@ import { duration } from "../app/journey.ts";
 import type { McpHealth, McpServerHealth } from "../app/mcpHealth.ts";
 import type { HealthState, ModelHealth, ModelPerf, ModelsHealth, Unlimited } from "../app/modelHealth.ts";
 import type { PlanProgress } from "../app/planProgress.ts";
+import type { TimeItem, TimePart, TimeSplit } from "../app/timeSplit.ts";
 import { cdTo, type TryOut, tryCommand } from "../app/tryOut.ts";
 import type { Change } from "../cli/checkout.ts";
 import { toolMix } from "../cli/progress.ts";
@@ -1130,6 +1131,39 @@ ${
 </section>`;
 }
 
+const TIME_ROWS: ReadonlyArray<{ part: TimePart; cls: string; name: string; what?: string }> = [
+  { part: "working", cls: "w", name: "Working", what: "steps ran, the model answered, tools worked" },
+  { part: "human", cls: "h", name: "Waiting for you" },
+  { part: "waiting", cls: "b", name: "Waiting on budget and the model" },
+  { part: "stopped", cls: "p", name: "Paused or stopped" },
+];
+
+/**
+ * `2h 19m · 1h 05m working` in the run's head, and on hover (or focus) where the time went:
+ * a bar and four rows from the journal's state intervals (src/app/timeSplit.ts).
+ */
+export function timeHtml(time: TimeSplit): Html {
+  const total = time.totalMs;
+  const working = time.parts.working.ms;
+  const share = (ms: number): number => (total > 0 ? (ms / total) * 100 : 0);
+  const pc = (ms: number): string => (ms === 0 ? "" : share(ms) < 1 ? "<1%" : `${Math.round(share(ms))}%`);
+  const one = (part: TimePart, i: TimeItem): string =>
+    `${i.label} ${duration(i.ms)}${i.times > 1 || (part === "waiting" && i.times > 0) ? ` (×${i.times})` : ""}`;
+  const rows = TIME_ROWS.map(({ part, cls, name, what }) => {
+    const items = time.parts[part].items;
+    const shown = part === "working" ? items.slice(0, 3) : items;
+    const list = `${shown.map((i) => one(part, i)).join(part === "working" ? ", " : " · ")}${items.length > shown.length ? "…" : ""}`;
+    const sub = [what, list].filter((x) => x).join(" · ");
+    const ms = time.parts[part].ms;
+    return html`<tr><td class="k"><i class="${cls}"></i>${name}</td><td class="v">${ms > 0 ? duration(ms) : "—"}</td><td class="pc">${pc(ms)}</td></tr>${sub ? html`<tr><td colspan="3" class="sub">${sub}</td></tr>` : ""}`;
+  });
+  const bar = TIME_ROWS.filter(({ part }) => time.parts[part].ms > 0).map(
+    ({ part, cls }) => html`<i class="${cls}" style="width:${share(time.parts[part].ms).toFixed(2)}%"></i>`,
+  );
+  const when = `started ${wallClock(time.startedAt).slice(0, 5)} · ${time.endedAt ? `ended ${wallClock(time.endedAt).slice(0, 5)}` : "not over yet"}`;
+  return html`<span class="timew" tabindex="0" aria-describedby="tpop">${duration(total)}${total - working >= 60_000 ? html` <span class="work">· ${duration(working)} working</span>` : ""}<span class="tpop" id="tpop" role="tooltip"><b class="ttl">Time of this run</b><span class="bar">${bar}</span><table>${rows}<tr class="total"><td>Total</td><td class="v">${duration(total)}</td><td class="pc"></td></tr></table><span class="note">From the run's journal, ${when}. Working time is what the run cost in time; the rest is where it waited.</span></span></span>`;
+}
+
 export function runContent(page: RunPage, now: number, actions?: Actions, notice?: Html): Html {
   const r = page.run;
   const t = page.tokens;
@@ -1139,13 +1173,16 @@ export function runContent(page: RunPage, now: number, actions?: Actions, notice
       : r.state === "RUNNING" && page.activity?.step
         ? `${page.activity.step.id}${page.activity.step.iteration > 1 ? `#${page.activity.step.iteration}` : ""}`
         : undefined;
-  const meta = [
-    r.workflow,
-    `run ${shortRunId(r.id)}`,
-    duration(page.workedMs),
-    `${t.calls} model call${t.calls === 1 ? "" : "s"}`,
-    ...(t.calls > 0 ? [`in ${kilo(t.promptTokens)} · out ${kilo(t.outputTokens)} tok`] : []),
-  ].join(" · ");
+  const meta = join(
+    [
+      r.workflow,
+      `run ${shortRunId(r.id)}`,
+      page.time ? timeHtml(page.time) : duration(page.workedMs),
+      `${t.calls} model call${t.calls === 1 ? "" : "s"}`,
+      ...(t.calls > 0 ? [`in ${kilo(t.promptTokens)} · out ${kilo(t.outputTokens)} tok`] : []),
+    ],
+    " · ",
+  );
   const card = page.card;
   const rest = r.task.split("\n").slice(1).join("\n").trim();
   return html`<div class="lede-col" style="display:flex;flex-direction:column;gap:8px" data-live="head">
