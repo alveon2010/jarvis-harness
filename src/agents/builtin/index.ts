@@ -159,7 +159,9 @@ Produce the result document when the plan is implemented or when you are blocked
   requires: { tools: true, structuredOutput: "json" },
   output: { type: "implementation", schema: ImplementationResult, outcomes: ["ok"] },
   limits: { maxToolCalls: 80, maxModelCalls: 100, checkpointEvery: 5 },
-  contextInputs: ["spec", "plan", "design"],
+  // the design frames on request: the spec carries their texts, and 73 KB went with every call (pilot)
+  contextInputs: ["spec", "plan"],
+  baseChars: 100_000,
 };
 
 export const TEST_AGENT: AgentDefinition = {
@@ -169,17 +171,19 @@ export const TEST_AGENT: AgentDefinition = {
   instructions: `You are the test agent of Jarvis.
 Goal: verify the implementation against the specification's acceptance criteria.
 Method:
-- Run the project's test and typecheck commands. Read failures carefully; distinguish failures caused by the change from pre-existing ones.
-- Where acceptance criteria have no test, add focused tests next to existing ones following the project's conventions, then run them.
+- The project's checks already ran on the change without a model — the checks document in your inputs: typecheck, lint and the tests related to the changed files, all passed. Do not run them again; you have no typecheck or lint command.
+- Where acceptance criteria have no test, add focused tests next to existing ones following the project's conventions, then run them by path (project.test* with the test file). Read failures carefully; distinguish failures caused by the change from pre-existing ones.
 - You change only test files (tests, mocks, snapshots). A defect in the implementation is not yours to fix: report it with the file, the line and what is wrong, and the implementation gets it.
 - Report commands run, whether everything passed, and each failure with detail. If defects remain, set outcome "defects_found" with reasons that name the failing criteria.
 Produce the result document.`,
-  capabilities: [...READ_REPO, ...WRITE_REPO, "project.*"],
+  // the tests only: typecheck, lint and builds are project.checks' (pilot: 48 commands a round)
+  capabilities: [...READ_REPO, ...WRITE_REPO, "project.test*"],
   writes: TEST_FILES,
   requires: { tools: true, structuredOutput: "json" },
   output: { type: "tests", schema: TestResult, outcomes: ["ok", "defects_found"] },
   limits: { maxToolCalls: 40, maxModelCalls: 60, checkpointEvery: 5 },
-  contextInputs: ["spec", "implementation"],
+  contextInputs: ["spec", "implementation", "checks"],
+  baseChars: 80_000,
 };
 
 export const REVIEW_AGENT: AgentDefinition = {
@@ -190,16 +194,19 @@ export const REVIEW_AGENT: AgentDefinition = {
 Goal: decide whether the change satisfies the specification and the project's conventions.
 Method:
 - Read the diff of the workspace against its base (git.diff). Check every requirement's acceptance criteria against the code and the test results.
+- The project's checks and the tests ran in verify before you, and passed: their results are in your inputs. You run no commands; judge the code.
 - Look for correctness, missing cases, convention violations, and scope creep. Each finding has a severity, a location and a concrete suggestion.
 - Check every standard in your context whose verification is semantic or hybrid; list the ones you checked in "standardsChecked" and report violations of required standards as findings with severity major or blocker.
 - When the same kind of issue appears repeatedly or a convention is implied by the code but written nowhere, propose it in "candidates" with evidence instead of inventing a rule on the spot.
 - Verdict: "approve" when no blocker or major findings remain; "fix_required" when the code needs changes (outcome fix_required); "plan_wrong" when the approach itself does not fit the specification (outcome plan_wrong); "requirements_wrong" when you found a business gap or contradiction the requirements never covered (outcome requirements_wrong) — do not mask it with code.
 Produce the result document.`,
-  capabilities: [...READ_REPO, "project.*"],
+  // verify ran the project's commands; a review that ran them again spent model calls on it (pilot)
+  capabilities: [...READ_REPO],
   requires: { tools: true, structuredOutput: "json" },
   output: { type: "review", schema: ReviewResult, outcomes: ["ok", "fix_required", "plan_wrong"] },
   limits: DEFAULT_LIMITS,
   contextInputs: ["spec", "plan", "implementation", "tests"],
+  baseChars: 100_000,
 };
 
 export const REVIEW_ANALYSIS_AGENT: AgentDefinition = {

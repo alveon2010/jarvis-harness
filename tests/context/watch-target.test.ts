@@ -68,3 +68,52 @@ describe("trimming at the watch level: only down to a target, searches first", (
     expect(events.map((e) => e.kind)).toEqual(["context.pressure", "context.trimmed"]);
   });
 });
+
+describe("the working set: tool results past it go to pointers whatever the window", () => {
+  // pilot: 500k window, nothing trimmed before 178k tokens; every call sent the whole history again
+  it("over the working set the oldest go, down to 60% of it, the newest three and sources stay", async () => {
+    const events: string[] = [];
+    const estimate = (ms: readonly Message[]) => Math.ceil(ms.reduce((n, m) => n + m.content.length, 0) / 4);
+    const transcript = [
+      ...result("j1", "jira.get", 3000),
+      ...result("a1", "repo.read", 4000),
+      ...result("a2", "repo.read", 4000),
+      ...result("a3", "repo.read", 4000),
+      ...result("a4", "repo.read", 1000),
+      ...result("a5", "repo.read", 1000),
+      ...result("a6", "repo.read", 1000),
+    ];
+    const manager = new ContextManager({
+      effective: 1_000_000,
+      thresholds: DEFAULT_THRESHOLDS,
+      compactTarget: 0.35,
+      workingSet: 3_000,
+      estimate,
+      store: () => "ref",
+      summarize: async () => "unused",
+      emit: (kind) => events.push(kind),
+    });
+    const r = await manager.manage([], transcript);
+    expect(r.level).toBe("healthy");
+    expect(r.changed).toBe(true);
+    // 4.5k tokens over a 3k set: shed to 1.8k — the three big reads go, the issue (a source) stays
+    expect(trimmedIds(r.transcript)).toEqual(["a1", "a2", "a3"]);
+    expect(estimate(r.transcript)).toBeLessThanOrEqual(3_000 * 0.6 + 1_200);
+    expect(events).toEqual(["context.trimmed"]);
+    // under the set: nothing happens
+    const again = await manager.manage([], r.transcript);
+    expect(again.changed).toBe(false);
+    // off
+    const off = new ContextManager({
+      effective: 1_000_000,
+      thresholds: DEFAULT_THRESHOLDS,
+      compactTarget: 0.35,
+      workingSet: 0,
+      estimate,
+      store: () => "ref",
+      summarize: async () => "unused",
+      emit: () => undefined,
+    });
+    expect((await off.manage([], transcript)).changed).toBe(false);
+  });
+});

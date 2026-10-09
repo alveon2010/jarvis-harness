@@ -286,7 +286,8 @@ function closeApprovalThread(ctx: StepContext, artifactId: string): void {
  * Composite steps: independent children in parallel with a shared budget (ADR-0011 §1).
  * ---------------------------------------------------------------------------------------------- */
 
-export type ChildRunner = (ctx: StepContext, childId: string) => Promise<StepOutcome>;
+/** Runs a child step; `skip` — why it does not run this time (recorded as a skipped step). */
+export type ChildRunner = (ctx: StepContext, childId: string, skip?: string) => Promise<StepOutcome>;
 
 export class CompositeExecutor implements StepExecutor {
   readonly kind = "composite" as const;
@@ -296,8 +297,37 @@ export class CompositeExecutor implements StepExecutor {
     this.runChild = runChild;
   }
 
+  /**
+   * Children run side by side, except that a child waits for the earlier siblings whose outputs it
+   * takes as inputs, and does not run when one of them did not pass: the work goes back first. Pilot:
+   * the test agent ran typecheck and lint again beside `checks`, 48 commands over two rounds, and spent
+   * a round on what `checks` was about to report anyway.
+   */
   async execute(ctx: StepContext): Promise<StepOutcome> {
-    const results = await Promise.allSettled(ctx.step.children.map((child) => this.runChild(ctx, child)));
+    const children = ctx.step.children;
+    const stepOf = (id: string) => ctx.workflow.steps.find((s) => s.id === id);
+    const started = new Map<string, Promise<StepOutcome>>();
+    const start = (id: string): Promise<StepOutcome> => {
+      const known = started.get(id);
+      if (known) return known;
+      const inputs = stepOf(id)?.inputs ?? [];
+      const before = children.slice(0, children.indexOf(id));
+      const deps = before.filter((d) => (stepOf(d)?.outputs ?? []).some((t) => inputs.includes(t)));
+      const run = (async () => {
+        const done = await Promise.all(deps.map(start));
+        const at = done.findIndex(
+          (o) => o.status === "failure" || (o.outcome !== undefined && o.outcome !== "ok"),
+        );
+        const blocker = at >= 0 ? done[at] : undefined;
+        const skip = blocker
+          ? `${deps[at]} ended ${blocker.outcome ?? blocker.status}: the work goes back before ${id} runs`
+          : undefined;
+        return this.runChild(ctx, id, skip);
+      })();
+      started.set(id, run);
+      return run;
+    };
+    const results = await Promise.allSettled(children.map(start));
     const suspended = results.find((r) => r.status === "rejected" && r.reason instanceof SuspendRun);
     if (suspended && suspended.status === "rejected") throw suspended.reason;
     const rejected = results.find((r) => r.status === "rejected");

@@ -21,6 +21,78 @@ import { isScratchFile } from "./scratch.ts";
  */
 const SKIP_DIRS = new Set(["node_modules", ".git", ".jarvis", "dist", "coverage", ".pnpm-store"]);
 
+/**
+ * `git.diff` of the whole change: the files it touches, then the code's diff within this size; tests,
+ * snapshots and lockfiles by name only (git.diff with their path shows them). Pilot: a 62 KB diff,
+ * cut at the tool limit, was asked for five times in one run and stayed in each conversation.
+ */
+const DIFF_CHARS = 24_000;
+const DIFF_ASIDE = [
+  "**/*.{test,spec}.{ts,tsx,js,jsx,mjs,cjs}",
+  "**/__tests__/**",
+  "**/__mocks__/**",
+  "**/__snapshots__/**",
+  "**/*.snap",
+  "**/{package-lock.json,yarn.lock,pnpm-lock.yaml,npm-shrinkwrap.json}",
+];
+
+/**
+ * `repo.list` without `recursive`: one level — the folders with how many files each holds, then the
+ * files. Pilot: a package's root listed recursively, 41 KB, stayed in the conversation for 60 calls.
+ */
+export function oneLevel(files: readonly string[], prefix: string): string[] {
+  const dirs = new Map<string, number>();
+  const here: string[] = [];
+  for (const f of files) {
+    const rest = f.slice(prefix.length);
+    const slash = rest.indexOf("/");
+    if (slash < 0) here.push(f);
+    else {
+      const dir = `${prefix}${rest.slice(0, slash)}/`;
+      dirs.set(dir, (dirs.get(dir) ?? 0) + 1);
+    }
+  }
+  return [...[...dirs.entries()].map(([d, n]) => `${d} (${n} file${n === 1 ? "" : "s"})`), ...here];
+}
+
+/**
+ * An artifact of this run (or of the run it went on from) by `art_…@v`, or by `type/name@v` as the task
+ * message lists it — also `artifact:type/name@v` and `name@v`. Pilot: the inputs «available on request»
+ * were named `design/design.md@1`, and knowledge.read knew only artifact ids.
+ */
+function artifactByRef(ctx: ToolContext, raw: string) {
+  const ref = raw.replace(/^artifact:/, "");
+  const m = /^([A-Za-z0-9_.:/-]+)@(\d+)$/.exec(ref);
+  if (!m || /^(standard|skill|knowledge):/.test(ref)) return undefined;
+  const [, id, v] = m as unknown as [string, string, string];
+  const version = Number(v);
+  const created = ctx.runtime.events.list({ runId: ctx.run.id, kind: "run.created", limit: 1 })[0];
+  const from = (created?.payload as { continuedFrom?: string } | undefined)?.continuedFrom;
+  const runs = [ctx.run.id, ...(from ? [from] : [])];
+  const byId = ctx.runtime.artifacts.get(id, version);
+  if (byId && runs.includes(byId.runId)) return byId;
+  const slash = id.indexOf("/");
+  const [type, name] = slash > 0 ? [id.slice(0, slash), id.slice(slash + 1)] : [undefined, id];
+  for (const runId of runs) {
+    const latest = ctx.runtime.artifacts
+      .listLatest(runId, type)
+      .find((a) => a.name === name || (type === undefined && a.name === id));
+    if (!latest) continue;
+    const exact = ctx.runtime.artifacts.get(latest.artifactId, version);
+    if (exact) return exact;
+  }
+  return undefined;
+}
+
+/** `documentation/x.md`, `knowledge:x` → the refs a knowledge document may be known by. */
+function refCandidates(ref: string): string[] {
+  const out = [ref];
+  if (!/^(standard|skill|knowledge):/.test(ref)) out.push(`knowledge:${ref}`);
+  const named = out.at(-1) as string;
+  if (named.startsWith("knowledge:") && !/\.md$/.test(named)) out.push(`${named}.md`);
+  return out;
+}
+
 function fail(error: unknown): ToolOutput {
   return { ok: false, error: error instanceof Error ? error.message : String(error) };
 }
@@ -140,22 +212,23 @@ export class LocalToolProvider implements ToolProvider {
           required: ["ref"],
         },
         handler: async (args, ctx) => {
-          const ref = str(args, "ref");
+          const ref = str(args, "ref").trim();
           // Originals of trimmed/compacted context and earlier artifacts (ADR-0001 §7: sources survive summaries).
           if (ref.startsWith("blob:")) {
-            const contentRef = ref.slice("blob:".length);
-            return ctx.runtime.blobs.has(contentRef)
+            const contentRef = ctx.runtime.blobs.resolve(ref.slice("blob:".length).replace(/…$/, ""));
+            return contentRef
               ? { ok: true, text: ctx.runtime.blobs.getText(contentRef) }
-              : { ok: false, error: `unknown blob "${contentRef}"` };
+              : { ok: false, error: `unknown blob "${ref.slice("blob:".length)}"` };
           }
-          const artifactRef = /^([A-Za-z0-9_.:/-]+)@(\d+)$/.exec(ref);
-          if (artifactRef && !/^(standard|skill|knowledge):/.test(ref)) {
-            const artifact = ctx.runtime.artifacts.get(artifactRef[1] as string, Number(artifactRef[2]));
-            if (artifact && artifact.runId === ctx.run.id)
-              return { ok: true, text: ctx.runtime.artifacts.text(artifact) };
+          const artifact = artifactByRef(ctx, ref);
+          if (artifact) return { ok: true, text: ctx.runtime.artifacts.text(artifact) };
+          const roots = knowledgeRootsOf(ctx.runtime.loaded, ctx.workspacePath);
+          // a knowledge document named without its prefix or extension (pilot: 13 failed reads)
+          for (const candidate of refCandidates(ref)) {
+            const text = readByRef(roots, candidate);
+            if (text !== undefined) return { ok: true, text };
           }
-          const text = readByRef(knowledgeRootsOf(ctx.runtime.loaded, ctx.workspacePath), ref);
-          return text === undefined ? { ok: false, error: `unknown ref "${ref}"` } : { ok: true, text };
+          return { ok: false, error: `unknown ref "${ref}"` };
         },
       },
       {
@@ -189,26 +262,32 @@ export class LocalToolProvider implements ToolProvider {
       },
       {
         name: "repo.list",
-        description: "List files inside the workspace (tracked and untracked, ignoring .gitignore'd files).",
+        description:
+          "List a folder of the workspace (tracked and untracked, ignoring .gitignore'd files): its folders with their file counts, then its files. recursive=true lists every file below it.",
         network: "none",
         access: "read",
         effect: false,
         parameters: {
           type: "object",
-          properties: { path: { type: "string" }, maxEntries: { type: "integer" } },
+          properties: {
+            path: { type: "string" },
+            recursive: { type: "boolean" },
+            maxEntries: { type: "integer" },
+          },
         },
         handler: async (args, ctx) => {
           try {
             const { absolute, relative: rel } = resolveInWorkspace(ctx, str(args, "path", "."));
             const all = await listFiles(ctx, ctx.workspacePath);
             const prefix = rel === "." ? "" : `${rel}/`;
-            const files = all.filter((f) => f.startsWith(prefix));
+            const below = all.filter((f) => f.startsWith(prefix));
+            const files = args.recursive === true ? below : oneLevel(below, prefix);
             const max = num(args, "maxEntries", 500);
             void absolute;
             return {
               ok: true,
               text: files.slice(0, max).join("\n"),
-              data: { total: files.length, shown: Math.min(max, files.length) },
+              data: { total: files.length, shown: Math.min(max, files.length), files: below.length },
             };
           } catch (error) {
             return fail(error);
@@ -425,22 +504,71 @@ export class LocalToolProvider implements ToolProvider {
       },
       {
         name: "git.diff",
-        description: "Diff of the workspace against a base (default: the run's base commit) or the index.",
+        description:
+          "Diff of the workspace against a base (default: the run's base commit) or the index. Without path: the changed files, then the code's diff (tests, snapshots and lockfiles by name — pass their path); path — one file or folder in full; full=true — everything.",
         network: "none",
         access: "read",
         effect: false,
         parameters: {
           type: "object",
-          properties: { base: { type: "string" }, path: { type: "string" }, staged: { type: "boolean" } },
+          properties: {
+            base: { type: "string" },
+            path: { type: "string" },
+            staged: { type: "boolean" },
+            full: { type: "boolean" },
+          },
         },
         handler: async (args, ctx) => {
           const base = typeof args.base === "string" ? args.base : ctx.run.workspace.baseCommit;
           const gitArgs = ["diff", "--no-color"];
           if (args.staged === true) gitArgs.push("--cached");
           else if (base) gitArgs.push(base);
-          if (typeof args.path === "string") gitArgs.push("--", resolveInWorkspace(ctx, args.path).relative);
-          const r = await git(gitArgs, ctx.workspacePath);
-          return r.code === 0 ? { ok: true, text: r.stdout } : { ok: false, error: r.stderr };
+          const whole = async (extra: string[] = []): Promise<ToolOutput> => {
+            const r = await git([...gitArgs, ...extra], ctx.workspacePath);
+            return r.code === 0 ? { ok: true, text: r.stdout } : { ok: false, error: r.stderr };
+          };
+          if (typeof args.path === "string")
+            return whole(["--", resolveInWorkspace(ctx, args.path).relative]);
+          if (args.full === true) return whole();
+          const names = await git([...gitArgs, "--name-only"], ctx.workspacePath);
+          if (names.code !== 0) return { ok: false, error: names.stderr };
+          const files = names.stdout.split("\n").filter((f) => f.length > 0);
+          const aside = files.filter((f) => globMatches(f, DIFF_ASIDE));
+          const code = files.filter((f) => !aside.includes(f));
+          const stat = await git([...gitArgs, "--stat=120"], ctx.workspacePath);
+          const diff =
+            code.length > 0 ? await git([...gitArgs, "--", ...code], ctx.workspacePath) : undefined;
+          const chunks = (diff?.stdout ?? "").split(/^(?=diff --git )/m).filter((c) => c.length > 0);
+          const shown: string[] = [];
+          const later: string[] = [];
+          let left = DIFF_CHARS;
+          for (const chunk of chunks) {
+            const file = /^diff --git a\/(\S+)/.exec(chunk)?.[1] ?? "?";
+            if (chunk.length <= left) {
+              shown.push(chunk);
+              left -= chunk.length;
+            } else later.push(file);
+          }
+          const untracked = await git(["ls-files", "--others", "--exclude-standard"], ctx.workspacePath);
+          const fresh = untracked.stdout
+            .split("\n")
+            .filter((f) => f.length > 0 && !ctx.pathPolicy.isDenied(f));
+          const notes = [
+            later.length > 0
+              ? `[not shown, over ${DIFF_CHARS} chars: ${later.join(", ")} — git.diff with their path]`
+              : "",
+            aside.length > 0
+              ? `[tests, snapshots, lockfiles — git.diff with their path: ${aside.join(", ")}]`
+              : "",
+            fresh.length > 0
+              ? `[new files not committed yet, not in a diff — repo.read them: ${fresh.join(", ")}]`
+              : "",
+          ].filter(Boolean);
+          return {
+            ok: true,
+            text: [stat.stdout.trimEnd(), shown.join(""), ...notes].filter(Boolean).join("\n\n"),
+            data: { files: files.length, shown: shown.length, later: later.length, aside: aside.length },
+          };
         },
       },
       {

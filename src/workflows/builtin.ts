@@ -79,10 +79,11 @@ steps:
     inputs: [spec, plan, design]
     outputs: [implementation]
     transitions: { onSuccess: verify }
-  # ADR-0019 §8 DAG: implementation → {tests, docs, telemetry} → review; children run in parallel.
+  # ADR-0019 §8 DAG: implementation → {tests, docs, telemetry} → review; children run in parallel,
+  # but tests waits for checks (it takes their result) and does not run when they failed
   - id: verify
     kind: composite
-    children: [tests, standards, checks, docs, telemetry]
+    children: [checks, standards, tests, docs, telemetry]
     transitions:
       onSuccess: review
       onOutcome:
@@ -112,7 +113,7 @@ steps:
   - id: tests
     kind: agentic
     agent: test
-    inputs: [spec, implementation]
+    inputs: [spec, implementation, checks]
     outputs: [tests]
   - id: review
     kind: agentic

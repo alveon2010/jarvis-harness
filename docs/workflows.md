@@ -62,9 +62,12 @@ flowchart LR
   requirements -.->|needs_clarification| thread((тред))
 ```
 
-`verify` — composite из `tests` (агент), `standards` (`standards.check`), `checks` (`project.checks`: команды
+`verify` — composite из `checks` (`project.checks`: команды
 `tools.local` для изменённых пакетов: `test*`, `typecheck*`, `lint*` на изменённых файлах, `tools.checks`; сначала
-`tools.fix` и `tools.rebuild`, после пересборки — `typecheck*` всех пакетов), `docs` и `telemetry` (агенты), все параллельно. `needs_clarification` — не ребро, а парковка: AgenticExecutor открывает тред
+`tools.fix` и `tools.rebuild`, после пересборки — `typecheck*` всех пакетов), `standards` (`standards.check`), `tests`
+(агент), `docs` и `telemetry` (агенты), параллельно. Ребёнок, который берёт выход более раннего соседа, ждёт его и не
+идёт, если тот не прошёл: `tests` берёт `checks` — запускает только свои тесты, typecheck и lint у него нет, а при
+упавших checks работа сразу уходит в implementation. Review команд проекта не запускает: verify уже прошёл. `needs_clarification` — не ребро, а парковка: AgenticExecutor открывает тред
 уточнения, run ждёт человека, после решения тот же шаг исполняется заново с решением в контексте.
 
 | Шаг | Вид | Входы | Выход |
@@ -79,12 +82,12 @@ flowchart LR
 | plan | agent `plan` | spec, impact | `plan` |
 | implementation | agent `implementation` | spec, plan, design | `implementation` |
 | verify | composite | | |
-| tests | agent `test` | spec, implementation | `tests` |
+| tests | agent `test` | spec, implementation, checks | `tests` |
 | standards | deterministic `standards.check` | | `standards-check` |
 | checks | deterministic `project.checks` | | `checks` |
 | docs | agent `docs` | spec, implementation | `docs` |
 | telemetry | agent `telemetry` | spec, impact, implementation | `telemetry` |
-| review | agent `review` | spec, plan, implementation, tests, docs, telemetry | `review` |
+| review | agent `review` | spec, plan, implementation, tests, checks, docs, telemetry | `review` |
 | approve-impl | approval `implementation` | | |
 | review-analysis | agent `review-analysis` | review-package, spec, requirements, implementation | `review-analysis` |
 | release-notes | agent `release-notes` | spec, implementation, review | `release-notes` |
@@ -112,10 +115,10 @@ flowchart LR
 | impact | research | чтение репо (в т.ч. `graph.impact`, `graph.neighbors`) | ok, needs_research |
 | plan | research | `repo.read/list/search` | ok, spec_infeasible |
 | implementation | implementation | чтение + `repo.write/edit`, `project.*`, `figma.get` | ok |
-| test | implementation | чтение + запись только тестов (`*.test.*`, `*.spec.*`, `__tests__`, `__mocks__`, `__snapshots__`, `test/`, `tests/`), `project.*` | ok, defects_found |
+| test | implementation | чтение + запись только тестов (`*.test.*`, `*.spec.*`, `__tests__`, `__mocks__`, `__snapshots__`, `test/`, `tests/`), `project.test*` | ok, defects_found |
 | docs | implementation | чтение + запись | ok |
 | telemetry | implementation | чтение + запись | ok, spec_gap |
-| review | review | чтение, `project.*` | ok, fix_required, plan_wrong |
+| review | review | чтение | ok, fix_required, plan_wrong |
 | review-analysis | review | чтение, `knowledge.read` | ok, fix_required, spec_wrong, requirements_wrong, needs_clarification |
 | release-notes | research | чтение | ok |
 | onboard-mapper | research | чтение | ok |

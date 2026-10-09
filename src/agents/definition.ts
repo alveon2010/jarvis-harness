@@ -36,6 +36,13 @@ export interface AgentDefinition<T = unknown> {
   readonly limits: AgentLimits;
   /** Artifact types to inject fully (the rest of the step inputs are listed by name only). */
   readonly contextInputs?: readonly string[];
+  /**
+   * The task message's size (inputs and knowledge, in characters) for an agent that works in a loop of
+   * many model calls: every call sends it again (no prefix cache on the pilot gateway). Without — a
+   * share of the model's window. Pilot: implementation sent ~240k characters on each of 162 calls,
+   * two thirds of the step's 20M input tokens.
+   */
+  readonly baseChars?: number;
   /** Where the agent may write (globs); without — wherever its capabilities and the path policy allow. */
   readonly writes?: readonly string[];
 }

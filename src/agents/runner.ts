@@ -170,9 +170,14 @@ export class AgentRuntimeRunner implements AgentRunner {
       route.model.contextWindow,
       config.context.maxContext ?? route.model.contextWindow,
     );
-    const charBudget = Math.floor(window * 0.45 * 3.5);
-    const buildBase = (chars: number) =>
-      buildBaseMessages({
+    // an agent of many calls has a task message of its own size: each call sends it again
+    const lean = config.agents[def.id]?.baseChars ?? def.baseChars;
+    const charBudget = Math.min(Math.floor(window * 0.45 * 3.5), lean ?? Number.POSITIVE_INFINITY);
+    // the files the task message shows whole: a read of one of them gets a pointer (rereads.ts)
+    let baseShown = new Map<string, string>();
+    const buildBase = (chars: number) => {
+      baseShown = new Map();
+      return buildBaseMessages({
         def,
         ctx,
         tools: toolDescriptors,
@@ -180,7 +185,9 @@ export class AgentRuntimeRunner implements AgentRunner {
         pkg,
         knowledgeConfig: config.knowledge,
         budget: { chars },
+        shown: baseShown,
       });
+    };
     let base = buildBase(charBudget);
     // a person's notes while the step works: the ones before it are in the base, the rest come live
     const before = notesOf(rt, ctx.run.id);
@@ -228,6 +235,7 @@ export class AgentRuntimeRunner implements AgentRunner {
       !grants.finish;
     // files read in this step, from the conversation itself (src/agents/rereads.ts)
     const reads = ReadLedger.from(transcript);
+    reads.seed(baseShown);
     const searches = SearchLedger.from(transcript);
     let toolCalls = restored?.toolCalls ?? 0;
     let modelCalls = restored?.modelCalls ?? 0;
@@ -275,6 +283,7 @@ export class AgentRuntimeRunner implements AgentRunner {
         effective,
         thresholds: resolveThresholds(config.context, route.modelId, ctx.step.phase),
         compactTarget: config.context.compactTarget,
+        workingSet: config.context.workingSet,
         estimate,
         store: (text) => rt.blobs.put(text, "text/plain").contentRef,
         summarize: async (rendered, previous) => {
@@ -291,7 +300,11 @@ export class AgentRuntimeRunner implements AgentRunner {
           return { text: response.text, truncated: response.finishReason === "length" };
         },
         // Aggressive pressure also tightens L3/L4: the same inputs under a smaller budget.
-        tighten: () => buildBase(Math.floor(charBudget * 0.6)),
+        tighten: () => {
+          const tighter = buildBase(Math.floor(charBudget * 0.6));
+          reads.seed(baseShown);
+          return tighter;
+        },
         emit,
         pinned: (id) => reads.pinned(id),
       },

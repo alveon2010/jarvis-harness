@@ -113,8 +113,13 @@ describe("local tools", () => {
     const tools = bind();
     const list = await tools.invoke("repo.list");
     expect(list.ok).toBe(true);
-    expect(list.text.split("\n")).toEqual(expect.arrayContaining(["src/index.ts", "README.md", "config.ts"]));
+    // one level: folders with their file counts, then files; recursive lists them all
+    expect(list.text.split("\n")).toEqual(
+      expect.arrayContaining(["src/ (1 file)", "README.md", "config.ts"]),
+    );
     expect(list.text).not.toContain(".env");
+    const all = await tools.invoke("repo.list", { recursive: true });
+    expect(all.text.split("\n")).toEqual(expect.arrayContaining(["src/index.ts", "README.md"]));
 
     const read = await tools.invoke("repo.read", { path: "src/index.ts", startLine: 2, endLine: 3 });
     expect(read.ok).toBe(true);
@@ -165,6 +170,23 @@ describe("local tools", () => {
     expect(status.text).toContain("src/new/");
     const diff = await tools.invoke("git.diff");
     expect(diff.text).toContain("-export const answer = 42");
+    expect(diff.text).toContain("src/index.ts |");
+    expect(diff.text).toContain(
+      "[new files not committed yet, not in a diff — repo.read them: src/new/file.ts",
+    );
+    // tests and snapshots by name only; their path shows them
+    writeFileSync(join(sb.project, "src/index.test.ts"), "old\n");
+    sh(sb.project, "git", ["add", "-A"]);
+    sh(sb.project, "git", ["commit", "-q", "-m", "t"]);
+    writeFileSync(join(sb.project, "src/index.test.ts"), "new\n");
+    const named = await tools.invoke("git.diff", { base: "HEAD" });
+    expect(named.text).toContain(
+      "[tests, snapshots, lockfiles — git.diff with their path: src/index.test.ts]",
+    );
+    expect(named.text).not.toContain("+new");
+    expect((await tools.invoke("git.diff", { base: "HEAD", path: "src/index.test.ts" })).text).toContain(
+      "+new",
+    );
   });
 
   it("refuses paths outside the workspace and secret locations, and redacts secrets in output", async () => {
@@ -337,6 +359,34 @@ describe("builds the checks read (tools.rebuild)", () => {
     const readme = await tools.invoke("repo.write", { path: "README.md", content: "# x\n" });
     expect(readme.text).toBe("wrote README.md (4 bytes)");
     expect(registry.get("repo.write")?.description).toContain("the project's fixer");
+  });
+
+  it("knowledge.read takes an input as the task message names it, a short blob ref, a document without its prefix", async () => {
+    const { bind, run } = await setup();
+    const tools = bind();
+    const design = rt.artifacts.put({
+      runId: run.id,
+      type: "design",
+      name: "design.md",
+      content: "# Frames\n",
+      provenance: { kind: "tool", capability: "sources.collect" },
+    });
+    for (const ref of [
+      "design/design.md@1",
+      "artifact:design/design.md@1",
+      "design.md@1",
+      `${design.artifactId}@1`,
+    ]) {
+      const r = await tools.invoke("knowledge.read", { ref });
+      expect(r.ok, ref).toBe(true);
+      expect(r.text).toContain("# Frames");
+    }
+    const blob = rt.blobs.put("the original result", "text/plain").contentRef;
+    expect((await tools.invoke("knowledge.read", { ref: `blob:${blob.slice(0, 12)}` })).text).toBe(
+      "the original result",
+    );
+    expect((await tools.invoke("knowledge.read", { ref: "blob:abc" })).ok).toBe(false);
+    expect((await tools.invoke("knowledge.read", { ref: "design/design.md@7" })).ok).toBe(false);
   });
 
   it("an agent with write paths cannot write outside them", async () => {

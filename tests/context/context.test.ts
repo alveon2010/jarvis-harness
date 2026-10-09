@@ -48,6 +48,7 @@ describe("pressure (ADR-0013 §1–2)", () => {
         byPhase: { implementation: { compact: 0.45 }, research: { watch: 0.7 } },
       },
       compactTarget: 0.35,
+      workingSet: 0,
     };
     expect(resolveThresholds(undefined, "x")).toEqual(DEFAULT_THRESHOLDS);
     expect(resolveThresholds(cfg, "other")).toEqual({ ...DEFAULT_THRESHOLDS, compact: 0.5 });

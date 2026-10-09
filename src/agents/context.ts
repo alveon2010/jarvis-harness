@@ -13,6 +13,7 @@ import type { Message } from "../models/types.ts";
 import type { StepContext } from "../orchestration/types.ts";
 import type { CapabilityDescriptor } from "../tools/types.ts";
 import type { AgentDefinition } from "./definition.ts";
+import { contentHash } from "./rereads.ts";
 
 /**
  * Context assembly for an agent call (ADR-0001 §7, ADR-0013 §4). Layers in a fixed order and
@@ -30,9 +31,17 @@ export interface ContextBudget {
   readonly chars: number;
 }
 
-function clip(text: string, max: number): string {
+function clip(text: string, max: number, ref?: string): string {
   if (text.length <= max) return text;
-  return `${text.slice(0, max)}\n…[truncated ${text.length - max} chars]`;
+  return `${text.slice(0, max)}\n…[truncated ${text.length - max} chars${ref ? ` — knowledge.read ${ref} for the whole` : ""}]`;
+}
+
+/** A file's text as repo.read shows it: numbered lines. */
+export function numberedLines(text: string): string {
+  return text
+    .split("\n")
+    .map((l, i) => `${String(i + 1).padStart(5)}  ${l}`)
+    .join("\n");
 }
 
 /** An input produced by an agent that ran out of its budget: say so, so it is not taken as complete. */
@@ -123,6 +132,11 @@ export interface BuildInput {
   readonly pkg: EngineeringContextPackage;
   readonly knowledgeConfig: KnowledgeConfig;
   readonly budget: ContextBudget;
+  /**
+   * Filled with the files the task message shows whole (path → hash of their numbered text): a
+   * repo.read of one of them, unchanged, is answered with a pointer (src/agents/rereads.ts).
+   */
+  readonly shown?: Map<string, string>;
 }
 
 /** L0–L4 as two messages: a byte-stable system message and the task message. */
@@ -157,7 +171,7 @@ export function buildBaseMessages(input: BuildInput): Message[] {
   const perInput = full.length > 0 ? Math.floor(inputBudget / full.length) : 0;
   const l3 = full.map(
     (i) =>
-      `## Artifact ${i.artifact.type}/${i.artifact.name}@${i.artifact.version}\n${incompleteNote(i.artifact)}${clip(i.text, perInput)}`,
+      `## Artifact ${i.artifact.type}/${i.artifact.name}@${i.artifact.version}\n${incompleteNote(i.artifact)}${clip(i.text, perInput, `${i.artifact.type}/${i.artifact.name}@${i.artifact.version}`)}`,
   );
   const named = input.inputs
     .filter((i) => !full.includes(i))
@@ -165,14 +179,15 @@ export function buildBaseMessages(input: BuildInput): Message[] {
       (i) =>
         `- ${i.artifact.type}/${i.artifact.name}@${i.artifact.version}${incompleteNote(i.artifact) ? " (incomplete: its agent ran out of budget)" : ""}`,
     );
-  if (named.length > 0) l3.push(`## Other inputs (available on request)\n${named.join("\n")}`);
+  if (named.length > 0)
+    l3.push(`## Other inputs (available on request: knowledge.read with the ref)\n${named.join("\n")}`);
   // bounded: every model call of the step re-sends it (no prefix cache on the pilot gateway)
-  const read = codeReadInRun(ctx, Math.min(Math.floor(inputBudget * 0.25), 40_000));
+  const read = codeReadInRun(ctx, Math.min(Math.floor(inputBudget * 0.25), 40_000), input.shown);
   if (read) l3.push(read);
   // an implementation starts on the plan step that is open, with its files as they are now
   const step =
     def.output.type === "implementation"
-      ? planStepNow(ctx, Math.min(Math.floor(inputBudget * 0.2), 30_000))
+      ? planStepNow(ctx, Math.min(Math.floor(inputBudget * 0.2), 30_000), input.shown)
       : undefined;
   if (step) l3.push(step);
   // the version the human sent back comes first: the agent revises it rather than starting over
@@ -239,7 +254,11 @@ export function humanReviewOf(
  * research, requirements, spec and impact each re-read `order-form.tsx`, a model round trip
  * (up to five minutes on the pilot gateway) every time.
  */
-export function codeReadInRun(ctx: StepContext, chars: number): string | undefined {
+export function codeReadInRun(
+  ctx: StepContext,
+  chars: number,
+  shown?: Map<string, string>,
+): string | undefined {
   const runs = [ctx.run.id];
   const created = ctx.runtime.events.list({ runId: ctx.run.id, kind: "run.created", limit: 1 })[0];
   const from = (created?.payload as { continuedFrom?: string } | undefined)?.continuedFrom;
@@ -276,12 +295,10 @@ export function codeReadInRun(ctx: StepContext, chars: number): string | undefin
     const buffer = readFileSync(full);
     if (buffer.includes(0)) continue;
     const text = ctx.runtime.redactor.redact(buffer.toString("utf8")).text;
-    const numbered = text
-      .split("\n")
-      .map((l, i) => `${String(i + 1).padStart(5)}  ${l}`)
-      .join("\n");
+    const numbered = numberedLines(text);
     const body = clip(numbered, Math.min(left, 16_000));
     left -= body.length;
+    if (body === numbered) shown?.set(path, contentHash(numbered));
     sections.push(
       `### ${path} (read ${info.n} time${info.n === 1 ? "" : "s"} by ${[...info.steps].join(", ") || "earlier steps"})\n${body}`,
     );
@@ -299,7 +316,11 @@ export function codeReadInRun(ctx: StepContext, chars: number): string | undefin
  * files, so it starts editing instead of reading the whole plan's code first (pilot: 64 model calls of
  * reading, five trims, no edit).
  */
-export function planStepNow(ctx: StepContext, chars: number): string | undefined {
+export function planStepNow(
+  ctx: StepContext,
+  chars: number,
+  shown?: Map<string, string>,
+): string | undefined {
   const progress = planProgressOf(
     ctx.runtime,
     ctx.run,
@@ -323,13 +344,16 @@ export function planStepNow(ctx: StepContext, chars: number): string | undefined
       lines.push(`### ${path}\n(new file — not there yet)`);
       continue;
     }
-    const text = readFileSync(full, "utf8");
-    const shown =
+    // redacted as every other way a file reaches the model (it was not: a secret in a plan step's file
+    // went into the prompt as it was)
+    const text = ctx.runtime.redactor.redact(readFileSync(full, "utf8")).text;
+    const body =
       text.length > left
         ? `${text.slice(0, left)}\n…[cut: ${text.length - left} more chars — repo.read it]`
         : text;
-    left -= shown.length;
-    lines.push(`### ${path} (as it is now)\n${shown}`);
+    left -= body.length;
+    if (body === text) shown?.set(path, contentHash(numberedLines(text)));
+    lines.push(`### ${path} (as it is now)\n${body}`);
   }
   return lines.join("\n\n");
 }

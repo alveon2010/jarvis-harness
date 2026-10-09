@@ -38,6 +38,19 @@ export class BlobStore {
     return existsSync(this.path(contentRef));
   }
 
+  /**
+   * The blob a shortened reference names (at least 8 hex characters, one match only). Pilot: models
+   * quoted a trimmed result's original as `blob:96acfe00d8f3`, and 20 reads back failed.
+   */
+  resolve(ref: string): string | undefined {
+    if (ref.length >= 2 && this.has(ref)) return ref;
+    if (!/^[0-9a-f]{8,63}$/.test(ref)) return undefined;
+    const rows = this.db
+      .prepare("SELECT content_ref FROM blobs WHERE content_ref LIKE ? LIMIT 2")
+      .all(`${ref}%`) as Array<{ content_ref: string }>;
+    return rows.length === 1 ? rows[0]?.content_ref : undefined;
+  }
+
   put(content: Buffer | string, mediaType?: string): BlobInfo {
     const buffer = typeof content === "string" ? Buffer.from(content, "utf8") : content;
     const contentRef = contentRefOf(buffer);

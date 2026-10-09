@@ -100,7 +100,7 @@ export class LocalWorkflowEngine {
       approval: options.executors?.approval ?? new ApprovalExecutor(),
       composite:
         options.executors?.composite ??
-        new CompositeExecutor((ctx, childId) =>
+        new CompositeExecutor((ctx, childId, skip) =>
           this.executeStep(
             ctx.run,
             ctx.workflow,
@@ -108,6 +108,7 @@ export class LocalWorkflowEngine {
             ctx.iteration,
             ctx.lease,
             ctx.workspace,
+            skip,
           ),
         ),
     };
@@ -244,9 +245,10 @@ export class LocalWorkflowEngine {
     iteration: number,
     lease: HeldLease,
     workspace: Workspace,
+    skipBecause?: string,
   ): Promise<StepOutcome> {
     lease.check();
-    const skip = this.skipReason(run, step);
+    const skip = skipBecause ?? this.skipReason(run, step);
     if (skip) {
       const historyId = this.rt.history.start(run.id, step.id, iteration, []);
       this.emit(run, "step.start", { stepId: step.id, iteration, kind: step.kind, inputs: [] });

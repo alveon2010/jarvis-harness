@@ -1131,6 +1131,38 @@ context: { maxContext: 8000 }
     expect(rt.artifacts.listLatest(run.id, "research")).toHaveLength(1);
   });
 
+  it("an agent of many calls has a task message of its own size, whatever the window (agents.<id>.baseChars)", async () => {
+    sb.write(
+      "home/.jarvis/config.yaml",
+      `version: 1
+models:
+  big:
+    provider: openai-compatible
+    baseUrl: ${server.baseUrl}
+    model: big
+    egress: private
+    contextWindow: 1000000
+    maxOutput: 2000
+    supports: { tools: true, jsonMode: true }
+roles:
+  research: { models: [big] }
+agents:
+  research: { baseChars: 6000 }
+`,
+    );
+    sb.write("project/.jarvis/knowledge/huge.md", `# Huge\n${"fact ".repeat(4000)}\n`);
+    sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
+    rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
+    server.respond(() => completion(JSON.stringify(RESEARCH_DOC)));
+    const run = createRun(rt, "r");
+    await engineWith(rt, researchOnly).execute(run.id, { owner: "cli:t" });
+    const task =
+      ((server.requests[0] as CapturedRequest).body.messages as Array<{ content: string }>)[1]?.content ?? "";
+    expect(task).toContain("huge.md");
+    expect(task).not.toContain("fact ".repeat(1000));
+    expect(task.length).toBeLessThan(8000);
+  });
+
   it("gives the next agent the code earlier steps read, as it is now (pilot: the same file re-read by four agents)", async () => {
     sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
     rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
@@ -1157,6 +1189,7 @@ context: { maxContext: 8000 }
     });
     const engine = engineWith(rt, wf);
     let readOnce = false;
+    let readInTask = false;
     server.respond((req) => {
       const system = (req.body.messages as Array<{ content: string }>)[0]?.content ?? "";
       if (system.includes("# Agent: research")) {
@@ -1165,6 +1198,11 @@ context: { maxContext: 8000 }
           return toolCallCompletion("repo.read", { path: "src/onboarding.ts" });
         }
         return completion(JSON.stringify(RESEARCH_DOC));
+      }
+      // the file its task message shows: read anyway, it gets a pointer
+      if (!readInTask) {
+        readInTask = true;
+        return toolCallCompletion("repo.read", { path: "src/onboarding.ts" });
       }
       return completion("not a document");
     });
@@ -1182,6 +1220,12 @@ context: { maxContext: 8000 }
     expect(text).toContain("## Code already read in this run (current content)");
     expect(text).toContain("### src/onboarding.ts (read 1 time by research)");
     expect(text).toContain("    1  export function canRestartOnboarding() {");
+    const after = server.requests.filter((r) =>
+      ((r.body.messages as Array<{ content: string }>)[0]?.content ?? "").includes("# Agent: requirements"),
+    )[1];
+    expect(JSON.stringify(after?.body.messages)).toContain(
+      "the whole of src/onboarding.ts is in your task message",
+    );
   });
 
   it("stores invalid structured output as an artifact and fails the step", async () => {

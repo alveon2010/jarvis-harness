@@ -97,3 +97,28 @@ describe("a file read again in the same step (pilot: one file read 62 times)", (
     ).toBe("first");
   });
 });
+
+describe("a file the task message already shows whole", () => {
+  it("unchanged: a pointer to the task message; asked again, the text; changed: the text", async () => {
+    const { contentHash } = await import("../../src/agents/rereads.ts");
+    const body = file.replace(/^\[repo\.read\] ok\n/, "");
+    const ledger = new ReadLedger();
+    ledger.seed(new Map([["src/orders/total.ts", contentHash(body)]]));
+    const key = readKey("repo.read", { path: "src/orders/total.ts" });
+    let transcript: Message[] = [call("c1")];
+    const first = ledger.answer(key, "c1", file, transcript);
+    expect(first.kind).toBe("in-task");
+    expect(first.content).toContain("is in your task message");
+    transcript = [...transcript, result("c1", first.content), call("c2")];
+    const second = ledger.answer(key, "c2", file, transcript);
+    expect(second.kind).toBe("again");
+    expect(second.content).toContain("export function total");
+    // changed since the task message was built: the text, as a first read
+    const other = new ReadLedger();
+    other.seed(new Map([["src/orders/total.ts", contentHash("something else")]]));
+    expect(other.answer(key, "c3", file, [call("c3")]).kind).toBe("first");
+    // a range is not the whole file
+    const ranged = readKey("repo.read", { path: "src/orders/total.ts", startLine: 1, endLine: 2 });
+    expect(ledger.answer(ranged, "c4", file, [call("c4")]).kind).toBe("first");
+  });
+});

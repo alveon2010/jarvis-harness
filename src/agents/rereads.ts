@@ -28,6 +28,8 @@ interface Read {
 }
 
 const hashOf = (text: string) => createHash("sha256").update(text).digest("hex");
+/** Of a file's text as the task message shows it (src/agents/context.ts). */
+export const contentHash = hashOf;
 
 /** Which reads count as the same: one path and one range. */
 export function readKey(name: string, args: Record<string, unknown>): string | undefined {
@@ -39,6 +41,17 @@ export function readKey(name: string, args: Record<string, unknown>): string | u
 export class ReadLedger {
   private readonly reads = new Map<string, Read>();
   private readonly pins = new Set<string>();
+  /** Files the task message shows whole: path → hash of their numbered text. */
+  private inTask = new Map<string, string>();
+
+  /**
+   * The files the task message shows whole ("Code already read", the plan step's files): reading one
+   * of them unchanged is answered with a pointer. Pilot: agents read again files their task message
+   * held, and each read stayed in the conversation. A second read gets the text.
+   */
+  seed(shown: ReadonlyMap<string, string>): void {
+    this.inTask = new Map(shown);
+  }
 
   /** What the conversation already holds: the last full read of each file and the pinned results. */
   static from(transcript: readonly Message[]): ReadLedger {
@@ -82,10 +95,20 @@ export class ReadLedger {
     callId: string,
     content: string,
     transcript: readonly Message[],
-  ): { content: string; kind: "first" | "unchanged" | "again" | "changed" } {
+  ): { content: string; kind: "first" | "in-task" | "unchanged" | "again" | "changed" } {
     if (!key || !/^\[repo\.read\] ok/.test(content)) return { content, kind: "first" };
     const hash = hashOf(content);
     const before = this.reads.get(key);
+    const path = key.endsWith("#-") ? key.slice(0, -2) : undefined;
+    const inTask = path ? this.inTask.get(path) : undefined;
+    if (!before && inTask !== undefined && inTask === hashOf(content.replace(/^\[repo\.read\] ok\n/, ""))) {
+      // the pointer stands for the read: asked again, the text comes
+      this.reads.set(key, { callId });
+      return {
+        content: `[repo.read] ok\n${UNCHANGED} the whole of ${path} is in your task message — "Code already read in this run" or the plan step's files — and it has not changed since. Use it; read it again only if you need its line numbers.)`,
+        kind: "in-task",
+      };
+    }
     this.reads.set(key, { callId, hash });
     if (!before) return { content, kind: "first" };
     const earlier = transcript.find((m) => m.role === "tool" && m.toolCallId === before.callId);

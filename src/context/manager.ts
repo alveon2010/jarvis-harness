@@ -20,6 +20,8 @@ const WATCH_BATCH = 4;
  * and the agent read 19 of its files again at once.
  */
 const WATCH_TARGET = 0.75;
+/** Past `workingSet`, trim down to this share of it: in one batch, not a result per call. */
+const WORKING_TARGET = 0.6;
 
 /**
  * Acts on context pressure before every model call (ADR-0013 §6, ADR-0001 §7):
@@ -34,6 +36,11 @@ export interface ContextManagerOptions {
   readonly thresholds: Thresholds;
   /** Share of the effective window the prompt should shrink to (`context.compactTarget`). */
   readonly compactTarget: number;
+  /**
+   * Tokens of tool results past the base kept in full whatever the pressure (`context.workingSet`):
+   * over it, the oldest go to pointers. 0 or absent — only pressure trims.
+   */
+  readonly workingSet?: number;
   /** Estimated tokens of messages (tool definitions included by the caller). */
   readonly estimate: (messages: readonly Message[]) => number;
   readonly store: (text: string) => string;
@@ -100,8 +107,7 @@ export class ContextManager {
     const level = levelOf(pressure, this.o.thresholds);
     const previousLevel = this.lastLevel;
     this.lastLevel = level;
-    if (level === "healthy") return { base, transcript, level, pressure, changed: false };
-    if (level !== previousLevel)
+    if (level !== previousLevel && level !== "healthy")
       this.o.emit("context.pressure", {
         level,
         tokens,
@@ -187,6 +193,19 @@ export class ContextManager {
       remeasure();
       this.o.emit("context.tightened", { tokens });
     };
+
+    // the working set: every call sends the whole history again, so old results go to pointers
+    // well before the window fills (pilot: 178k tokens of a 500k window before the first trim)
+    const set = this.o.workingSet ?? 0;
+    if (set > 0) {
+      const own = this.o.estimate(transcript);
+      if (own > set && trimmable(transcript, WATCH_KEEP, 600, keepLight) > 0) {
+        const saveChars = Math.ceil(((own - set * WORKING_TARGET) * charsOf(transcript)) / Math.max(1, own));
+        trim(WATCH_KEEP, undefined, true, saveChars);
+      }
+    }
+    if (level === "healthy")
+      return { base, transcript, level, pressure, changed: transcript !== transcriptIn };
 
     const t = this.o.thresholds;
     if (level === "watch") {

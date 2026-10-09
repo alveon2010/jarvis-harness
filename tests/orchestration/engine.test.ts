@@ -508,6 +508,56 @@ describe("LocalWorkflowEngine", () => {
     expect(stolen.run.state).toBe("COMPLETED");
   });
 
+  it("a composite child waits for the earlier sibling whose output it takes, and is skipped when it failed", async () => {
+    const wf = workflowOf({
+      name: "dag",
+      entry: "verify",
+      steps: [
+        {
+          id: "verify",
+          kind: "composite",
+          children: ["checks", "tests"],
+          transitions: { onSuccess: "DONE", onOutcome: { defects_found: { to: "fix", maxIterations: 1 } } },
+        },
+        { id: "checks", kind: "agentic", agent: "checks", outputs: ["checks"] },
+        { id: "tests", kind: "agentic", agent: "tests", inputs: ["checks"] },
+        { id: "fix", kind: "agentic", agent: "fix", transitions: { onSuccess: "verify" } },
+      ],
+    });
+    let fixed = false;
+    let checksDone = false;
+    const order: string[] = [];
+    const engine = engineFor(rt, [wf], {
+      checks: async () => {
+        await new Promise((r) => setTimeout(r, 20));
+        checksDone = true;
+        order.push("checks");
+        return fixed ? { status: "success" } : { status: "success", outcome: "defects_found" };
+      },
+      tests: async () => {
+        order.push(checksDone ? "tests after checks" : "tests before checks");
+        return { status: "success" };
+      },
+      fix: async () => {
+        fixed = true;
+        return { status: "success" };
+      },
+    });
+    const run = createRun(rt, "dag");
+    const result = await engine.execute(run.id, owner);
+    expect(result.run.state).toBe("COMPLETED");
+    // the first round: checks found defects, tests did not run; the second: tests after checks
+    expect(order).toEqual(["checks", "checks", "tests after checks"]);
+    const skipped = rt.events
+      .list({ runId: run.id, kind: "step.finish" })
+      .map((e) => (e.payload ?? {}) as { stepId?: string; status?: string; reason?: string })
+      .find((p) => p.stepId === "tests");
+    expect(skipped).toMatchObject({
+      status: "skipped",
+      reason: "checks ended defects_found: the work goes back before tests runs",
+    });
+  });
+
   it("runs composite children in parallel and propagates their outcome", async () => {
     const wf = workflowOf({
       name: "composite",

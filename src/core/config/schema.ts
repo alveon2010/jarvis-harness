@@ -337,6 +337,13 @@ export const ContextConfigSchema = z.strictObject({
     .prefault({}),
   compactTarget: ratio.default(0.35),
   maxContext: z.int().positive().optional(),
+  /**
+   * Tool results an agent keeps in full, in tokens past its task message: over it, the oldest go to
+   * pointers (the original stays readable) down to 60% of it, in one batch — whatever the window.
+   * Pilot: with a 500k window nothing was trimmed before 178k tokens, and each of 151 calls of the test
+   * agent sent its whole history again. 0 — off.
+   */
+  workingSet: z.int().nonnegative().default(50_000),
 });
 
 /**
@@ -457,6 +464,8 @@ export const AgentConfigSchema = z.strictObject({
    * incomplete; `ask` — the run waits for a person to grant more or let it finish. Over the step's own.
    */
   onLimit: z.enum(["finish", "ask"]).optional(),
+  /** The task message's size in characters (inputs and knowledge), over the agent's own `baseChars`. */
+  baseChars: z.int().positive().optional(),
 });
 export type AgentConfig = z.infer<typeof AgentConfigSchema>;
 
