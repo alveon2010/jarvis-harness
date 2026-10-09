@@ -314,3 +314,33 @@ describe("ModelGateway prefix reuse (ADR-0013 §4)", () => {
     expect(changed[0]).toMatchObject({ stepId: "spec", payload: { message: 0, role: "system" } });
   });
 });
+
+describe("ModelGateway prefix cache estimate (models.<id>.prefixCache)", () => {
+  it("a call within the TTL sharing a long enough prefix counts it as cached; past the TTL nothing", async () => {
+    // the gateway caches but reports no cached tokens
+    server.respond(() => completion("ok", { usage: { prompt_tokens: 10_000, completion_tokens: 7 } }));
+    let now = Date.parse("2026-10-09T10:00:00Z");
+    const config = testConfig(server.baseUrl);
+    const models = config.models as Record<string, Record<string, unknown>>;
+    (models.private as Record<string, unknown>).prefixCache = { ttlSeconds: 120, minTokens: 1000 };
+    const g = gateway({ config, clock: () => new Date(now) });
+    const step = { ...ask, stepId: "impl", iteration: 1 };
+    const system = { role: "system" as const, content: "stable rules" };
+    await g.call({ ...step, messages: [system, { role: "user", content: "task" }] });
+    now += 30_000;
+    await g.call({
+      ...step,
+      messages: [system, { role: "user", content: "task" }, { role: "assistant", content: "more" }],
+    });
+    now += 600_000;
+    await g.call({
+      ...step,
+      messages: [system, { role: "user", content: "task" }, { role: "assistant", content: "more" }],
+    });
+    const calls = events.events
+      .filter((e) => e.kind === "model.call")
+      .map((e) => (e.payload as Record<string, unknown>).cachedEstimated);
+    // the first has nothing before it; the second shares 80% of 10k within the TTL; the third came late
+    expect(calls).toEqual([undefined, 8000, 0]);
+  });
+});

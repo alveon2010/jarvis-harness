@@ -58,6 +58,19 @@ export const ModelConfigSchema = z.strictObject({
   egress: EgressSchema,
   quotaPool: z.string().min(1).optional(),
   contextWindow: z.int().positive(),
+  /**
+   * The gateway caches prompt prefixes but does not say so in `usage` (yet): a call within `ttlSeconds`
+   * of the previous one of its step, sharing a prefix of at least `minTokens`, counts that prefix as
+   * cached — an estimate («≈»), until the gateway reports `cached_tokens`. Budgets of input tokens
+   * count what was not cached. Pilot: two budget stops in a run on 40M input tokens, ~95% of them a
+   * prefix the cluster had cached.
+   */
+  prefixCache: z
+    .strictObject({
+      ttlSeconds: z.int().positive().default(120),
+      minTokens: z.int().nonnegative().default(8192),
+    })
+    .optional(),
   maxOutput: z.int().positive(),
   supports: ModelSupportsSchema.prefault({}),
   tokenizer: z.string().min(1).optional(),
@@ -343,7 +356,7 @@ export const ContextConfigSchema = z.strictObject({
    * Pilot: with a 500k window nothing was trimmed before 178k tokens, and each of 151 calls of the test
    * agent sent its whole history again. 0 — off.
    */
-  workingSet: z.int().nonnegative().default(50_000),
+  workingSet: z.int().nonnegative().default(80_000),
 });
 
 /**

@@ -114,7 +114,7 @@ export function limitedUsageFromEvents(
   const rows = db
     .prepare(
       `SELECT ts, json_extract(payload_json, '$.modelId') AS modelId, COALESCE(json_extract(payload_json, '$.outputTokens'), 0) AS output,
-              COALESCE(json_extract(payload_json, '$.promptTokens'), 0) AS input
+              MAX(0, COALESCE(json_extract(payload_json, '$.promptTokens'), 0) - COALESCE(NULLIF(json_extract(payload_json, '$.cachedTokens'), 0), json_extract(payload_json, '$.cachedEstimated'), 0)) AS input
        FROM events WHERE ${clauses.join(" AND ")}`,
     )
     .all(...params) as Array<{ ts: string; modelId: string | null; output: number; input: number }>;
@@ -147,7 +147,7 @@ export function usageFromEvents(
   const row = db
     .prepare(
       `SELECT COUNT(*) AS requests, COALESCE(SUM(json_extract(payload_json, '$.outputTokens')), 0) AS output,
-              COALESCE(SUM(json_extract(payload_json, '$.promptTokens')), 0) AS input
+              COALESCE(SUM(MAX(0, COALESCE(json_extract(payload_json, '$.promptTokens'), 0) - COALESCE(NULLIF(json_extract(payload_json, '$.cachedTokens'), 0), json_extract(payload_json, '$.cachedEstimated'), 0))), 0) AS input
        FROM events WHERE ${clauses.join(" AND ")}`,
     )
     .get(...params) as { requests: number; output: number; input: number };

@@ -106,6 +106,8 @@ export class ModelGateway implements ModelCaller {
   private readonly semaphores = new Map<string, Semaphore>();
   /** The last prompt of each step (run, step, iteration, model): what the next call can reuse. */
   private readonly lastPrompts = new Map<string, readonly Message[]>();
+  /** When the previous call of each step ended: a prefix cache keeps it for its TTL. */
+  private readonly lastEnds = new Map<string, number>();
   /** Steps whose calls go to another model of the role while the first one's pool is full. */
   private readonly failedOver = new Map<string, string>();
 
@@ -157,6 +159,7 @@ export class ModelGateway implements ModelCaller {
     }
 
     const reuse = this.observePrefix(request);
+    const sinceLastMs = this.sinceLast(request);
     const estimatedPrompt = this.estimator.estimateMessages(
       modelId,
       model.tokenizer,
@@ -184,7 +187,7 @@ export class ModelGateway implements ModelCaller {
         );
       }
       const response = this.finish(request, entry.response, 0, 0, "replay");
-      this.emitCall(request, response, estimatedPrompt, reuse);
+      this.emitCall(request, response, estimatedPrompt, reuse, sinceLastMs);
       return response;
     }
 
@@ -304,7 +307,7 @@ export class ModelGateway implements ModelCaller {
               cassetteVersion: 1,
             });
           }
-          this.emitCall(request, response, estimatedPrompt, reuse);
+          this.emitCall(request, response, estimatedPrompt, reuse, sinceLastMs);
           this.log.debug("model.response", {
             ...(request.runId ? { runId: request.runId } : {}),
             ...(request.stepId ? { stepId: request.stepId } : {}),
@@ -468,6 +471,38 @@ export class ModelGateway implements ModelCaller {
    * call's from the start) shows how cache-friendly the prompts are even where the gateway reports no
    * cache; a change in the stable layers (the first two messages) is a `context.prefixChanged`.
    */
+  private prefixKey(request: ModelRequest): string | undefined {
+    return request.runId && request.stepId
+      ? `${request.runId}:${request.stepId}:${request.iteration ?? 0}:${request.modelId}`
+      : undefined;
+  }
+
+  /** Milliseconds since the previous call of the same step ended, if there was one. */
+  private sinceLast(request: ModelRequest): number | undefined {
+    const key = this.prefixKey(request);
+    const last = key ? this.lastEnds.get(key) : undefined;
+    return last === undefined ? undefined : this.clock().getTime() - last;
+  }
+
+  /**
+   * Prompt tokens a prefix cache most likely served, where the gateway reports none: the share of the
+   * prompt identical to the previous call's, when that call ended within the cache's TTL and the
+   * shared part is at least its minimum (models.<id>.prefixCache).
+   */
+  private cachedEstimate(
+    request: ModelRequest,
+    response: ModelResponse,
+    reuse: number | undefined,
+    sinceLastMs: number | undefined,
+  ): number | undefined {
+    const cache = this.config.models[request.modelId]?.prefixCache;
+    if (!cache || response.usage.cachedTokens > 0 || reuse === undefined || sinceLastMs === undefined)
+      return undefined;
+    if (sinceLastMs > cache.ttlSeconds * 1000) return 0;
+    const shared = Math.floor(reuse * response.usage.promptTokens);
+    return shared >= cache.minTokens ? shared : 0;
+  }
+
   private observePrefix(request: ModelRequest): number | undefined {
     if (!request.runId || !request.stepId) return undefined;
     const key = `${request.runId}:${request.stepId}:${request.iteration ?? 0}:${request.modelId}`;
@@ -500,7 +535,15 @@ export class ModelGateway implements ModelCaller {
     response: ModelResponse,
     estimatedPrompt: number,
     reuse?: number,
+    sinceLastMs?: number,
   ): void {
+    const estimated = this.cachedEstimate(request, response, reuse, sinceLastMs);
+    const key = this.prefixKey(request);
+    if (key) {
+      this.lastEnds.delete(key);
+      this.lastEnds.set(key, this.clock().getTime());
+      if (this.lastEnds.size > 64) this.lastEnds.delete(this.lastEnds.keys().next().value as string);
+    }
     this.events.emit({
       kind: "model.call",
       ...(request.runId ? { runId: request.runId } : {}),
@@ -527,6 +570,7 @@ export class ModelGateway implements ModelCaller {
         ...(response.streamed ? { streamed: true } : {}),
         ...(response.firstTokenMs !== undefined ? { firstTokenMs: response.firstTokenMs } : {}),
         ...(reuse !== undefined ? { prefixReuse: reuse } : {}),
+        ...(estimated !== undefined ? { cachedEstimated: estimated } : {}),
       },
     });
   }

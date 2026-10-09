@@ -1179,7 +1179,11 @@ export function runContent(page: RunPage, now: number, actions?: Actions, notice
       `run ${shortRunId(r.id)}`,
       page.time ? timeHtml(page.time) : duration(page.workedMs),
       `${t.calls} model call${t.calls === 1 ? "" : "s"}`,
-      ...(t.calls > 0 ? [`in ${kilo(t.promptTokens)} · out ${kilo(t.outputTokens)} tok`] : []),
+      ...(t.calls > 0
+        ? [
+            `in ${kilo(t.promptTokens)}${t.cachedTokens > 0 ? ` (${t.cachedEstimated ? "≈ " : ""}${kilo(t.cachedTokens)} cached)` : ""} · out ${kilo(t.outputTokens)} tok`,
+          ]
+        : []),
     ],
     " · ",
   );

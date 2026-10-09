@@ -62,3 +62,28 @@ describe("the night's spend after the night", () => {
     expect(() => day.check(10)).toThrow("inputTokens");
   });
 });
+
+describe("input tokens a prefix cache served do not count (models.<id>.prefixCache)", () => {
+  it("the gateway's cached tokens, else Jarvis's estimate, come off the input a budget counts", async () => {
+    sb = sandbox();
+    sb.write("project/.jarvis/project.yaml", "version: 1\n");
+    rt = await testRuntime(sb);
+    const run = createRun(rt, "smoke");
+    const call = (payload: Record<string, unknown>) =>
+      rt.events.emit({ kind: "model.call", runId: run.id, stepId: "impl", iteration: 1, payload });
+    call({ modelId: "flash", promptTokens: 10_000, cachedTokens: 9_000, outputTokens: 10 });
+    call({
+      modelId: "flash",
+      promptTokens: 10_000,
+      cachedTokens: 0,
+      cachedEstimated: 8_000,
+      outputTokens: 10,
+    });
+    call({ modelId: "flash", promptTokens: 10_000, outputTokens: 10 });
+    expect(limitedUsageFromEvents(rt.db.db, () => false, run.id)).toEqual({
+      inputTokens: 1_000 + 2_000 + 10_000,
+      outputTokens: 30,
+      requests: 3,
+    });
+  });
+});

@@ -61,7 +61,7 @@ describe("generateStructured", () => {
     expect(server.requests[0]?.body.messages).toEqual(messages);
   });
 
-  it("json mode puts the schema in the system prompt and repairs once on validation failure", async () => {
+  it("json mode puts the schema with the last request (the prefix stays cached) and repairs once on validation failure", async () => {
     server.queue(
       completion(JSON.stringify({ title: "T", risks: [] })),
       completion(JSON.stringify({ title: "T", risks: ["fixed"] })),
@@ -81,8 +81,9 @@ describe("generateStructured", () => {
       messages: Array<{ role: string; content: string }>;
     };
     expect(first.response_format.type).toBe("json_object");
-    expect(first.messages[0]?.role).toBe("system");
-    expect(first.messages[0]?.content).toContain("JSON Schema");
+    expect(first.messages.at(-1)?.role).toBe("user");
+    expect(first.messages.at(-1)?.content).toContain("JSON Schema");
+    expect(first.messages.length).toBe(messages.length);
     const second = server.requests[1]?.body as { messages: Array<{ role: string; content: string }> };
     expect(second.messages.at(-1)?.content).toContain("risks");
   });

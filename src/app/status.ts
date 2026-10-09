@@ -35,6 +35,8 @@ export interface RunTokens {
   readonly cachedTokens: number;
   readonly outputTokens: number;
   readonly retries: number;
+  /** Some of `cachedTokens` is Jarvis's estimate (models.<id>.prefixCache), not the gateway's word. */
+  readonly cachedEstimated?: boolean;
 }
 
 export interface RunDetail {

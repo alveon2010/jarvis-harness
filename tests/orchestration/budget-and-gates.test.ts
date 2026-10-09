@@ -132,8 +132,9 @@ describe("budget in the pool's unlimited hours", () => {
     });
     const run = createRun(rt, "bn");
     const result = await engine.execute(run.id, owner);
-    expect(result.run.stateReason).toContain("budget.perStep.inputTokens exceeded: 1008 of 1000");
-    expect(server.requests).toHaveLength(24); // 0 … 966 used → allowed; 1008 ≥ 100 × 10 → refused
+    expect(result.run.stateReason).toContain("budget.perStep.inputTokens exceeded: 1024 of 1000");
+    // 42 prompt tokens a call, 10 of them cached: 32 count
+    expect(server.requests).toHaveLength(32); // 0 … 992 used → allowed; 1024 ≥ 100 × 10 → refused
   });
 });
 
@@ -142,7 +143,7 @@ describe("input tokens as a cap (the real cost when every call re-sends the conv
     sb.write("home/.jarvis/config.yaml", userConfig());
     sb.write("project/.jarvis/project.yaml", "version: 1\nbudget:\n  perStep: { inputTokens: 100 }\n");
     rt = await testRuntime(sb);
-    server.respond(() => completion("ok")); // 42 prompt tokens per call
+    server.respond(() => completion("ok")); // 42 prompt tokens per call, 10 cached: 32 count
     const wf = workflowOf({
       name: "bi",
       entry: "work",
@@ -161,13 +162,13 @@ describe("input tokens as a cap (the real cost when every call re-sends the conv
     const run = createRun(rt, "bi");
     const result = await engine.execute(run.id, owner);
     expect(result.run.state).toBe("WAITING_HUMAN");
-    expect(result.run.stateReason).toContain("budget.perStep.inputTokens exceeded: 126 of 100");
-    expect(server.requests).toHaveLength(3); // 0, 42, 84 used → allowed; 126 ≥ 100 → refused
+    expect(result.run.stateReason).toContain("budget.perStep.inputTokens exceeded: 128 of 100");
+    expect(server.requests).toHaveLength(4); // 0, 32, 64, 96 used → allowed; 128 ≥ 100 → refused
     const stop = budgetStopOf(rt, result.run);
     expect(stop).toMatchObject({
       scope: "perStep",
       dimension: "inputTokens",
-      used: 126,
+      used: 128,
       cap: 100,
       suggested: 100_000,
     });
@@ -181,7 +182,7 @@ describe("input tokens as a cap (the real cost when every call re-sends the conv
       "cli",
     );
     expect((await engine.execute(run.id, owner)).run.state).toBe("WAITING_HUMAN");
-    expect(server.requests).toHaveLength(4); // 126 < 150 → one more; 168 ≥ 150 → refused
+    expect(server.requests).toHaveLength(5); // 128 < 150 → one more; 160 ≥ 150 → refused
   });
 });
 

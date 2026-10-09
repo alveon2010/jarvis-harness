@@ -154,15 +154,16 @@ function schemaInstruction(name: string, jsonSchema: Record<string, unknown>): s
   return `Respond with a single JSON document named "${name}" that conforms to this JSON Schema and nothing else:\n${JSON.stringify(jsonSchema)}`;
 }
 
+/**
+ * The schema goes with the last request, not into the system message: the prompt so far stays byte for
+ * byte the one the agent's loop sent, and a prefix cache serves all of it. Pilot: the document request
+ * of every step changed its system message and missed the cache from the first message on.
+ */
 function withSchemaHint(messages: readonly Message[], hint: string): Message[] {
   const out = [...messages];
-  const systemIndex = out.findIndex((m) => m.role === "system");
-  if (systemIndex >= 0) {
-    const system = out[systemIndex] as Message;
-    out[systemIndex] = { ...system, content: `${system.content}\n\n${hint}` };
-  } else {
-    out.unshift({ role: "system", content: hint });
-  }
+  const last = out.at(-1);
+  if (last?.role === "user") out[out.length - 1] = { ...last, content: `${last.content}\n\n${hint}` };
+  else out.push({ role: "user", content: hint });
   return out;
 }
 

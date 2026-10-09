@@ -822,12 +822,14 @@ export async function runPage(
     .reduce<RunTokens>(
       (acc, e) => {
         const p = (e.payload ?? {}) as Record<string, number>;
+        const estimated = !p.cachedTokens && (p.cachedEstimated ?? 0) > 0;
         return {
           calls: acc.calls + 1,
           promptTokens: acc.promptTokens + (p.promptTokens ?? 0),
-          cachedTokens: acc.cachedTokens + (p.cachedTokens ?? 0),
+          cachedTokens: acc.cachedTokens + (p.cachedTokens || p.cachedEstimated || 0),
           outputTokens: acc.outputTokens + (p.outputTokens ?? 0),
           retries: acc.retries + (p.retries ?? 0),
+          ...(acc.cachedEstimated || estimated ? { cachedEstimated: true } : {}),
         };
       },
       { calls: 0, promptTokens: 0, cachedTokens: 0, outputTokens: 0, retries: 0 },
