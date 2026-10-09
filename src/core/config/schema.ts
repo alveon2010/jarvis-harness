@@ -354,9 +354,11 @@ export const ContextConfigSchema = z.strictObject({
    * Tool results an agent keeps in full, in tokens past its task message: over it, the oldest go to
    * pointers (the original stays readable) down to 60% of it, in one batch — whatever the window.
    * Pilot: with a 500k window nothing was trimmed before 178k tokens, and each of 151 calls of the test
-   * agent sent its whole history again. 0 — off.
+   * agent sent its whole history again. 0 — off. Without it: 160k for a model whose gateway caches
+   * prefixes (`models.<id>.prefixCache` — keeping costs little, a trim costs the reads it brings back:
+   * 20 re-reads after three trims in a pilot research), else 80k.
    */
-  workingSet: z.int().nonnegative().default(80_000),
+  workingSet: z.int().nonnegative().optional(),
 });
 
 /**

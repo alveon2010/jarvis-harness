@@ -147,3 +147,13 @@ describe("the working set: tool results past it go to pointers whatever the wind
     expect((await off.manage([], transcript)).changed).toBe(false);
   });
 });
+
+describe("the working set's default", () => {
+  it("160k where the gateway caches prefixes, 80k elsewhere, the config's own value first", async () => {
+    const { workingSetOf } = await import("../../src/agents/runner.ts");
+    expect(workingSetOf(undefined, true)).toBe(160_000);
+    expect(workingSetOf(undefined, false)).toBe(80_000);
+    expect(workingSetOf(0, true)).toBe(0);
+    expect(workingSetOf(50_000, true)).toBe(50_000);
+  });
+});

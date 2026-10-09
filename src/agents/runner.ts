@@ -124,6 +124,11 @@ function forPeople(rt: StepContext["runtime"], runId: string, value: unknown): u
   };
 }
 
+/** `context.workingSet`, or its default: larger where the gateway caches prefixes (keeping is cheap). */
+export function workingSetOf(configured: number | undefined, prefixCached: boolean): number {
+  return configured ?? (prefixCached ? 160_000 : 80_000);
+}
+
 /** Knowledge candidates proposed by an agent become `candidate` artifacts (ADR-0020 §6). */
 function storeCandidates(
   rt: StepContext["runtime"],
@@ -314,7 +319,7 @@ export class AgentRuntimeRunner implements AgentRunner {
         effective,
         thresholds: resolveThresholds(config.context, route.modelId, ctx.step.phase),
         compactTarget: config.context.compactTarget,
-        workingSet: config.context.workingSet,
+        workingSet: workingSetOf(config.context.workingSet, route.model.prefixCache !== undefined),
         estimate,
         store: (text) => rt.blobs.put(text, "text/plain").contentRef,
         summarize: async (rendered, previous) => {
