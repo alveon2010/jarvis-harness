@@ -90,6 +90,25 @@ describe("plan progress", () => {
     expect(end?.done).toBe(3);
   });
 
+  it("a resumed round keeps its marks; a new round starts over", () => {
+    const start = (iteration: number) =>
+      rt.events.emit({
+        kind: "step.start",
+        runId: run.id,
+        stepId: "implementation",
+        payload: { stepId: "implementation", iteration },
+      });
+    start(1);
+    call("plan.step", { step: "S1", status: "done" });
+    call("plan.step", { step: "S2", status: "start" });
+    // a budget stop and its grant: the same round goes on (pilot: «Plan 1 of 9» after the grant)
+    start(1);
+    expect(progress()).toMatchObject({ current: 1, done: 1 });
+    // verify sent it back: the next round
+    start(2);
+    expect(progress()).toMatchObject({ current: 0, done: 0 });
+  });
+
   it("no plan, no progress", () => {
     rt.runs.update(run.id, { currentStep: "fix-it", currentIteration: 1 });
     const other = rt.runs.create({ ...run, id: undefined } as never);

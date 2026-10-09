@@ -79,13 +79,17 @@ export function planProgressOf(
   const plan = planSteps(runtime, run);
   const stepId = run.currentStep;
   if (plan.length === 0 || !stepId) return undefined;
+  // since the round began: a resume of the same round (a budget, a quota window, a pause) starts it again
+  // in the journal, and its marks before that count (pilot: «Plan 1 of 9» after a budget grant)
   let from = -1;
+  let round: number | undefined;
   events.forEach((e, i) => {
-    if (
-      e.kind === "step.start" &&
-      ((e.payload as { stepId?: string } | undefined)?.stepId ?? e.stepId) === stepId
-    )
-      from = i;
+    const p = (e.payload ?? {}) as { stepId?: string; iteration?: number };
+    if (e.kind !== "step.start" || (p.stepId ?? e.stepId) !== stepId) return;
+    const iteration = typeof p.iteration === "number" ? p.iteration : (e.iteration ?? 1);
+    if (iteration === round) return;
+    round = iteration;
+    from = i;
   });
   const indexOf = (ref: string): number => {
     const exact = plan.findIndex((s) => s.id === ref);

@@ -9,6 +9,26 @@ const ev = (kind: string, ts: string, payload: Record<string, unknown> = {}): St
   ({ seq: ++seq, ts: `2026-10-06T10:${ts}Z`, kind, runId: "run_1", payload }) as StoredEvent;
 
 describe("journey", () => {
+  it("a round resumed after a budget grant reports the whole round, not its last stretch", () => {
+    const j = new Journey(["implementation"]);
+    j.push(ev("step.start", "00:00", { stepId: "implementation", iteration: 1, kind: "agentic" }));
+    j.push(ev("model.call", "05:00", { promptTokens: 10_000, outputTokens: 500 }));
+    j.push(ev("tool.call", "05:01", { capability: "repo.read" }));
+    j.push(
+      ev("run.state", "20:00", { state: "WAITING_HUMAN", reason: "budget.perStep.inputTokens exceeded" }),
+    );
+    j.push(ev("run.state", "21:00", { state: "RUNNING", reason: "resumed from WAITING_HUMAN" }));
+    j.push(ev("step.start", "21:00", { stepId: "implementation", iteration: 1, kind: "agentic" }));
+    j.push(ev("model.call", "22:00", { promptTokens: 12_000, outputTokens: 600 }));
+    const [line] = j.push(
+      ev("step.finish", "23:00", { stepId: "implementation", iteration: 1, status: "success" }),
+    );
+    expect(line).toMatchObject({
+      kind: "step",
+      report: { durationMs: 23 * 60_000, modelCalls: 2, toolCalls: 1 },
+    });
+  });
+
   it("reports a finished step with its position, time, model and tool use", () => {
     const j = new Journey(["discover", "research", "spec"]);
     expect(j.push(ev("step.start", "00:00", { stepId: "research", iteration: 1, kind: "agentic" }))).toEqual(

@@ -122,6 +122,25 @@ describe("live activity of a run", () => {
     expect(done?.receiving).toBeUndefined();
   });
 
+  it("a round resumed after a stop keeps its clock and its counts", () => {
+    const events = [
+      ...RUN.slice(0, 3),
+      ev(40, "model.call", { promptTokens: 1000, outputTokens: 100, latencyMs: 9000 }),
+      ev(45, "run.state", {
+        state: "WAITING_HUMAN",
+        reason: "budget.perStep.inputTokens exceeded: 15104372 of 15000000",
+      }),
+      ev(55, "run.state", { state: "RUNNING", reason: "resumed from WAITING_HUMAN" }),
+      ev(60, "step.start", { stepId: "map", iteration: 1 }),
+      ev(61, "agent.start", { agent: "onboard-mapper", restoredToolCalls: 3, maxToolCalls: 40 }),
+    ];
+    const a = activityOf(events, at(70)) as NonNullable<ReturnType<typeof activityOf>>;
+    expect(a.step?.modelCalls).toBe(1);
+    expect(Date.parse(a.step?.startedAt ?? "")).toBeLessThan(at(60).getTime());
+    expect(a.step?.toolCalls).toBe(3);
+    expect(a.resumed).toMatchObject({ after: "a budget grant", times: 1 });
+  });
+
   it("says when a streamed answer went quiet: a piece that does not grow is not news", () => {
     const events = [
       ...RUN.slice(0, 3),

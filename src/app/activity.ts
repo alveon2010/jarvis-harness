@@ -49,6 +49,11 @@ export interface Activity {
   /** A streamed answer on its way: characters of the answer and of the reasoning so far. */
   readonly receiving?: { readonly outputChars: number; readonly reasoningChars: number };
   /**
+   * The current round went on after a stop (a budget grant, a quota window, a pause, the model back):
+   * when, after what, how many times. Its clock, counts and plan marks are the round's, not reset.
+   */
+  readonly resumed?: { readonly at: string; readonly after: string; readonly times: number };
+  /**
    * How long nothing came from the model on the call in flight (since the call or its last streamed
    * piece). Pilot: a provider in trouble streamed nothing for three minutes and the page still said
    * «thinking» — RUNNING, yellow models, and no way to tell a slow answer from a stuck one.
@@ -175,6 +180,7 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
     receiving?: { outputChars: number; reasoningChars: number } | undefined;
     /** The last piece of the answer in flight came then. */
     heardAt?: string | undefined;
+    resumed?: { at: string; after: string; times: number } | undefined;
     compacting?: { kind: string; tokens: number; blocks: number; since: string } | undefined;
     batch?: LiveBatch | undefined;
   }
@@ -189,6 +195,8 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
   let latency = 0;
   let lastTool: Activity["lastTool"];
   let lastRetry: string | undefined;
+  /** Why the run last stopped: what a resume of the same round goes on after. */
+  let stoppedFor: string | undefined;
   /** Trimmed results by their blob: a re-read of one is named by the call it answered. */
   const originals = new Map<string, string>();
   const named = (detail: string | undefined): string | undefined => {
@@ -205,6 +213,17 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
     switch (e.kind) {
       case "step.start": {
         const id = str(p.stepId) ?? e.stepId ?? "?";
+        // the same round resumed (a budget, a quota window, a pause): its clock and counts go on
+        const same = open.get(id);
+        if (same && same.step.iteration === (num(p.iteration) || (e.iteration ?? 1))) {
+          same.resumed = { at: e.ts, after: stoppedFor ?? "a stop", times: (same.resumed?.times ?? 0) + 1 };
+          same.agentActive = false;
+          same.waitingSince = undefined;
+          same.receiving = undefined;
+          same.heardAt = undefined;
+          last = same;
+          break;
+        }
         const fresh: Live = {
           step: {
             id,
@@ -349,6 +368,23 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
       case "run.state": {
         // the run left the step loop: finished, or parked for a human or a quota window
         const state = str(p.state);
+        const reason = str(p.reason) ?? "";
+        if (state && state !== "RUNNING")
+          stoppedFor = /^budget\./.test(reason)
+            ? "a budget grant"
+            : /limit|tool calls|model calls/.test(reason) && state === "WAITING_HUMAN"
+              ? "more calls granted"
+              : state === "SUSPENDED"
+                ? reason.startsWith("paused")
+                  ? "a pause"
+                  : "Ctrl-C"
+                : state === "WAITING_BUDGET"
+                  ? /unavailable|model/.test(reason) && !/admission/.test(reason)
+                    ? "the model came back"
+                    : "the quota window"
+                  : state === "FAILED"
+                    ? "Try again"
+                    : "your decision";
         if (state !== "RUNNING")
           for (const l of open.values()) {
             l.agentActive = false;
@@ -390,6 +426,7 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
     ...(lastRetry ? { lastRetry } : {}),
     ...(current?.retrying && waitingMs !== undefined ? { retrying: current.retrying } : {}),
     ...(current?.receiving && waitingMs !== undefined ? { receiving: current.receiving } : {}),
+    ...(current?.resumed && !finished ? { resumed: current.resumed } : {}),
     ...((q) => (q !== undefined ? { quietMs: q } : {}))(
       waitingMs !== undefined && waitingSince
         ? Math.max(0, now.getTime() - Date.parse(current?.heardAt ?? waitingSince))

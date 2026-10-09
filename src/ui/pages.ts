@@ -998,6 +998,7 @@ function nowHtml(page: RunPage, now: number, actions?: Actions): Html {
     : "";
   return html`<section class="panel now" aria-label="Now" data-live="card">
 <div class="row"><span class="spin" aria-hidden="true"></span><b>${a.step.id}${a.step.iteration > 1 ? `#${a.step.iteration}` : ""}${a.step.agent && a.step.agent !== a.step.id ? ` · ${a.step.agent}` : ""}</b><span class="meta">${ticking(now - Date.parse(a.step.startedAt))} · ${callText(a)}</span></div>
+${a.resumed ? html`<span class="hint resumed">↻ resumed ${wallClock(a.resumed.at).slice(0, 5)} after ${a.resumed.after}${a.resumed.times > 1 ? ` (${a.resumed.times}× this round)` : ""} — the same round goes on from its checkpoint: its conversation, tool calls and plan marks are kept</span>` : ""}
 ${page.fixing ? fixWidget(page.fixing) : page.planProgress ? planWidget(page.planProgress, page.planProgress.lastFile) : ""}
 ${a.batch ? batchHtml(a.batch) : ""}
 ${toolBudget(a, now)}

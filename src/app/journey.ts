@@ -102,6 +102,9 @@ export class Journey {
         const kind = str(p.kind);
         const stepId = str(p.stepId) ?? e.stepId ?? "?";
         this.last = stepId;
+        // the same round again: the run resumed it (a budget, a quota window, a pause), not a new round
+        const iteration = num(p.iteration) || (e.iteration ?? 1);
+        if (this.open.get(stepId)?.iteration === iteration) return [];
         this.open.set(stepId, {
           stepId,
           iteration: num(p.iteration) || (e.iteration ?? 1),

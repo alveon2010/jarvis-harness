@@ -816,6 +816,48 @@ describe("New task on the page", () => {
     expect((await post(`/runs/${short}/pause`, { t: token })).location).toContain("notice=not-running");
   });
 
+  it("a round resumed after a budget grant says so and keeps its plan step", async () => {
+    await serve();
+    const run = createRun("ABC-42: Delivery slots on the order form");
+    rt.runs.update(run.id, { currentStep: "implementation", currentIteration: 1 });
+    rt.runs.transition(run.id, "RUNNING");
+    rt.runs.acquireLease(run.id, "cli:elsewhere", 90_000);
+    rt.artifacts.put({
+      runId: run.id,
+      type: "plan",
+      name: "plan.json",
+      content: JSON.stringify({
+        summary: "s",
+        steps: [
+          { id: "S1", description: "Types for the slots", files: [], verification: "tsc" },
+          { id: "S2", description: "Fetch the slots", files: [], verification: "saga test" },
+        ],
+      }),
+      provenance: { kind: "agent", agentId: "plan" },
+    });
+    const ev = (kind: string, payload: Record<string, unknown>, stepId?: string) =>
+      rt.events.emit({ kind, runId: run.id, ...(stepId ? { stepId } : {}), payload });
+    ev("step.start", { stepId: "implementation", iteration: 1 }, "implementation");
+    ev("agent.start", { agent: "implementation" }, "implementation");
+    ev(
+      "tool.call",
+      { capability: "plan.step", ok: true, args: JSON.stringify({ step: "S1", status: "done" }) },
+      "implementation",
+    );
+    ev("run.state", {
+      state: "WAITING_HUMAN",
+      reason: "budget.perStep.inputTokens exceeded: 15104372 of 15000000",
+    });
+    ev("run.state", { state: "RUNNING", reason: "resumed from WAITING_HUMAN" });
+    ev("step.start", { stepId: "implementation", iteration: 1 }, "implementation");
+    ev("agent.start", { agent: "implementation", restoredToolCalls: 220 }, "implementation");
+    const short = run.id.replace(/^run_/, "").slice(0, 8);
+    const body = await page(`/runs/${short}`);
+    expect(body).toContain("after a budget grant — the same round goes on from its checkpoint");
+    expect(body).toContain("Plan 2 of 2");
+    expect(body).not.toContain('class="planw fixw"');
+  });
+
   it("notes fold once the agents have them, open while one is on its way; Add a note stays outside", async () => {
     await serve();
     const run = createRun("ABC-42: Delivery slots on the order form");
