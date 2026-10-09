@@ -1131,6 +1131,61 @@ context: { maxContext: 8000 }
     expect(rt.artifacts.listLatest(run.id, "research")).toHaveLength(1);
   });
 
+  it("open questions are stored as a person reads them: one line each, a frame by its name (pilot)", async () => {
+    sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
+    rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
+    const wf = workflowOf({
+      name: "sq",
+      entry: "spec",
+      steps: [
+        {
+          id: "spec",
+          kind: "agentic",
+          agent: "specification",
+          outputs: ["spec"],
+          transitions: { onSuccess: "DONE" },
+        },
+      ],
+    });
+    const run = createRun(rt, "sq");
+    rt.artifacts.put({
+      runId: run.id,
+      type: "design",
+      name: "design.md",
+      content:
+        "## 1. Delivery slots\nFigma: Checkout · node 100:1 · https://www.figma.com/design/K/x?node-id=100-1\n",
+      provenance: { kind: "tool", capability: "sources.collect" },
+    });
+    server.respond(() =>
+      completion(
+        JSON.stringify({
+          summary: "Slots on the order form.",
+          title: "Slots",
+          goals: ["Slots"],
+          requirements: [{ id: "R1", text: "Show slots", acceptance: ["shown"] }],
+          openQuestions: [
+            "Which variant of frame 100:1 is the target?",
+            {
+              question: "Is a slot required?",
+              about: "the order form",
+              options: ["yes", "no"],
+              refs: ["R1"],
+            },
+          ],
+          outcome: "ok",
+        }),
+      ),
+    );
+    await engineWith(rt, wf).execute(run.id, { owner: "cli:t" });
+    const spec = JSON.parse(rt.artifacts.text(rt.artifacts.listLatest(run.id, "spec")[0] as never)) as {
+      openQuestions: string[];
+    };
+    expect(spec.openQuestions).toEqual([
+      "Which variant of frame «Delivery slots» is the target?",
+      "Is a slot required? (the order form) — yes / no",
+    ]);
+  });
+
   it("an agent of many calls has a task message of its own size, whatever the window (agents.<id>.baseChars)", async () => {
     sb.write(
       "home/.jarvis/config.yaml",

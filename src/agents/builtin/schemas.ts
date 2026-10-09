@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { OpenQuestion } from "../../interaction/questions.ts";
 
 /**
  * Result schemas of the built-in agents (ADR-0001 §6 "schema результата"). Every result carries
@@ -112,7 +113,7 @@ export const RequirementsResult = z.object({
     .default([])
     .describe("what you had to assume; each becomes explicit in the spec"),
   terminology: z.array(z.object({ term: z.string(), meaning: z.string() })).default([]),
-  openQuestions: z.array(z.string()).default([]),
+  openQuestions: z.array(OpenQuestion).default([]),
   verdict: z.enum(["READY", "READY_WITH_ASSUMPTIONS", "NEEDS_CLARIFICATION"]),
   clarification: z
     .object({
@@ -135,7 +136,7 @@ export const SpecResult = z.object({
     )
     .min(1),
   risks: z.array(z.string()).default([]),
-  openQuestions: z.array(z.string()).default([]),
+  openQuestions: z.array(OpenQuestion).default([]),
   outcome: z.enum(["ok"]).default("ok"),
 });
 

@@ -8,7 +8,9 @@ import {
   summarizerMessages,
 } from "../context/index.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
+import { frameNamesOf, humanizeNodeIds } from "../design/frames.ts";
 import { NOTE_DELIVERED, notesOf, notesText } from "../interaction/notes.ts";
+import { questionsOf } from "../interaction/questions.ts";
 import { ModelError } from "../models/errors.ts";
 import { resolveModel } from "../models/router.ts";
 import {
@@ -91,6 +93,35 @@ interface AgentResultDoc {
     evidence?: string[];
     proposal?: string;
   }>;
+}
+
+/**
+ * A result's questions for a person — open questions, the clarification — as they read them: one line
+ * each, a frame's node id as its title from the run's design (src/design/frames.ts). Pilot: «which
+ * variant of frame 100:1 is the target» at the gate.
+ */
+function forPeople(rt: StepContext["runtime"], runId: string, value: unknown): unknown {
+  if (!value || typeof value !== "object") return value;
+  const doc = value as Record<string, unknown>;
+  const clarification = doc.clarification as { question?: unknown; context?: unknown } | undefined;
+  if (!Array.isArray(doc.openQuestions) && !(clarification && typeof clarification === "object"))
+    return value;
+  const design = rt.artifacts.listLatest(runId, "design")[0];
+  const names = frameNamesOf(design ? rt.artifacts.text(design) : undefined);
+  const human = (v: unknown) => (typeof v === "string" ? humanizeNodeIds(v, names) : v);
+  return {
+    ...doc,
+    ...(Array.isArray(doc.openQuestions) ? { openQuestions: questionsOf(doc.openQuestions, names) } : {}),
+    ...(clarification && typeof clarification === "object"
+      ? {
+          clarification: {
+            ...clarification,
+            question: human(clarification.question),
+            ...(clarification.context !== undefined ? { context: human(clarification.context) } : {}),
+          },
+        }
+      : {}),
+  };
 }
 
 /** Knowledge candidates proposed by an agent become `candidate` artifacts (ADR-0020 §6). */
@@ -668,7 +699,7 @@ export class AgentRuntimeRunner implements AgentRunner {
         runId: ctx.run.id,
         type: def.output.type,
         name: `${def.output.type}.json`,
-        content: JSON.stringify(result.value, null, 2),
+        content: JSON.stringify(forPeople(rt, ctx.run.id, result.value), null, 2),
         mediaType: "application/json",
         provenance: { kind: "agent", agentId: def.id, ...(budgetExhausted ? { budgetExhausted } : {}) },
         // What the agent was told (ADR-0020 §4) joins what it read (ADR-0005).

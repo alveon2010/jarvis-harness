@@ -378,7 +378,8 @@ form.clarify>.actions{margin:4px 0}
 .qs .q .said{font-size:14px;line-height:21px;color:var(--ink);white-space:pre-wrap}
 .qs .q .opt small{color:var(--muted);font-size:12px}
 .qs .q .src{display:flex;gap:6px;flex-wrap:wrap}
-.qs .q .src span{font-family:var(--mono);font-size:11px;padding:1px 7px;border-radius:6px;border:1px solid var(--line);color:var(--ink-2)}
+.qs .q .src span,.qs .q .src a{font-family:var(--mono);font-size:11px;padding:1px 7px;border-radius:6px;border:1px solid var(--line);color:var(--ink-2)}
+.qs .q .src a{color:var(--accent);text-decoration:none}.qs .q .src a:hover{border-color:var(--accent)}
 .qs .q .own textarea{width:100%;min-height:40px;padding:8px 10px;border-radius:6px;resize:vertical;font-size:14px;line-height:20px}
 .qs .q .qrow{display:flex;gap:8px;flex-wrap:wrap}
 .qs .q .pick{display:inline-flex;gap:6px;align-items:center;font-size:13px;color:var(--ink-2);padding:5px 10px;border:1px solid var(--line);border-radius:999px;cursor:pointer}

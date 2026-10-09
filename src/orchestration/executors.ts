@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { prepareSuggestions } from "../interaction/answers.ts";
+import { questionsOf } from "../interaction/questions.ts";
 import { afterApproval, afterGateReached } from "../interaction/review/lifecycle.ts";
 import type { StepContext, StepExecutor, StepOutcome } from "./types.ts";
 import { SuspendRun } from "./types.ts";
@@ -139,14 +140,15 @@ function questionOf(rt: StepContext["runtime"], ref: string): string | undefined
   try {
     const doc = JSON.parse(rt.artifacts.text(artifact)) as {
       clarification?: { question?: string; context?: string };
-      openQuestions?: string[];
+      openQuestions?: unknown[];
     };
     if (doc.clarification?.question) {
       return doc.clarification.context
         ? `${doc.clarification.question}\n\nContext: ${doc.clarification.context}`
         : doc.clarification.question;
     }
-    if (doc.openQuestions && doc.openQuestions.length > 0) return doc.openQuestions.join("\n");
+    const questions = questionsOf(doc.openQuestions);
+    if (questions.length > 0) return questions.join("\n");
   } catch {
     // not JSON
   }

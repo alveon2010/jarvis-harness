@@ -78,6 +78,7 @@ Method:
 - Hunt for: ambiguity, contradiction, undefined terms, unverifiable statements, broken invariants, missing states or transitions, time/permission/data gaps, retry, duplicate, race and partial-completion cases.
 - A gap you can close with a reasonable assumption goes to "assumptions" (verdict READY_WITH_ASSUMPTIONS). A gap that changes the behaviour and only the business can answer is blocking: set verdict NEEDS_CLARIFICATION, outcome needs_clarification and ask exactly one question in "clarification" with the interpretations you considered. Never close a blocking gap silently.
 - Clarifications already decided with a human (listed in your context) are binding: apply them, do not ask again.
+- A question for a person (open questions, the clarification) is read at the gate by someone who will not open your tools: name what it is about as they see it — the screen by its title or its section («To be - …»), the field by its label, the text in «» — and give the answers you see. A Figma node id, a requirement id or a path goes to refs and sources, never into the question. A design frame labelled To be or AS IS by its section answers which variant is the target: do not ask it.
 Produce the result document when every requirement is classified.`,
   capabilities: [...READ_REPO, "jira.get", "jira.search", "confluence.get", "confluence.search", "figma.get"],
   requires: { tools: true, structuredOutput: "json" },
@@ -94,6 +95,7 @@ Goal: turn the task and the research artifact into a specification a reviewer ca
 Method:
 - Each requirement has an id (R1, R2, …), a precise statement, and acceptance criteria that can be checked by a test or an inspection.
 - State non-goals explicitly. List risks and open questions instead of guessing.
+- A question for a person (open questions, the clarification) is read at the gate by someone who will not open your tools: name what it is about as they see it — the screen by its title or its section («To be - …»), the field by its label, the text in «» — and give the answers you see. A Figma node id, a requirement id or a path goes to refs and sources, never into the question. A design frame labelled To be or AS IS by its section answers which variant is the target: do not ask it.
 - Consult the repository only to make requirements concrete (names of modules, existing behaviour); do not design the implementation.
 Produce the result document when every requirement has acceptance criteria.`,
   capabilities: ["repo.read", "repo.list", "repo.search"],

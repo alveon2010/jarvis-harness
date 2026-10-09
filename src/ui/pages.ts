@@ -1439,10 +1439,15 @@ export interface ArtifactExtras {
   readonly tryOut?: TryOut;
 }
 
+/** A source chip; one that ends with a link (a Figma frame by its name) opens it. */
+const sourceChip = (x: string) => {
+  const m = /^(.*\S)\s+(https:\/\/\S+)$/.exec(x);
+  return m
+    ? html`<a href="${m[2] as string}" target="_blank" rel="noopener">${cut(m[1] as string, 80)}</a>`
+    : html`<span>${cut(x, 80)}</span>`;
+};
 const sourceChips = (sources: readonly string[]) =>
-  sources.length > 0
-    ? html`<span class="src">${sources.map((x) => html`<span>${cut(x, 80)}</span>`)}</span>`
-    : "";
+  sources.length > 0 ? html`<span class="src">${sources.map(sourceChip)}</span>` : "";
 
 /**
  * The document's open questions as a form (pilot: eight questions of a spec sat in a side column, the

@@ -4,8 +4,10 @@ import { z } from "zod";
 import type { Runtime } from "../app/runtime.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import type { Run } from "../core/domain/run.ts";
+import { frameNamesOf, humanizeNodeIds, humanizeSource } from "../design/frames.ts";
 import { resolveModel } from "../models/router.ts";
 import { generateStructured } from "../models/structured.ts";
+import { questionsOf } from "./questions.ts";
 
 /**
  * Answers to a document's open questions, prepared before its approval gate (pilot: eight questions of
@@ -86,9 +88,7 @@ const clip = (s: string, max: number) => (s.length <= max ? s : `${s.slice(0, ma
 export function openQuestionsOf(text: string): string[] {
   try {
     const doc = JSON.parse(text) as { openQuestions?: unknown };
-    return Array.isArray(doc.openQuestions)
-      ? doc.openQuestions.filter((q): q is string => typeof q === "string" && q.trim().length > 0)
-      : [];
+    return questionsOf(doc.openQuestions);
   } catch {
     return [];
   }
@@ -200,7 +200,8 @@ export async function prepareSuggestions(
             "# Jarvis: answers to a document's open questions",
             "A person is about to approve the document below. Prepare an answer for each of its open questions from the material, so they decide in seconds.",
             "Rules:",
-            "- Answer only from the material. Every answer names exactly where it stands (page id and section, issue key, `path:line`, Figma node id). No source — not an answer.",
+            "- Answer only from the material. Every answer names exactly where it stands (page id and section, issue key, `path:line`, Figma node id) in its sources. No source — not an answer.",
+            "- The text of an answer and of an option is for a person: a frame by its title or section («To be - …»), a field by its label — ids only in sources.",
             "- When sources disagree and the material itself tells which holds (a table over an example, a later page over an earlier one, the target design over the current one), it is settled: kind answer, saying which you follow and why.",
             "- The task changes the product: the target design (To be) and the issue's plan describe what must be; the current code and the AS IS frames describe what is being replaced. Never prefer today's behaviour where the task changes it.",
             "- When the material does not settle it but the team can decide: kind decision, 2–3 options with what follows from each; mark as suggested the one the task and the target design point to — today's behaviour only where the task does not touch it — and give its sources.",
@@ -227,7 +228,23 @@ export async function prepareSuggestions(
       `${material}\n${text}`,
       run.workspace.path,
     );
-    const body: SuggestionsDoc = { for: `${doc.artifactId}@${doc.version}`, items };
+    // for a person: a frame by its name, its source a link to open it (src/design/frames.ts)
+    const design = runtime.artifacts.listLatest(run.id, "design")[0];
+    const names = frameNamesOf(design ? runtime.artifacts.text(design) : undefined);
+    const readable = items.map((x) => ({
+      ...x,
+      ...(x.answer ? { answer: humanizeNodeIds(x.answer, names) } : {}),
+      options: x.options.map((o) => ({
+        ...o,
+        text: humanizeNodeIds(o.text, names),
+        note: humanizeNodeIds(o.note, names),
+      })),
+      sources: x.sources.map((s) => {
+        const h = humanizeSource(s, names);
+        return h.link ? `${h.text} ${h.link}` : h.text;
+      }),
+    }));
+    const body: SuggestionsDoc = { for: `${doc.artifactId}@${doc.version}`, items: readable };
     runtime.artifacts.put({
       runId: run.id,
       type: SUGGESTIONS,

@@ -24,6 +24,7 @@ import type { Runtime } from "../app/runtime.ts";
 import type { Actor } from "../core/domain/actor.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import type { Run } from "../core/domain/run.ts";
+import { questionsOf } from "../interaction/questions.ts";
 import { shortRunId } from "../storage/runStore.ts";
 import { git } from "../tools/local/exec.ts";
 import {
@@ -205,7 +206,7 @@ export function docFacts(name: string, text: string): DocFacts | undefined {
       ...n(doc.contradictions, "contradiction", true),
     ],
     risks: strings(doc.risks),
-    openQuestions: strings(doc.openQuestions),
+    openQuestions: questionsOf(doc.openQuestions),
   };
 }
 
@@ -416,7 +417,7 @@ async function changes(
 ): Promise<string | undefined> {
   const at = signal ? { signal } : {};
   const st = ctx.out.style;
-  const questions = strings(doc?.openQuestions);
+  const questions = questionsOf(doc?.openQuestions);
   const answers: string[] = [];
   if (questions.length > 0) {
     ctx.out.line(`  ${st.muted("answer the open questions (empty line skips one):")}`);
@@ -843,7 +844,7 @@ export async function humanGate(
         continue;
       }
       if (input === "e") {
-        const questions = strings(doc?.openQuestions);
+        const questions = questionsOf(doc?.openQuestions);
         const dir = mkdtempSync(join(tmpdir(), "jarvis-comment-"));
         const file = join(dir, "COMMENT.md");
         try {

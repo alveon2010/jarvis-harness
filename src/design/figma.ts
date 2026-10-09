@@ -178,6 +178,18 @@ export function describeFrame(design: FigmaDesign, options: DescribeOptions = {}
   const colors = new Map<string, number>();
   const used = new Map<string, number>();
   const texts: string[] = [];
+  /**
+   * The texts by screen: a canvas or a section holds several screens side by side (To be, AS IS, the
+   * states of a step), each under the name the designer gave it. Pilot: a canvas's 240 texts came as
+   * one list, the layout was cut on its first screen, and the model asked which variant was the target
+   * — the section said «To be» all along.
+   */
+  interface Screen {
+    readonly title: string;
+    readonly id?: string;
+    readonly texts: string[];
+  }
+  const screens: Screen[] = [];
   const tree: string[] = [];
   const max = options.maxTreeLines ?? 160;
   let cut = 0;
@@ -207,9 +219,23 @@ export function describeFrame(design: FigmaDesign, options: DescribeOptions = {}
     return parts.join(", ");
   };
 
-  const walk = (raw: FigmaNode, depth: number) => {
+  const CONTAINER = new Set(["CANVAS", "SECTION", "PAGE", "DOCUMENT"]);
+  // arrows and notes between screens are not screens
+  const NOT_SCREEN = new Set(["CONNECTOR", "STICKY", "LINE", "VECTOR", "IMAGE-SVG", "RECTANGLE", "ELLIPSE"]);
+  const screenOf = (title: string, id?: string): Screen => {
+    const s: Screen = { title, ...(id ? { id } : {}), texts: [] };
+    screens.push(s);
+    return s;
+  };
+  const walk = (raw: FigmaNode, depth: number, trail: readonly string[] = [], within?: Screen) => {
     const n = expand(raw);
     const type = (n.type ?? "").toUpperCase();
+    const container = CONTAINER.has(type);
+    const isTextNode = type === "TEXT" || n.text !== undefined;
+    // the first node that is not a canvas or a section: a screen, named by the sections around it
+    let screen = within;
+    if (!screen && !container && !isTextNode && !NOT_SCREEN.has(type))
+      screen = screenOf([...trail, n.name ?? type.toLowerCase()].filter(Boolean).join(" › "), n.id);
     const component = componentOf(n);
     if (component) count(used, component.replace(/ \(.*\)$/, ""));
     const color = colorOf(n.fills);
@@ -217,10 +243,13 @@ export function describeFrame(design: FigmaDesign, options: DescribeOptions = {}
     if (isText) count(colors, color);
     else if (color && color !== "#FFFFFF" && color !== "#ffffff") count(colors, color);
     const textStyle = isText ? textStyleOf(n.textStyle) : undefined;
-    if (isText && n.text)
-      texts.push(
-        `- «${n.text.replace(/\s+/g, " ").trim()}»${textStyle ? ` — ${textStyle}` : ""}${color ? `, ${color}` : ""}`,
-      );
+    if (isText && n.text) {
+      const line = `- «${n.text.replace(/\s+/g, " ").trim()}»${textStyle ? ` — ${textStyle}` : ""}${color ? `, ${color}` : ""}`;
+      texts.push(line);
+      // a text right in a section: the section's own (a caption, a note)
+      const loose = trail.join(" › ") || "(outside a screen)";
+      (screen ?? screens.find((x) => x.title === loose && !x.id) ?? screenOf(loose)).texts.push(line);
+    }
     const label = component
       ? `${component}${props(n.componentProperties) ? ` · ${props(n.componentProperties)}` : ""}`
       : isText
@@ -245,7 +274,9 @@ export function describeFrame(design: FigmaDesign, options: DescribeOptions = {}
     else cut += 1;
     // an icon or a vector drawing has no structure worth a line per path
     if (type === "IMAGE-SVG" || type === "VECTOR" || type === "BOOLEAN_OPERATION") return;
-    for (const c of n.children ?? []) walk(c, depth + 1);
+    // a section names the screens in it; the frame's own root (depth 0) is its title already
+    const next = container && depth > 0 && n.name ? [...trail, n.name] : trail;
+    for (const c of n.children ?? []) walk(c, depth + 1, next, screen);
   };
   for (const n of design.nodes) walk(n, 0);
 
@@ -259,9 +290,16 @@ export function describeFrame(design: FigmaDesign, options: DescribeOptions = {}
     `### ${title}`,
     `Figma: ${fileName}${top ? ` · node ${top.id}` : ""}${options.link ? ` · ${options.link}` : ""}`,
     "",
-    "Texts, in order:",
-    ...(texts.length > 0 ? texts : ["- (none)"]),
-    "",
+    // several screens: each text under its own, even when the read reached the texts of one only
+    ...(screens.length > 1
+      ? [
+          `Screens (${screens.length}), each with its texts below: ${screens.map((s) => `«${s.title}»${s.texts.length === 0 ? " (no texts read)" : ""}`).join(" · ")}`,
+          "",
+          ...screens
+            .filter((s) => s.texts.length > 0)
+            .flatMap((s) => [`#### ${s.title}${s.id ? ` · node ${s.id}` : ""}`, ...s.texts, ""]),
+        ]
+      : ["Texts, in order:", ...(texts.length > 0 ? texts : ["- (none)"]), ""]),
     "Layout:",
     ...tree,
     ...(cut > 0
