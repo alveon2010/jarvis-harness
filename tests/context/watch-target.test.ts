@@ -103,6 +103,36 @@ describe("the working set: tool results past it go to pointers whatever the wind
     // under the set: nothing happens
     const again = await manager.manage([], r.transcript);
     expect(again.changed).toBe(false);
+    // a source keeps it over the set: after a trim the next waits for a batch's growth (40% of the set),
+    // not a trim of each result as it ages
+    const held = new ContextManager({
+      effective: 1_000_000,
+      thresholds: DEFAULT_THRESHOLDS,
+      compactTarget: 0.35,
+      workingSet: 3_000,
+      estimate,
+      store: () => "ref",
+      summarize: async () => "unused",
+      emit: () => undefined,
+    });
+    const first = await held.manage(
+      [],
+      [
+        ...result("k1", "jira.get", 13_000),
+        ...result("a1", "repo.read", 4000),
+        ...result("a2", "repo.read", 4000),
+        ...result("a3", "repo.read", 4000),
+        ...result("a4", "repo.read", 1000),
+        ...result("a5", "repo.read", 1000),
+        ...result("a6", "repo.read", 1000),
+      ],
+    );
+    expect(trimmedIds(first.transcript)).toEqual(["a1", "a2", "a3"]);
+    const next = [...first.transcript, ...result("c1", "repo.read", 3000)];
+    expect(estimate(next)).toBeGreaterThan(3_000);
+    expect((await held.manage([], next)).changed).toBe(false); // a4 stays
+    const later = [...next, ...result("c2", "repo.read", 3000), ...result("c3", "repo.read", 3000)];
+    expect(trimmedIds((await held.manage([], later)).transcript)).toContain("a4");
     // off
     const off = new ContextManager({
       effective: 1_000_000,

@@ -87,6 +87,8 @@ export class ContextManager {
   private readonly o: ContextManagerOptions;
   private tightened = false;
   private lastLevel: PressureLevel = "healthy";
+  /** The results' size right after the last working-set trim: the next waits for a batch's growth. */
+  private afterSetTrim = 0;
 
   constructor(options: ContextManagerOptions, initial?: Partial<ContextStats>) {
     this.o = options;
@@ -196,12 +198,18 @@ export class ContextManager {
 
     // the working set: every call sends the whole history again, so old results go to pointers
     // well before the window fills (pilot: 178k tokens of a 500k window before the first trim)
+    // In batches: once trimmed, the next trim waits until the results have grown by the batch again —
+    // what stays (sources, files read again) can keep it over the set, and a trim on every call
+    // trimmed each result as it aged and the agent read it back (pilot: 23 trims and 11 re-reads in
+    // a research of 58 calls).
     const set = this.o.workingSet ?? 0;
     if (set > 0) {
       const own = this.o.estimate(transcript);
-      if (own > set && trimmable(transcript, WATCH_KEEP, 600, keepLight) > 0) {
+      const due = Math.max(set, this.afterSetTrim + set * (1 - WORKING_TARGET));
+      if (own > due && trimmable(transcript, WATCH_KEEP, 600, keepLight) > 0) {
         const saveChars = Math.ceil(((own - set * WORKING_TARGET) * charsOf(transcript)) / Math.max(1, own));
         trim(WATCH_KEEP, undefined, true, saveChars);
+        this.afterSetTrim = this.o.estimate(transcript);
       }
     }
     if (level === "healthy")
