@@ -75,6 +75,17 @@ async function jarvis(args: string[]) {
   return { code, out, err };
 }
 
+const FIXER = `import { readFileSync, writeFileSync } from "node:fs";
+const fix = process.argv.includes("--fix");
+let bad = false;
+for (const f of process.argv.slice(2).filter((a) => !a.startsWith("--"))) {
+  let s = readFileSync(f, "utf8");
+  if (fix) { s = s.replace(/\\{(\\w+)\\}/g, "{ $1 }"); writeFileSync(f, s); }
+  if (/\\{\\w+\\}/.test(s) || s.includes("BAD")) { console.log(f + ": error, cannot fix"); bad = true; }
+}
+process.exit(bad ? 1 : 0);
+`;
+
 describe("worktree workspace end to end (ADR-0003)", () => {
   it("runs in a worktree, commits checkpoints with trailers, diffs, applies and gcs", async () => {
     const r = await jarvis(["--json", "work", "ABC-9", "--workflow", "touch"]);
@@ -227,12 +238,73 @@ steps:
       ["test-pkg", false, ""],
       ["test-jest", true, ""],
       ["typecheck-other", true, "no changed code in its scope"],
+      ["lint", true, ""],
     ]);
+    expect(checks.results[3]?.command).toBe("echo not a check pkg/a.ts");
     // jest on the related tests only, and no related test is not a failure
     expect(checks.results[1]?.command).toBe("cd pkg && echo jest --passWithNoTests --findRelatedTests a.ts");
     expect(checks.reasons[0]?.summary).toContain(
       "test-pkg failed: $ cd pkg && echo tests ran in pkg && exit 3 | tests ran in pkg",
     );
+  });
+
+  it("project.checks fixes first, lints the changed files and runs a check its files call for (tools.fix, tools.checks)", async () => {
+    sb.write(
+      "project/.jarvis/project.yaml",
+      [
+        "version: 1",
+        "workspace: { mode: cwd, allowWrites: true }",
+        "tools:",
+        "  local:",
+        '    fix-pkg: "cd pkg && node ../fixer.mjs --fix"',
+        '    lint-pkg: "cd pkg && node ../fixer.mjs"',
+        '    snap-check: "echo snapshot checked"',
+        '    never-check: "echo never"',
+        "  fix:",
+        '    - { when: ["pkg/**/*.ts"], run: fix-pkg }',
+        "  checks:",
+        '    - { when: ["pkg/**"], run: snap-check }',
+        '    - { when: ["other/**"], run: never-check }',
+      ].join("\n"),
+    );
+    sb.write("project/fixer.mjs", FIXER);
+    sb.write(
+      "project/.jarvis/workflows/chk.yaml",
+      `name: chk
+entry: change
+steps:
+  - id: change
+    kind: deterministic
+    tool: repo.write
+    args: { path: "pkg/a.ts", content: "import {a} from './b';\\n" }
+    transitions: { onSuccess: checks }
+  - id: checks
+    kind: deterministic
+    tool: project.checks
+    outputs: [checks]
+    transitions: { onSuccess: DONE, onOutcome: { defects_found: { to: change, maxIterations: 1 } } }
+`,
+    );
+    sh(sb.project, ["add", "-A"]);
+    sh(sb.project, ["commit", "-q", "-m", "checks"]);
+    // a file the agent did not write through repo.write: the fixer before the checks takes it
+    sb.write("project/pkg/c.ts", "export {x} from './a';\n");
+    const r = await jarvis(["work", "T-4", "--workflow", "chk"]);
+    expect(r.err).toContain("✓ [2/2] checks");
+    const loaded = await loadConfig({ cwd: sb.project, homeDir: sb.home, env: {} });
+    const rt = createRuntime(loaded, { env: {} });
+    const runId = rt.runs.list({ includeTerminal: true })[0]?.id as string;
+    const checks = JSON.parse(rt.artifacts.text(rt.artifacts.listLatest(runId, "checks")[0] as never)) as {
+      results: Array<{ check: string; command: string; ok: boolean; skipped?: string; fixed?: string[] }>;
+    };
+    rt.close();
+    expect(checks.results.map((x) => [x.check, x.ok, x.fixed ?? []])).toEqual([
+      ["fix:fix-pkg", true, ["pkg/c.ts"]],
+      ["lint-pkg", true, []],
+      ["snap-check", true, []],
+    ]);
+    expect(checks.results[1]?.command).toBe("cd pkg && node ../fixer.mjs a.ts c.ts");
+    expect(readFileSync(join(sb.project, "pkg/a.ts"), "utf8")).toBe("import { a } from './b';\n");
   });
 
   it("project.checks rebuilds what a package reads built, then typechecks its dependents (tools.rebuild)", async () => {

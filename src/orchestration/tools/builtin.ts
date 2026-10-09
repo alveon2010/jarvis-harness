@@ -1,4 +1,4 @@
-import { existsSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { CapabilityRegistry } from "../../capabilities/registry.ts";
 import { collectSources } from "../../design/collect.ts";
@@ -6,6 +6,7 @@ import { changedFiles, checkStandards } from "../../knowledge/check.ts";
 import { impactOf, repoIdOf, updateGraph } from "../../knowledge/graph/update.ts";
 import { loadStandards } from "../../knowledge/standards.ts";
 import { verifyModuleStep } from "../../onboarding/moduleRun.ts";
+import { filesFor, packageDirOf, rulesFor } from "../../tools/local/fix.ts";
 import type { DeterministicTool } from "../executors.ts";
 import { rebuildsFor } from "./rebuild.ts";
 
@@ -305,9 +306,44 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
     const workspace = ctx.workspace.ref.path;
     const base = ctx.workspace.ref.baseCommit ?? ctx.workspace.ref.baseRef;
     const changed = await changedFiles(workspace, base);
-    const results: Array<{ check: string; command: string; ok: boolean; skipped?: string; tail?: string }> =
-      [];
+    const results: Array<{
+      check: string;
+      command: string;
+      ok: boolean;
+      skipped?: string;
+      tail?: string;
+      fixed?: string[];
+    }> = [];
     const tools = ctx.runtime.loaded.config.tools;
+    const tail = (r: { text?: string; denied?: string }): string =>
+      (r.text ?? r.denied ?? "").split("\n").slice(-40).join("\n");
+    // the fixers first (tools.fix): what they fix is no defect, what they cannot is lint's to report
+    for (const { run, files } of rulesFor(
+      tools.fix,
+      changed.filter((f) => existsSync(join(workspace, f))),
+    )) {
+      const command = tools.local[run];
+      if (!command) {
+        results.push({
+          check: `fix:${run}`,
+          command: run,
+          ok: false,
+          tail: `no tools.local command "${run}"`,
+        });
+        continue;
+      }
+      const read = () => files.map((f) => readFileSync(join(workspace, f), "utf8"));
+      const before = read();
+      await ctx.tools.invoke(`project.${run}`, { args: filesFor(command, files) });
+      const after = read();
+      const fixed = files.filter((_, i) => before[i] !== after[i]);
+      results.push({
+        check: `fix:${run}`,
+        command: `${command} ${filesFor(command, files)}`,
+        ok: true,
+        ...(fixed.length > 0 ? { fixed } : {}),
+      });
+    }
     // what the checks read built: rebuilt first, from the run's sources
     const rebuilt: string[] = [];
     for (const name of rebuildsFor(tools, changed)) {
@@ -326,13 +362,13 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
         check: `rebuild:${name}`,
         command,
         ok: r.ok,
-        ...(r.ok ? {} : { tail: (r.text ?? r.denied ?? "").split("\n").slice(-40).join("\n") }),
+        ...(r.ok ? {} : { tail: tail(r) }),
       });
       if (r.ok) rebuilt.push(name);
     }
     for (const [name, command] of Object.entries(tools.local)) {
-      if (!/^(test|typecheck)/.test(name)) continue;
-      const dir = /^\s*cd\s+([^\s&;]+)\s*&&/.exec(command)?.[1]?.replace(/\/+$/, "");
+      if (!/^(test|typecheck|lint)/.test(name)) continue;
+      const dir = packageDirOf(command);
       const inScope = dir ? changed.filter((f) => f === dir || f.startsWith(`${dir}/`)) : changed;
       const code = inScope.filter((f) => /\.(tsx?|jsx?|mjs|cjs)$/.test(f));
       // a package that reads what was rebuilt: its types may break with no file of its own changed
@@ -342,7 +378,7 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
           check: name,
           command,
           ok: r.ok,
-          ...(r.ok ? {} : { tail: (r.text ?? r.denied ?? "").split("\n").slice(-40).join("\n") }),
+          ...(r.ok ? {} : { tail: tail(r) }),
         });
         continue;
       }
@@ -350,18 +386,43 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
         results.push({ check: name, command, ok: true, skipped: "no changed code in its scope" });
         continue;
       }
+      const present = code.filter((f) => existsSync(join(workspace, f)));
       const related =
         name.startsWith("test") && /\bjest\b/.test(command)
           ? // no test relates to the changed files: not a failure (pilot: jest exited 1 on «0 matches»)
-            ` --passWithNoTests --findRelatedTests ${code.map((f) => (dir ? f.slice(dir.length + 1) : f)).join(" ")}`
-          : "";
+            ` --passWithNoTests --findRelatedTests ${filesFor(command, code)}`
+          : // the linter on the changed files only: errors elsewhere in the repo are not this run's
+            // (pilot: `yarn lint` failed on a package the run never touched, and agents could not tell)
+            name.startsWith("lint") && present.length > 0
+            ? ` ${filesFor(command, present)}`
+            : "";
+      if (name.startsWith("lint") && present.length === 0) {
+        results.push({
+          check: name,
+          command,
+          ok: true,
+          skipped: "the changed code in its scope was deleted",
+        });
+        continue;
+      }
       const r = await ctx.tools.invoke(`project.${name}`, related ? { args: related.trim() } : {});
       results.push({
         check: name,
         command: `${command}${related}`,
         ok: r.ok,
-        ...(r.ok ? {} : { tail: (r.text ?? r.denied ?? "").split("\n").slice(-40).join("\n") }),
+        ...(r.ok ? {} : { tail: tail(r) }),
       });
+    }
+    // tools.checks: a command of its own when the run changed what it checks
+    for (const { run } of rulesFor(tools.checks, changed)) {
+      if (results.some((r) => r.check === run)) continue;
+      const command = tools.local[run];
+      if (!command) {
+        results.push({ check: run, command: run, ok: false, tail: `no tools.local command "${run}"` });
+        continue;
+      }
+      const r = await ctx.tools.invoke(`project.${run}`, {});
+      results.push({ check: run, command, ok: r.ok, ...(r.ok ? {} : { tail: tail(r) }) });
     }
     const failed = results.filter((r) => !r.ok);
     const reasons = failed.map((r) => ({

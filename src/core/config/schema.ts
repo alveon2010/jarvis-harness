@@ -213,6 +213,24 @@ export const ToolsConfigSchema = z.strictObject({
   rebuild: z
     .array(z.strictObject({ when: z.array(z.string().min(1)).min(1), run: z.string().min(1) }))
     .default([]),
+  /**
+   * Fixers (a linter's --fix, a formatter): the `tools.local` command `run` with the files matching
+   * `when` appended, relative to its package (`cd <dir> && …`). It runs on each file an agent writes —
+   * the formatting is fixed and what the fixer cannot fix comes back in the write's result — and on
+   * every changed file before `project.checks`. Pilot: a round of implementation went to an import's
+   * line breaks (object-curly-newline) the linter fixes by itself.
+   */
+  fix: z
+    .array(z.strictObject({ when: z.array(z.string().min(1)).min(1), run: z.string().min(1) }))
+    .default([]),
+  /**
+   * More checks for `project.checks`: the `tools.local` command `run`, as it is, when the run changed a
+   * file matching `when` (a snapshot of the API config, a routes table). Pilot: a snapshot the change
+   * should have updated was found by the review, a model, not by the project's own check.
+   */
+  checks: z
+    .array(z.strictObject({ when: z.array(z.string().min(1)).min(1), run: z.string().min(1) }))
+    .default([]),
   /** Expose `shell.run` for arbitrary commands inside the workspace. Off by default. */
   shell: z.boolean().default(false),
   /** Tool output returned to the agent is capped; the full (redacted) output is kept as a blob. */

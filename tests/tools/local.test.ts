@@ -78,6 +78,17 @@ async function setup(
   return { run, router, registry, bind };
 }
 
+const FIXER = `import { readFileSync, writeFileSync } from "node:fs";
+const fix = process.argv.includes("--fix");
+let bad = false;
+for (const f of process.argv.slice(2).filter((a) => !a.startsWith("--"))) {
+  let s = readFileSync(f, "utf8");
+  if (fix) { s = s.replace(/\\{(\\w+)\\}/g, "{ $1 }"); writeFileSync(f, s); }
+  if (/\\{\\w+\\}/.test(s) || s.includes("BAD")) { console.log(f + ": error, cannot fix"); bad = true; }
+}
+process.exit(bad ? 1 : 0);
+`;
+
 beforeEach(() => {
   sb = sandbox();
 });
@@ -197,6 +208,13 @@ describe("local tools", () => {
     expect(r.ok).toBe(true);
     expect(r.text).toContain("hello-from-project extra");
     expect(r.text).toContain("[exit 0");
+    // the agent's args are words for the command, not shell (pilot: `2>&1 | tail -120`)
+    const quoted = await bind().invoke("project.echo", { args: "x; touch pwned" });
+    expect(quoted.text).toContain("hello-from-project 'x;' touch pwned");
+    expect(() => readFileSync(join(sb.project, "pwned"))).toThrow();
+    const piped = await bind().invoke("project.echo", { args: '--testPathPattern="a|b" 2>&1 | tail -5' });
+    expect(piped.ok).toBe(false);
+    expect(piped.error).toContain('"2>&1" is not run');
     lease.release();
     rt.close();
     const withShell = await setup("version: 1\ntools: { shell: true }\n");
@@ -286,6 +304,39 @@ describe("builds the checks read (tools.rebuild)", () => {
     await tools.invoke("project.build-lib");
     expect((await tools.invoke("project.typecheck-app")).text).not.toContain("rebuilt first");
     expect(builds()).toBe(3);
+  });
+
+  it("the project's fixer runs on each file an agent writes; what it cannot fix comes back (tools.fix)", async () => {
+    const { bind, registry } = await setup(
+      [
+        "version: 1",
+        "tools:",
+        "  local:",
+        '    fix-src: "cd src && node ../fixer.mjs --fix"',
+        "  fix:",
+        '    - { when: ["src/**/*.ts"], run: fix-src }',
+      ].join("\n"),
+    );
+    writeFileSync(join(sb.project, "fixer.mjs"), FIXER);
+    const tools = bind();
+    const fixed = await tools.invoke("repo.write", { path: "src/b.ts", content: "import {a} from './a';\n" });
+    expect(fixed.ok).toBe(true);
+    expect(fixed.text).toContain(
+      "[fix-src: reformatted the file — read it again before the next edit; no problems left]",
+    );
+    expect(readFileSync(join(sb.project, "src/b.ts"), "utf8")).toBe("import { a } from './a';\n");
+    const edited = await tools.invoke("repo.edit", {
+      path: "src/b.ts",
+      oldText: "import",
+      newText: "BAD import",
+    });
+    expect(edited.text).toContain(
+      "[fix-src found what it cannot fix — correct it:]\nb.ts: error, cannot fix",
+    );
+    // a file no rule covers: no fixer
+    const readme = await tools.invoke("repo.write", { path: "README.md", content: "# x\n" });
+    expect(readme.text).toBe("wrote README.md (4 bytes)");
+    expect(registry.get("repo.write")?.description).toContain("the project's fixer");
   });
 
   it("an agent with write paths cannot write outside them", async () => {

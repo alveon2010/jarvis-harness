@@ -9,7 +9,9 @@ import { knowledgeRootsOf } from "../../knowledge/sources.ts";
 import { gitIdentityEnv } from "../../orchestration/worktree.ts";
 import { effectMarker } from "../../storage/effects.ts";
 import type { Capability, ToolContext, ToolOutput, ToolProvider } from "../types.ts";
+import { projectArgs } from "./args.ts";
 import { git, hasRipgrep, runCommand, runShell } from "./exec.ts";
+import { filesFor, rulesFor } from "./fix.ts";
 import { PathDeniedError, resolveInWorkspace } from "./paths.ts";
 import { isScratchFile } from "./scratch.ts";
 
@@ -328,7 +330,7 @@ export class LocalToolProvider implements ToolProvider {
       },
       {
         name: "repo.write",
-        description: "Create or overwrite a file inside the workspace. A text file is ended with a newline.",
+        description: `Create or overwrite a file inside the workspace. A text file is ended with a newline.${this.fixNote()}`,
         network: "none",
         access: "write",
         effect: false,
@@ -350,10 +352,11 @@ export class LocalToolProvider implements ToolProvider {
             const before = existsSync(absolute) ? readFileSync(absolute, "utf8") : undefined;
             const content = withFinalNewline(str(args, "content"), before);
             writeFileSync(absolute, content, "utf8");
+            const fixed = await this.fixWritten(rel, absolute, ctx);
             return {
               ok: true,
-              text: `wrote ${rel} (${Buffer.byteLength(content)} bytes)`,
-              data: { path: rel },
+              text: `wrote ${rel} (${Buffer.byteLength(content)} bytes)${fixed.text}`,
+              data: { path: rel, ...(fixed.data ? { fix: fixed.data } : {}) },
             };
           } catch (error) {
             return fail(error);
@@ -362,8 +365,7 @@ export class LocalToolProvider implements ToolProvider {
       },
       {
         name: "repo.edit",
-        description:
-          "Replace an exact text fragment in a file. Fails if the fragment is missing or ambiguous unless replaceAll=true.",
+        description: `Replace an exact text fragment in a file. Fails if the fragment is missing or ambiguous unless replaceAll=true.${this.fixNote()}`,
         network: "none",
         access: "write",
         effect: false,
@@ -398,10 +400,11 @@ export class LocalToolProvider implements ToolProvider {
             // take it away, and a file written without one is mended by the next edit
             const next = withFinalNewline(replaced, undefined);
             writeFileSync(absolute, next, "utf8");
+            const fixed = await this.fixWritten(rel, absolute, ctx);
             return {
               ok: true,
-              text: `edited ${rel} (${occurrences} replacement${occurrences > 1 ? "s" : ""})`,
-              data: { path: rel, replacements: occurrences },
+              text: `edited ${rel} (${occurrences} replacement${occurrences > 1 ? "s" : ""})${fixed.text}`,
+              data: { path: rel, replacements: occurrences, ...(fixed.data ? { fix: fixed.data } : {}) },
             };
           } catch (error) {
             return fail(error);
@@ -539,10 +542,20 @@ export class LocalToolProvider implements ToolProvider {
         effect: false,
         parameters: {
           type: "object",
-          properties: { args: { type: "string", description: "extra arguments appended to the command" } },
+          properties: {
+            args: {
+              type: "string",
+              description:
+                "extra arguments appended to the command (a file, a test path, an option); quoted for you — not shell: no pipes, redirects or chains",
+            },
+          },
         },
-        handler: async (args, ctx) =>
-          this.projectCommand(name, `${command}${typeof args.args === "string" ? ` ${args.args}` : ""}`, ctx),
+        handler: async (args, ctx) => {
+          const extra =
+            typeof args.args === "string" ? projectArgs(args.args) : ({ ok: true, text: "" } as const);
+          if (!extra.ok) return { ok: false, error: extra.error };
+          return this.projectCommand(name, `${command}${extra.text ? ` ${extra.text}` : ""}`, ctx);
+        },
       });
     }
 
@@ -601,6 +614,54 @@ export class LocalToolProvider implements ToolProvider {
         ? { ...out, text: `[rebuilt first: ${notes.join(", ")}]\n${out.text ?? ""}` }
         : out;
     });
+  }
+
+  /** What the write tools say of `tools.fix`, when the project has fixers. */
+  private fixNote(): string {
+    return this.config.tools.fix.length > 0
+      ? " Then the project's fixer runs on the file (tools.fix): formatting is fixed for you, and what it cannot fix comes back in the result — fix that before you go on."
+      : "";
+  }
+
+  /**
+   * `tools.fix` on a file an agent just wrote: the fixer rewrites what it can (an import's line
+   * breaks, a blank line, the final newline), and what it cannot goes back to the agent with the
+   * write — the agent writes to the linter's rules as it goes, not a round of verify later.
+   */
+  private async fixWritten(
+    rel: string,
+    absolute: string,
+    ctx: ToolContext,
+  ): Promise<{ text: string; data?: { run: string[]; changed: boolean; clean: boolean } }> {
+    const plans = rulesFor(this.config.tools.fix, [rel]);
+    if (plans.length === 0) return { text: "" };
+    const before = readFileSync(absolute, "utf8");
+    const notes: string[] = [];
+    let clean = true;
+    for (const { run } of plans) {
+      const command = this.config.tools.local[run];
+      if (!command) {
+        notes.push(`[fix "${run}": no tools.local command of that name]`);
+        continue;
+      }
+      const out = await this.runProjectCommand(`${command} ${filesFor(command, [rel])}`, ctx);
+      if (!out.ok) {
+        clean = false;
+        // its findings, not the command line and the exit footer
+        const lines = (out.text ?? "")
+          .split("\n")
+          .slice(1, -1)
+          .filter((l) => l.trim() !== "");
+        notes.push(`[${run} found what it cannot fix — correct it:]\n${lines.slice(-30).join("\n")}`);
+      }
+    }
+    const after = existsSync(absolute) ? readFileSync(absolute, "utf8") : before;
+    const changed = after !== before;
+    const head = `\n[${plans.map((p) => p.run).join(", ")}: ${changed ? "reformatted the file — read it again before the next edit" : "nothing to reformat"}${clean ? "; no problems left" : ""}]`;
+    return {
+      text: `${head}${notes.length > 0 ? `\n${notes.join("\n")}` : ""}`,
+      data: { run: plans.map((p) => p.run), changed, clean },
+    };
   }
 
   private inTurn<T>(key: string, work: () => Promise<T>): Promise<T> {
