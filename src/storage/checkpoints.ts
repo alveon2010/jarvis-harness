@@ -155,6 +155,18 @@ export class StepHistoryStore {
       .run(this.clock().toISOString(), status, outcome ?? null, JSON.stringify(outputs), id);
   }
 
+  /**
+   * The number of a step's next round: one past its last. Not the count of its rows — a round
+   * resumed after a stop (a budget grant, a quota window, a pause) starts a row of its own, and the
+   * pilot's third round of implementation showed as #5.
+   */
+  nextIteration(runId: string, stepId: string): number {
+    const row = this.db
+      .prepare("SELECT MAX(iteration) AS last FROM step_history WHERE run_id = ? AND step_id = ?")
+      .get(runId, stepId) as { last: number | null } | undefined;
+    return (row?.last ?? 0) + 1;
+  }
+
   list(runId: string): StepRecord[] {
     const rows = this.db
       .prepare(

@@ -472,7 +472,7 @@ export class LocalWorkflowEngine {
       return { run: failed, stop: true };
     }
 
-    const nextIteration = this.rt.history.list(run.id).filter((h) => h.stepId === transition.to).length + 1;
+    const nextIteration = this.rt.history.nextIteration(run.id, transition.to);
     const updated = this.rt.runs.update(run.id, {
       currentStep: transition.to,
       currentIteration: nextIteration,
@@ -515,7 +515,7 @@ export class LocalWorkflowEngine {
       const edge = run.waitingFor.detail ?? "";
       const back = rerunBackTo(this.rt, run.id);
       const to = back && edge.includes(`->${back}#`) ? back : run.currentStep;
-      const fresh = this.rt.history.list(run.id).filter((h) => h.stepId === to).length + 1;
+      const fresh = this.rt.history.nextIteration(run.id, to);
       this.rt.runs.update(run.id, { currentStep: to, currentIteration: fresh });
     }
     const resumed = this.rt.runs.transition(run.id, "RUNNING", { reason: `resumed from ${run.state}` });

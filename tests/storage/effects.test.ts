@@ -170,5 +170,11 @@ describe("CheckpointStore / StepHistoryStore", () => {
         outputs: ["art_2@1"],
       },
     ]);
+
+    // a round resumed after a stop has a row of its own and the same number: the next round is #2
+    expect(history.nextIteration(runId, "implementation")).toBe(1);
+    history.finish(history.start(runId, "implementation", 1), "suspended");
+    history.finish(history.start(runId, "implementation", 1), "success");
+    expect(history.nextIteration(runId, "implementation")).toBe(2);
   });
 });
