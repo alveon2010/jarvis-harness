@@ -268,7 +268,7 @@ function docsOf(files: readonly string[]): ScanReport["docs"] {
     else if (/(^|\/)changelog(\.[a-z]+)?$/.test(lower)) out.push({ path: f, kind: "changelog" });
     else if (/(^|\/)architecture(\.[a-z]+)?$/.test(lower)) out.push({ path: f, kind: "architecture" });
     else if (/(^|\/)(adr|adrs|decisions)\/[^/]+\.md$/.test(lower)) out.push({ path: f, kind: "adr" });
-    else if (/^(docs?|documentation)\/.+\.(md|mdx|rst|adoc)$/.test(lower))
+    else if (/^(docs?|documentation|src\/docs)\/.+\.(md|mdx|rst|adoc)$/.test(lower))
       out.push({ path: f, kind: "docs" });
   }
   return out.sort((a, b) => a.path.localeCompare(b.path));
