@@ -6,8 +6,10 @@ import { changedFiles, checkStandards } from "../../knowledge/check.ts";
 import { impactOf, repoIdOf, updateGraph } from "../../knowledge/graph/update.ts";
 import { loadStandards } from "../../knowledge/standards.ts";
 import { verifyModuleStep } from "../../onboarding/moduleRun.ts";
+import { git } from "../../tools/local/exec.ts";
 import { filesFor, packageDirOf, rulesFor } from "../../tools/local/fix.ts";
 import type { DeterministicTool } from "../executors.ts";
+import { failingOnBase, junitFailures } from "./baseline.ts";
 import { rebuildsFor } from "./rebuild.ts";
 import { classSelection, coveringTests, testRunnerOf } from "./relatedTests.ts";
 
@@ -35,6 +37,54 @@ export function filesNamedIn(text: string, workspace: string): string[] {
     if (existsSync(abs) && statSync(abs).isFile()) found.add(path);
   }
   return [...found].sort();
+}
+
+/**
+ * Of the test classes a check failed on, those that fail on the run's base commit too; `excused` when
+ * that is all of them. Nothing is excused when the reports name no class (a compile error) or the base
+ * cannot be checked.
+ */
+async function preexistingOf(
+  ctx: Parameters<DeterministicTool>[0],
+  runner: "gradle" | "maven",
+  command: string,
+  failing: readonly string[],
+): Promise<{ classes: string[]; excused: boolean } | undefined> {
+  const ref = ctx.workspace.ref;
+  if (failing.length === 0) return undefined;
+  // a checkout of the project itself (cwd mode) has its base at the ref it started from
+  const resolved = ref.baseCommit
+    ? undefined
+    : await git(["rev-parse", "--verify", `${ref.baseRef}^{commit}`], ref.repoRoot);
+  const baseCommit = ref.baseCommit ?? (resolved?.code === 0 ? resolved.stdout.trim() : undefined);
+  if (!baseCommit) return undefined;
+  const loaded = ctx.runtime.loaded;
+  const onBase = await failingOnBase({
+    repoRoot: ref.repoRoot,
+    baseCommit,
+    runner,
+    command,
+    classes: failing,
+    worktreesDir: loaded.home.worktreesDir,
+    cacheDir: loaded.home.cacheDir,
+    repoId: repoIdOf(ref.repoRoot),
+    setup: loaded.config.workspace.setup,
+    depsCache: loaded.config.workspace.cache
+      ? { dir: join(loaded.home.cacheDir, "deps"), ...loaded.config.workspace.cache }
+      : undefined,
+    timeoutMs: loaded.config.tools.commandTimeoutMs,
+    env: process.env,
+  });
+  if (!onBase) return undefined;
+  const classes = failing.filter((c) => onBase.has(c));
+  ctx.runtime.events.emit({
+    kind: "checks.baseline",
+    runId: ctx.run.id,
+    stepId: ctx.step.id,
+    iteration: ctx.iteration,
+    payload: { failing: failing.length, preexisting: classes.length, base: baseCommit.slice(0, 10) },
+  });
+  return { classes, excused: classes.length === failing.length };
 }
 
 export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
@@ -315,6 +365,8 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
       skipped?: string;
       tail?: string;
       fixed?: string[];
+      /** Test classes that fail on the base commit too: not the run's (src/orchestration/tools/baseline.ts). */
+      preexisting?: string[];
     }> = [];
     const tools = ctx.runtime.loaded.config.tools;
     const tail = (r: { text?: string; denied?: string }): string =>
@@ -436,12 +488,19 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
         });
         continue;
       }
+      const started = Date.now() - 1000;
       const r = await ctx.tools.invoke(`project.${name}`, related ? { args: related.trim() } : {});
+      // failing tests that fail on the base commit too are not this run's defects
+      const preexisting =
+        !r.ok && (runner === "gradle" || runner === "maven")
+          ? await preexistingOf(ctx, runner, command, junitFailures(workspace, started))
+          : undefined;
       results.push({
         check: name,
         command: `${command}${related}`,
-        ok: r.ok,
-        ...(r.ok ? {} : { tail: tail(r) }),
+        ok: r.ok || preexisting?.excused === true,
+        ...(r.ok || preexisting?.excused ? {} : { tail: tail(r) }),
+        ...(preexisting && preexisting.classes.length > 0 ? { preexisting: preexisting.classes } : {}),
       });
     }
     // tools.checks: a command of its own when the run changed what it checks

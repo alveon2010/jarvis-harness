@@ -329,6 +329,94 @@ steps:
     ]);
   });
 
+  // a Gradle stand-in: runs the classes of `--tests` (or all of all.txt), fails those listed in fails.txt
+  const FAKE_GRADLEW = [
+    "#!/bin/sh",
+    "shift",
+    'classes=""',
+    'while [ $# -gt 0 ]; do if [ "$1" = "--tests" ]; then classes="$classes $2"; shift; fi; shift; done',
+    '[ -z "$classes" ] && classes=$(cat all.txt)',
+    "mkdir -p build/test-results/test",
+    "code=0",
+    "for c in $classes; do",
+    '  f=0; grep -qx "$c" fails.txt && f=1 && code=1',
+    '  echo "<testsuite name=\\"$c\\" tests=\\"1\\" failures=\\"$f\\" errors=\\"0\\"></testsuite>" > "build/test-results/test/TEST-$c.xml"',
+    '  [ $f = 1 ] && echo "$c > works() FAILED"',
+    "done",
+    "exit $code",
+  ].join("\n");
+
+  async function baselineRun(
+    task: string,
+    fails: string,
+  ): Promise<Array<{ check: string; ok: boolean; preexisting?: string[]; tail?: string }>> {
+    sb.write(
+      "project/.jarvis/project.yaml",
+      [
+        "version: 1",
+        "workspace: { mode: cwd, allowWrites: true }",
+        "tools:",
+        "  local:",
+        '    test: "./gradlew test"',
+      ].join("\n"),
+    );
+    sb.write("project/.gitignore", "build/\n.setup-ran\n");
+    sb.write("project/gradlew", FAKE_GRADLEW);
+    execFileSync("chmod", ["+x", join(sb.project, "gradlew")]);
+    sb.write("project/all.txt", "a.OldTest\na.NewTest\n");
+    sb.write("project/fails.txt", "a.OldTest\n");
+    sb.write("project/src/main/java/a/A.java", "package a;\npublic class A {}\n");
+    sb.write(
+      "project/.jarvis/workflows/chk.yaml",
+      `name: chk
+entry: change
+steps:
+  - id: change
+    kind: deterministic
+    tool: repo.write
+    args: { path: "src/main/java/a/A.java", content: "package a;\\npublic class A { int x; }\\n" }
+    transitions: { onSuccess: fails }
+  - id: fails
+    kind: deterministic
+    tool: repo.write
+    args: { path: "fails.txt", content: "${fails}" }
+    transitions: { onSuccess: checks }
+  - id: checks
+    kind: deterministic
+    tool: project.checks
+    outputs: [checks]
+    transitions: { onSuccess: DONE, onOutcome: { defects_found: { to: DONE } } }
+`,
+    );
+    sh(sb.project, ["add", "-A"]);
+    sh(sb.project, ["commit", "-q", "-m", "gradle"]);
+    const r = await jarvis(["work", task, "--workflow", "chk"]);
+    if (!r.err.includes("checks")) throw new Error(r.err + r.out);
+    const loaded = await loadConfig({ cwd: sb.project, homeDir: sb.home, env: {} });
+    const rt = createRuntime(loaded, { env: {} });
+    const runId = rt.runs.list({ includeTerminal: true })[0]?.id as string;
+    const checks = JSON.parse(rt.artifacts.text(rt.artifacts.listLatest(runId, "checks")[0] as never)) as {
+      results: Array<{ check: string; ok: boolean; preexisting?: string[]; tail?: string }>;
+    };
+    rt.close();
+    return checks.results;
+  }
+
+  it("project.checks excuses test classes that fail on the base commit too, and only those", async () => {
+    // the base fails a.OldTest already; the run fails nothing new: no defect
+    expect(await baselineRun("T-6", "a.OldTest\\n")).toEqual([
+      { check: "test", command: "./gradlew test", ok: true, preexisting: ["a.OldTest"] },
+    ]);
+    // no checkout of the base is left behind
+    expect(sh(sb.project, ["worktree", "list"]).trim().split("\n")).toHaveLength(1);
+  });
+
+  it("project.checks fails on a test the run broke, naming the ones broken before it", async () => {
+    const [test] = await baselineRun("T-7", "a.OldTest\\na.NewTest\\n");
+    expect(test).toMatchObject({ check: "test", ok: false, preexisting: ["a.OldTest"] });
+    expect(test?.tail).toContain("a.NewTest > works() FAILED");
+  });
+
   it("project.checks fixes first, lints the changed files and runs a check its files call for (tools.fix, tools.checks)", async () => {
     sb.write(
       "project/.jarvis/project.yaml",
