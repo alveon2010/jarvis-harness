@@ -226,3 +226,67 @@ export function topicFacts(file: string, content: string): GraphNode[] {
   for (const d of docs) visit(d.contents as Node, [], false);
   return nodes;
 }
+
+const REPOSITORY =
+  /\binterface\s+([A-Z]\w*)\s*(?:<[^{]*?>)?\s+extends\s+[^{]*?\b(?:Mongo|Crud|PagingAndSorting|ListCrud|ListPagingAndSorting|Reactive\w*|Jpa)Repository\s*<\s*([A-Z]\w*)/;
+
+/**
+ * What a class binds and stores, read off its annotations: the config it reads
+ * (`@ConfigurationProperties` prefix, `@Value("${…}")` properties), the Mongo collection of a
+ * `@Document`, the entity of a Spring Data repository, and whether it sends messages (a
+ * `KafkaTemplate` / `StreamBridge` `send`) with the topic properties it reads. Where a config key
+ * is read and which class writes a collection are otherwise a search through the whole service.
+ */
+export function springBindings(file: string, content: string): GraphNode[] {
+  if (!/@(ConfigurationProperties|Value|Document)\b|Repository\s*<|\.send\s*\(/.test(content)) return [];
+  const code = blankLiterals(content, true);
+  const lineAt = (index: number) => code.slice(0, index).split("\n").length;
+  const type = TYPE.exec(code)?.[2] ?? file.replace(/^.*\//, "").replace(/\.\w+$/, "");
+  TYPE.lastIndex = 0;
+  const nodes: GraphNode[] = [];
+  const add = (key: string, kind: GraphNode["kind"], at: number, metadata: Record<string, unknown>) => {
+    const id = `${file}#${key}`;
+    if (!nodes.some((n) => n.id === id))
+      nodes.push({ id, kind, file, metadata: { ...metadata, type, line: lineAt(at) } });
+  };
+  for (const m of code.matchAll(/@ConfigurationProperties\b/g)) {
+    const prefix = attr(argsAt(code, (m.index ?? 0) + m[0].length)?.text, ["prefix", "value"], true)[0];
+    if (prefix) add(`config ${prefix}`, "Symbol", m.index ?? 0, { role: "config", prefix });
+  }
+  const read: string[] = [];
+  for (const m of code.matchAll(/@Value\b/g)) {
+    for (const v of attr(argsAt(code, (m.index ?? 0) + m[0].length)?.text, ["value"], true))
+      for (const p of v.matchAll(/\$\{([^}:]+)(?::[^}]*)?\}/g)) {
+        const property = p[1] as string;
+        read.push(property);
+        add(`value ${property}`, "Symbol", m.index ?? 0, { role: "config", property });
+      }
+  }
+  for (const m of code.matchAll(/@Document\b/g)) {
+    const named = attr(argsAt(code, (m.index ?? 0) + m[0].length)?.text, ["collection", "value"], true)[0];
+    // Spring's default: the class name, first letter lower
+    const collection = named ?? `${type.slice(0, 1).toLowerCase()}${type.slice(1)}`;
+    add(`collection ${collection}`, "DataModel", m.index ?? 0, { role: "collection", collection });
+  }
+  const repo = REPOSITORY.exec(code);
+  if (repo)
+    add("repository", "DataModel", repo.index, { role: "repository", repository: repo[1], entity: repo[2] });
+  const send =
+    /\b(KafkaTemplate|StreamBridge)\b[\s\S]*?\.send\s*\(|\.send\s*\([\s\S]*\b(KafkaTemplate|StreamBridge)\b/.test(
+      code,
+    )
+      ? /\.send\s*\(/.exec(code)
+      : null;
+  // the topic a sender writes is often a config key in a string (`topics.get("orders-paid")`): its
+  // strings that look like keys, for the tree to match against the topics' properties
+  const keys = [...new Set([...code.matchAll(/"([a-z][\w.-]{2,80})"/g)].map((k) => k[1] as string))]
+    .sort()
+    .slice(0, 60);
+  if (send)
+    add("sends", "Event", send.index, {
+      role: "sends",
+      ...(read.length > 0 ? { properties: [...new Set(read)].sort() } : {}),
+      ...(keys.length > 0 ? { keys } : {}),
+    });
+  return nodes;
+}

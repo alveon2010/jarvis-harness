@@ -266,12 +266,14 @@ export function renderModuleDoc(map: VerifiedModuleMap, facts?: ModuleFacts): st
  * listeners. Scoped by `paths` to the files that declare them: in the context of work on those.
  */
 export function renderContracts(c: CodeContracts): string | undefined {
-  if (c.endpoints.length === 0 && c.topics.length === 0) return undefined;
+  if (c.endpoints.length === 0 && c.topics.length === 0 && (c.config ?? []).length === 0) return undefined;
   const files = [
     ...new Set([
       ...c.endpoints.map((e) => e.file),
       ...c.listeners.map((l) => l.file),
       ...c.topics.map((t) => t.file),
+      ...(c.senders ?? []).map((x) => x.file),
+      ...(c.config ?? []).map((x) => x.file),
     ]),
   ];
   const dirs = [...new Set(files.map((f) => f.slice(0, f.lastIndexOf("/"))))].sort();
@@ -321,8 +323,8 @@ export function renderContracts(c: CodeContracts): string | undefined {
       "",
       `## Message topics (${c.topics.length})`,
       "",
-      "| property | topic | config | listened to by |",
-      "|---|---|---|---|",
+      "| property | topic | config | listened to by | sent by |",
+      "|---|---|---|---|---|",
     );
     for (const t of [...c.topics].sort(
       (a, b) => a.property.localeCompare(b.property) || a.file.localeCompare(b.file),
@@ -330,10 +332,39 @@ export function renderContracts(c: CodeContracts): string | undefined {
       const by = c.listeners
         .filter((l) => l.property === t.property || l.topic === t.topic)
         .map((l) => code(l.handler ?? basename(l.file)));
+      const senders = (c.senders ?? []).filter((x) => x.topics.includes(t)).map((x) => code(x.type));
       lines.push(
-        `| ${code(t.property)} | ${code(t.topic)} | ${basename(t.file)}${t.line ? `:${t.line}` : ""} | ${by.join(", ") || "—"} |`,
+        `| ${code(t.property)} | ${code(t.topic)} | ${basename(t.file)}${t.line ? `:${t.line}` : ""} | ${by.join(", ") || "—"} | ${senders.join(", ") || "—"} |`,
       );
     }
+  }
+  const unmatched = (c.senders ?? []).filter((x) => x.topics.length === 0);
+  if (unmatched.length > 0)
+    lines.push(
+      "",
+      `Senders whose topic is not read off the code: ${unmatched.map((x) => `${code(x.type)} (${basename(x.file)})`).join(", ")}.`,
+    );
+  if ((c.config ?? []).length > 0) {
+    lines.push(
+      "",
+      `## Config read by the code (${(c.config ?? []).length})`,
+      "",
+      "| key | read by | how |",
+      "|---|---|---|",
+    );
+    for (const b of c.config ?? [])
+      lines.push(
+        `| ${code(b.prefix ? `${b.key}.*` : b.key)} | ${code(b.type)} (${basename(b.file)}${b.line ? `:${b.line}` : ""}) | ${b.prefix ? "@ConfigurationProperties" : "@Value"} |`,
+      );
+  }
+  if ((c.data ?? []).length > 0) {
+    lines.push("", "## Stored data", "");
+    for (const d of c.data ?? [])
+      lines.push(
+        d.kind === "collection"
+          ? `- collection ${code(d.name)} — documents ${code(d.of)} (${basename(d.file)})`
+          : `- repository ${code(d.name)} of ${code(d.of)} (${basename(d.file)})`,
+      );
   }
   return `${lines.join("\n")}\n`;
 }

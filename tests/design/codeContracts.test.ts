@@ -119,3 +119,30 @@ describe("contracts of the code", () => {
     ).toBeUndefined();
   });
 });
+
+describe("config keys a task names", () => {
+  it("are settled in the sources with the class that reads them", () => {
+    const check = checkContracts(
+      "/nonexistent",
+      [],
+      [{ from: "the task", text: "Set orders.inaction.idle-delay to 2h" }],
+      {
+        endpoints: [],
+        topics: [],
+        listeners: [],
+        config: [
+          {
+            key: "orders.inaction",
+            prefix: true,
+            type: "InactionProperties",
+            file: `${W}/../config/InactionProperties.java`,
+            line: 9,
+          },
+        ],
+      },
+    );
+    expect(contractsSection(check as never)).toContain(
+      "- `orders.inaction.idle-delay` (the task) — read by `InactionProperties` (InactionProperties.java:9, prefix orders.inaction)",
+    );
+  });
+});

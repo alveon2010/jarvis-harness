@@ -8,7 +8,7 @@ import type {
 import { type JavaFile, parseJava } from "./ast.ts";
 import { JAVA_RESOLVER_VERSION, JavaResolver } from "./resolver.ts";
 import { parseJvmSource } from "./source.ts";
-import { SPRING_CONFIG, springFacts, topicFacts } from "./spring.ts";
+import { SPRING_CONFIG, springBindings, springFacts, topicFacts } from "./spring.ts";
 
 /**
  * Java / Groovy / Kotlin facts (ADR-0008 §1, ADR-0021 §6): a pure function of one file's content,
@@ -26,7 +26,7 @@ import { SPRING_CONFIG, springFacts, topicFacts } from "./spring.ts";
  * `spec:url:` — the resolver links the test to the controller that serves the path: a MockMvc test
  * names no controller class, only its URL.
  */
-export const JAVA_EXTRACTOR_VERSION = 5;
+export const JAVA_EXTRACTOR_VERSION = 6;
 
 /** Path literals of a test: `"/api/orders/$id"`, `'/slots/${zone}'` → `/api/orders/{p}`, once each. */
 export function urlsIn(content: string): string[] {
@@ -116,6 +116,7 @@ export class JavaExtractor implements ProjectGraphExtractor {
             }),
           )),
       ...spring.nodes,
+      ...(isTestSource(file) ? [] : springBindings(file, content)),
     ];
     const specs = new Set<string>();
     for (const i of src.imports) {

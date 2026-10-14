@@ -1,6 +1,12 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { type CodeContracts, type TopicHit, topicsNamedIn } from "./codeContracts.ts";
+import {
+  type CodeContracts,
+  type ConfigHit,
+  configNamedIn,
+  type TopicHit,
+  topicsNamedIn,
+} from "./codeContracts.ts";
 
 /**
  * API methods the task's sources name (`GET /delivery-slots`), checked by code against the project's
@@ -158,6 +164,8 @@ export interface ContractCheck {
   readonly codeEndpoints?: number;
   /** Topics the sources name, found in the code's config. */
   readonly topics?: readonly TopicHit[];
+  /** Config keys the sources name, with the classes that read them. */
+  readonly config?: readonly ConfigHit[];
 }
 
 /**
@@ -171,12 +179,19 @@ export function checkContracts(
   code?: CodeContracts,
 ): ContractCheck | undefined {
   const fromCode = code ?? { endpoints: [], topics: [], listeners: [] };
-  if (maps.length === 0 && fromCode.endpoints.length === 0 && fromCode.topics.length === 0) return undefined;
+  if (
+    maps.length === 0 &&
+    fromCode.endpoints.length === 0 &&
+    fromCode.topics.length === 0 &&
+    (fromCode.config ?? []).length === 0
+  )
+    return undefined;
   const all = mentionsIn(sources);
   // a method checks only against something: the code's endpoints or a map
   const mentions = maps.length > 0 || fromCode.endpoints.length > 0 ? all : [];
   const topics = topicsNamedIn(sources, fromCode);
-  if (mentions.length === 0 && topics.length === 0) return undefined;
+  const config = configNamedIn(sources, fromCode);
+  if (mentions.length === 0 && topics.length === 0 && config.length === 0) return undefined;
   const files: string[] = [];
   const unreadable: string[] = [];
   const entries: ContractEntry[] = [];
@@ -201,6 +216,7 @@ export function checkContracts(
     unreadable,
     ...(fromCode.endpoints.length > 0 ? { codeEndpoints: fromCode.endpoints.length } : {}),
     ...(topics.length > 0 ? { topics } : {}),
+    ...(config.length > 0 ? { config } : {}),
   };
 }
 
@@ -274,7 +290,9 @@ export function contractsSection(check: ContractCheck): string {
       (l) =>
         `${l.handler ? `\`${l.handler}\`` : "a listener"} (${basename(l.file)}${l.line ? `:${l.line}` : ""})`,
     );
-    return `- \`${h.name}\` (${h.from})${config.length > 0 ? ` — ${config.join("; ")}` : ""}${listeners.length > 0 ? `; listened to by ${listeners.join(", ")}` : "; no listener in this code"}`;
+    const senders =
+      h.senders && h.senders.length > 0 ? `; sent by ${h.senders.map((x) => `\`${x}\``).join(", ")}` : "";
+    return `- \`${h.name}\` (${h.from})${config.length > 0 ? ` — ${config.join("; ")}` : ""}${listeners.length > 0 ? `; listened to by ${listeners.join(", ")}` : "; no listener in this code"}${senders}`;
   });
   const topicPart =
     topics.length > 0
@@ -287,5 +305,20 @@ export function contractsSection(check: ContractCheck): string {
           ...topics,
         ]
       : [];
-  return [...methods, ...topicPart].join("\n");
+  const configLines = (check.config ?? []).map(
+    (h) =>
+      `- \`${h.key}\` (${h.from}) — read by ${h.readers.map((r) => `\`${r.type}\` (${basename(r.file)}${r.line ? `:${r.line}` : ""}, ${r.via})`).join(", ")}`,
+  );
+  const configPart =
+    configLines.length > 0
+      ? [
+          ...(methods.length > 0 || topicPart.length > 0 ? [""] : []),
+          "## Config keys named in the sources, found in the code",
+          "",
+          "Found by Jarvis without a model: the class that reads each key (`@ConfigurationProperties` prefix or `@Value`). Settled — do not search for them again.",
+          "",
+          ...configLines,
+        ]
+      : [];
+  return [...methods, ...topicPart, ...configPart].join("\n");
 }

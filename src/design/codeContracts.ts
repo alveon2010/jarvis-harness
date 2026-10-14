@@ -27,6 +27,28 @@ export interface CodeContracts {
   readonly endpoints: readonly ContractEntry[];
   readonly topics: readonly TopicEntry[];
   readonly listeners: readonly ListenerEntry[];
+  /** Classes that send messages, with the topics of the config they name. */
+  readonly senders?: ReadonlyArray<{
+    readonly type: string;
+    readonly file: string;
+    readonly line?: number;
+    readonly topics: readonly TopicEntry[];
+  }>;
+  /** Config bindings: a prefix (`@ConfigurationProperties`) or a property (`@Value`) and the class reading it. */
+  readonly config?: ReadonlyArray<{
+    readonly key: string;
+    readonly prefix: boolean;
+    readonly type: string;
+    readonly file: string;
+    readonly line?: number;
+  }>;
+  /** Stored data: a collection and its document class, a repository and its entity. */
+  readonly data?: ReadonlyArray<{
+    readonly kind: "collection" | "repository";
+    readonly name: string;
+    readonly of: string;
+    readonly file: string;
+  }>;
 }
 
 const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
@@ -114,7 +136,52 @@ export function codeContractsOf(nodes: readonly GraphNode[]): CodeContracts {
         ...(line ? { line } : {}),
       });
   }
-  return { endpoints, topics, listeners };
+  // senders: the topics whose property they read (@Value) or whose property has a key they name
+  const senders: Array<NonNullable<CodeContracts["senders"]>[number]> = [];
+  const config: Array<NonNullable<CodeContracts["config"]>[number]> = [];
+  const data: Array<NonNullable<CodeContracts["data"]>[number]> = [];
+  for (const n of nodes) {
+    const m = n.metadata ?? {};
+    if (!n.file) continue;
+    const type = str(m.type) ?? typeOf(n.file);
+    const line = num(m.line);
+    if (n.kind === "Event" && m.role === "sends") {
+      const props = new Set(list(m.properties));
+      const keys = new Set(list(m.keys));
+      const sent = topics.filter(
+        (t) => props.has(t.property) || t.property.split(".").some((seg) => keys.has(seg)),
+      );
+      senders.push({ type, file: n.file, ...(line ? { line } : {}), topics: sent });
+    } else if (n.kind === "Symbol" && m.role === "config") {
+      const key = str(m.prefix) ?? str(m.property);
+      if (key)
+        config.push({
+          key,
+          prefix: str(m.prefix) !== undefined,
+          type,
+          file: n.file,
+          ...(line ? { line } : {}),
+        });
+    } else if (n.kind === "DataModel" && m.role === "collection" && str(m.collection))
+      data.push({ kind: "collection", name: str(m.collection) as string, of: type, file: n.file });
+    else if (n.kind === "DataModel" && m.role === "repository" && str(m.repository))
+      data.push({
+        kind: "repository",
+        name: str(m.repository) as string,
+        of: str(m.entity) ?? "",
+        file: n.file,
+      });
+  }
+  return {
+    endpoints,
+    topics,
+    listeners,
+    ...(senders.length > 0 ? { senders } : {}),
+    ...(config.length > 0
+      ? { config: config.sort((a, b) => a.key.localeCompare(b.key) || a.file.localeCompare(b.file)) }
+      : {}),
+    ...(data.length > 0 ? { data } : {}),
+  };
 }
 
 export interface TopicHit {
@@ -122,6 +189,50 @@ export interface TopicHit {
   readonly from: string;
   readonly topics: readonly TopicEntry[];
   readonly listeners: readonly ListenerEntry[];
+  /** Classes that send to it. */
+  readonly senders?: readonly string[];
+}
+
+/** Config keys the sources name (`inaction.client-idle-delay`) with the classes that read them. */
+export interface ConfigHit {
+  readonly key: string;
+  readonly from: string;
+  readonly readers: ReadonlyArray<{
+    readonly type: string;
+    readonly file: string;
+    readonly line?: number;
+    readonly via: string;
+  }>;
+}
+
+/** Dotted keys in the sources bound in the code: a `@Value` property, or under a `@ConfigurationProperties` prefix. */
+export function configNamedIn(
+  sources: ReadonlyArray<{ from: string; text: string }>,
+  code: CodeContracts,
+): ConfigHit[] {
+  const bindings = code.config ?? [];
+  if (bindings.length === 0) return [];
+  const hits = new Map<string, ConfigHit>();
+  for (const s of sources)
+    for (const m of s.text.matchAll(/(?<![\w.$-])([a-z][\w-]*(?:\.[\w-]+)+)(?![\w-]|\.[\w])/g)) {
+      const key = m[1] as string;
+      if (
+        hits.has(key) ||
+        /\.(java|groovy|kt|ya?ml|json|md|html?|ts|js)$/.test(key) ||
+        /^(www|https?)\./.test(key)
+      )
+        continue;
+      const readers = bindings
+        .filter((b) => (b.prefix ? key === b.key || key.startsWith(`${b.key}.`) : key === b.key))
+        .map((b) => ({
+          type: b.type,
+          file: b.file,
+          ...(b.line ? { line: b.line } : {}),
+          via: b.prefix ? `prefix ${b.key}` : "@Value",
+        }));
+      if (readers.length > 0) hits.set(key, { key, from: s.from, readers });
+    }
+  return [...hits.values()].sort((a, b) => a.key.localeCompare(b.key));
 }
 
 const literal = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -149,7 +260,10 @@ export function topicsNamedIn(
         (l.property && (properties.has(l.property) || l.property === name)) ||
         (l.topic && values.has(l.topic)),
     );
-    hits.push({ name, from: source.from, topics, listeners });
+    const senders = (code.senders ?? [])
+      .filter((s) => s.topics.some((t) => topics.includes(t)))
+      .map((s) => s.type);
+    hits.push({ name, from: source.from, topics, listeners, ...(senders.length > 0 ? { senders } : {}) });
   }
   // a topic named in the sources by its name and by its property too: one hit, by the name
   const seen = new Set<string>();

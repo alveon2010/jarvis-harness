@@ -206,7 +206,11 @@ through the client of …» — сервис вызывает его у друг
 абстрактного контроллера считаются под маршрутом каждого наследника. Топики: имя топика или свойство конфига
 (`orders.topics.paid.name`), названные в источниках, находятся в `application*.yml` (значения под ключами `topic`/
 `topics` и `destination` биндингов, по всем профилям файла) вместе со слушателями `@KafkaListener` — раздел «Message
-topics named in the sources». Граф строит шаг `discover`; без снимка сверка идёт только по `contracts`.
+topics named in the sources». Граф строит шаг `discover`; без снимка сверка идёт только по `contracts`. Отправители: класс с `KafkaTemplate`/`StreamBridge` `send`
+связывается с топиками, чьё свойство он читает (`@Value`) или чей сегмент свойства называет строкой
+(`topics.get("orders-paid")`). Ключи конфига, названные в источниках (`orders.inaction.idle-delay`), находятся
+у класса, который их читает (`@ConfigurationProperties` с этим префиксом или `@Value`) — раздел «Config keys named in
+the sources».
 
 Модели шаг не вызывает; все вызовы идут через Tool Router (политика, исключение egress, журнал). Без `figma.get`
 (сервер не настроен или запрещён) шаг пишет только `sources`, и то если что-то прочитал.

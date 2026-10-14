@@ -148,3 +148,67 @@ describe("contracts.md", () => {
     expect(renderContracts({ endpoints: [], topics: [], listeners: [] })).toBeUndefined();
   });
 });
+
+describe("what the code binds and sends", () => {
+  it("config read by classes, senders linked to topics by the keys they name, config keys named in a task", async () => {
+    const { springBindings } = await import("../../src/adapters/java/spring.ts");
+    const { configNamedIn } = await import("../../src/design/codeContracts.ts");
+    const nodes: GraphNode[] = [
+      ...springBindings(
+        `${B}/config/InactionProperties.java`,
+        'package a;\n@ConfigurationProperties(prefix = "orders.inaction")\npublic class InactionProperties { int idleDelay; }\n',
+      ),
+      ...springBindings(
+        `${B}/kafka/PaidProducer.java`,
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: a Spring placeholder in Java source
+        'package a;\npublic class PaidProducer {\n  @Value("${orders.retry.max:3}") int max;\n  private final KafkaTemplate<String, String> kafka;\n  void send(Order o) { kafka.send(props.getTopics().get("orders-paid").getName(), o.json()); }\n}\n',
+      ),
+      {
+        id: "src/main/resources/application.yml#topic t",
+        kind: "Event",
+        file: "src/main/resources/application.yml",
+        metadata: { role: "topic", property: "kafka.topics.orders-paid.name", topic: "orders.paid" },
+      },
+      {
+        id: "src/main/resources/application.yml#topic u",
+        kind: "Event",
+        file: "src/main/resources/application.yml",
+        metadata: { role: "topic", property: "kafka.topics.slots.name", topic: "slots" },
+      },
+    ];
+    const c = codeContractsOf(nodes);
+    expect(c.config?.map((b) => [b.key, b.prefix, b.type])).toEqual([
+      ["orders.inaction", true, "InactionProperties"],
+      ["orders.retry.max", false, "PaidProducer"],
+    ]);
+    expect(c.senders?.map((s) => [s.type, s.topics.map((t) => t.topic)])).toEqual([
+      ["PaidProducer", ["orders.paid"]],
+    ]);
+    expect(
+      configNamedIn(
+        [{ from: "issue ABC-42", text: "Raise orders.inaction.idle-delay to 2h; see docs.md" }],
+        c,
+      ),
+    ).toEqual([
+      {
+        key: "orders.inaction.idle-delay",
+        from: "issue ABC-42",
+        readers: [
+          {
+            type: "InactionProperties",
+            file: `${B}/config/InactionProperties.java`,
+            line: 2,
+            via: "prefix orders.inaction",
+          },
+        ],
+      },
+    ]);
+    const doc = renderContracts(c) ?? "";
+    expect(doc).toContain(
+      "| `kafka.topics.orders-paid.name` | `orders.paid` | application.yml | — | `PaidProducer` |",
+    );
+    expect(doc).toContain(
+      "| `orders.inaction.*` | `InactionProperties` (InactionProperties.java:2) | @ConfigurationProperties |",
+    );
+  });
+});
