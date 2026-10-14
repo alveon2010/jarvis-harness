@@ -457,7 +457,7 @@ describe("an egress exception (ADR-0016 §6)", () => {
     );
   });
 
-  it("only the project file declares one, for a server it has", async () => {
+  it("only the project file declares one; for a server this machine has not, it waits", async () => {
     sb.write("home/.jarvis/config.yaml", `version: 1\nactor: { id: me@corp }\n${EXCEPTION}`);
     sb.write("project/.jarvis/project.yaml", "version: 1\n");
     await expect(testRuntime(sb, ENV)).rejects.toThrow("invalid configuration");
@@ -466,9 +466,11 @@ describe("an egress exception (ADR-0016 §6)", () => {
       "project/.jarvis/project.yaml",
       `version: 1\n${EXCEPTION.replace("server: jira", "server: nope")}`,
     );
-    await expect(testRuntime(sb, ENV)).rejects.toMatchObject({
-      issues: [expect.objectContaining({ message: 'no MCP server "nope" in mcp.servers' })],
-    });
+    const rt = await testRuntime(sb, ENV);
+    expect(rt.loaded.warnings).toContain(
+      'egressExceptions[0].server: no MCP server "nope" in mcp.servers — the exception applies once it is added',
+    );
+    await rt.close();
   });
 });
 

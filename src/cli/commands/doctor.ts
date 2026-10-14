@@ -134,6 +134,18 @@ export async function runDoctor(ctx: CliContext): Promise<DoctorReport> {
       );
     }
 
+    // what the project expects of this machine and it does not have: no failure, a note
+    for (const warning of loaded.warnings.filter((w) => w.startsWith("egressExceptions")))
+      checks.push(
+        check(
+          "config.egress",
+          "warn",
+          "egress exception",
+          warning,
+          "add the server to ~/.jarvis/config.yaml mcp.servers if the project needs it",
+        ),
+      );
+
     const models = Object.keys(loaded.config.models).length;
     const pools = Object.keys(loaded.config.quotaPools).length;
     const roles = Object.keys(loaded.config.roles).length;

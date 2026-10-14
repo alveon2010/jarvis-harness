@@ -83,7 +83,11 @@ function checkVersion(value: unknown, source: string): ConfigIssue[] {
   return [];
 }
 
-function crossChecks(config: ResolvedConfig, sources: Record<string, string>): ConfigIssue[] {
+function crossChecks(
+  config: ResolvedConfig,
+  sources: Record<string, string>,
+  warnings: string[],
+): ConfigIssue[] {
   const issues: ConfigIssue[] = [];
   const withSource = (path: string, message: string): ConfigIssue => {
     const source = sourceFor(path, sources);
@@ -99,9 +103,13 @@ function crossChecks(config: ResolvedConfig, sources: Record<string, string>): C
         source,
       });
   }
+  // the project's exception for a server this developer has not connected (yet): it waits for it — the
+  // project file travels with the repository, the servers live in each one's ~/.jarvis/config.yaml
   config.egressExceptions.forEach((e, i) => {
     if (!config.mcp.servers[e.server])
-      issues.push(withSource(`egressExceptions[${i}].server`, `no MCP server "${e.server}" in mcp.servers`));
+      warnings.push(
+        `egressExceptions[${i}].server: no MCP server "${e.server}" in mcp.servers — the exception applies once it is added`,
+      );
   });
 
   for (const [role, def] of Object.entries(config.roles)) {
@@ -216,7 +224,7 @@ export async function loadConfig(options: LoadOptions = {}): Promise<LoadedConfi
     for (const path of applied.changed) sources[path] = `profile:${profileName}`;
   }
 
-  const cross = crossChecks(config, sources);
+  const cross = crossChecks(config, sources, warnings);
   if (cross.length > 0) throw new ConfigError("invalid configuration", cross);
 
   if (!project)
