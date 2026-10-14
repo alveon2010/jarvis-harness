@@ -49,11 +49,22 @@ function check(id: string, status: CheckStatus, subject: string, detail: string,
   return hint ? { id, status, subject, detail, hint } : { id, status, subject, detail };
 }
 
-function commandExists(command: string, env: NodeJS.ProcessEnv, cwd: string): boolean {
-  const executable = command.trim().split(/\s+/)[0];
+/**
+ * The program a command line runs, found: after `cd <dir> &&` (from that directory) and variables set
+ * for it (`TZ=Europe/Paris ./gradlew test`). Pilot: the variable was reported as a missing executable.
+ */
+export function commandExists(command: string, env: NodeJS.ProcessEnv, cwd: string): boolean {
+  let words = command.trim().split(/\s+/);
+  let dir = cwd;
+  if (words[0] === "cd" && words[1] && words[2] === "&&") {
+    dir = isAbsolute(words[1]) ? words[1] : join(cwd, words[1]);
+    words = words.slice(3);
+  }
+  while (words[0] && /^[A-Za-z_]\w*=/.test(words[0])) words = words.slice(1);
+  const executable = words[0];
   if (!executable) return false;
   if (executable.includes("/")) {
-    return existsSync(isAbsolute(executable) ? executable : join(cwd, executable));
+    return existsSync(isAbsolute(executable) ? executable : join(dir, executable));
   }
   for (const dir of (env.PATH ?? "").split(delimiter)) {
     if (!dir) continue;
