@@ -48,7 +48,13 @@ PERSISTS | EMITS | TESTED_BY`) — чистую функцию от содерж
 Регистрация — `capabilities.register(new MyAdapter())` в `src/app/runtime.ts` (образцы —
 `src/adapters/typescript/` и `src/adapters/java/`).
 
-JVM (`src/adapters/java/`): Gradle или Maven, файлы `.java`, `.groovy` (Spock), `.kt`, без компилятора. Файл зависит
+JVM (`src/adapters/java/`): Gradle или Maven, файлы `.java`, `.groovy` (Spock), `.kt`, без компилятора и без JVM.
+Java разбирается tree-sitter (`web-tree-sitter` + `tree-sitter-java`, WASM: без нативной сборки и сети): типы и методы —
+узлы (`file#Outer.Inner`, `file#Type.method/arity`), `EXTENDS`/`IMPLEMENTS` — их супертипы, `CALLS` — вызовы, чей
+получатель файл типизирует сам (поле, параметр, локальная переменная, `this`, имя класса, `new X()`). Резолвер получает
+узлы всего дерева и находит метод в классе и его супертипах (по арности, иначе по имени); метода нет в дереве
+(унаследован от библиотеки, сгенерирован Lombok) — ребро на класс; вызов в библиотеку — не ребро. Groovy и Kotlin —
+лексически, как ниже. Файл зависит
 от импортов (static — от класса, `a.b.*` — от названных в коде типов этого пакета) и от типов своего пакета, которые
 он называет; класс вне дерева — узел пакета `pkg:org.example.web`. Запускаемый тест — файл тестового source set
 (`src/test/…`, `src/integrationTest/…`), с именем `*Test`, `*Tests`, `*Spec`, `*Specification` или `*IT`, не

@@ -166,7 +166,7 @@ export async function updateGraph(options: UpdateOptions): Promise<UpdateResult>
 
   // the stack's own resolution first (aliases, workspace packages), then the generic one
   const resolvers = new Map(
-    options.extractors.map((x) => [x, x.createResolver?.(options.workspace, known)] as const),
+    options.extractors.map((x) => [x, x.createResolver?.(options.workspace, known, nodes)] as const),
   );
   const resolverOf = (file: string) => {
     const x = options.extractors.find((ex) => ex.extensions.some((ext) => file.endsWith(ext)));

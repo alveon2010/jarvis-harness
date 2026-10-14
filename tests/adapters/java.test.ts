@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { JavaAdapter } from "../../src/adapters/java/adapter.ts";
+import { parseJava } from "../../src/adapters/java/ast.ts";
 import { JavaExtractor } from "../../src/adapters/java/extractor.ts";
 import { JavaResolver } from "../../src/adapters/java/resolver.ts";
 import { blankLiterals, parseJvmSource } from "../../src/adapters/java/source.ts";
@@ -274,7 +275,7 @@ describe("Spring contracts in the graph", () => {
       ].join("\n"),
     );
     const meta = ctl.nodes
-      .filter((n) => n.kind !== "Module" && n.kind !== "Type")
+      .filter((n) => n.kind === "Endpoint" || n.kind === "Event")
       .map((n) => [n.id.split("#")[1], n.metadata]);
     expect(meta).toEqual([
       [
@@ -374,5 +375,108 @@ describe("Spring contracts in the graph", () => {
       ["spring.cloud.stream.bindings.slots-out-0.destination", "slots.changed", 11],
     ]);
     expect(await x.extract(".github/workflows/ci.yml", "topics: [a]\n")).toEqual({ nodes: [], edges: [] });
+  });
+});
+
+describe("Java syntax (tree-sitter)", () => {
+  const SRC = [
+    "package com.example.orders;",
+    "import com.example.slots.SlotRepository;",
+    "import static com.example.util.Money.format;",
+    "import com.example.common.*;",
+    "@Service @RequiredArgsConstructor",
+    "public class OrderServiceImpl extends BaseService implements OrderService {",
+    "  private final OrderRepository repo;",
+    "  private final SlotRepository slots;",
+    "  @Override public OrderDto find(String id) {",
+    "    var order = new Order(id);",
+    "    Slot slot = slots.next(order);",
+    "    audit(order);",
+    "    this.repo.save(order);",
+    "    Mapper.toDto(order);",
+    "    repo.findById(id).orElseThrow();",
+    "    STATUS.equals(id);",
+    "    return list.stream().map(Mapper::toDto);",
+    "  }",
+    "  static class Cache { void put(Order o) { o.getId(); } }",
+    "}",
+  ].join("\n");
+
+  it("reads types, members and the calls whose receiver the file types", async () => {
+    const f = await parseJava(SRC);
+    expect(f).toMatchObject({
+      pkg: "com.example.orders",
+      imports: ["com.example.slots.SlotRepository"],
+      wildcards: ["com.example.common"],
+      staticImports: ["com.example.util.Money.format"],
+      errors: false,
+    });
+    expect(f.types.map((t) => [t.path, t.extends, t.implements, t.annotations])).toEqual([
+      ["OrderServiceImpl", ["BaseService"], ["OrderService"], ["Service", "RequiredArgsConstructor"]],
+      ["OrderServiceImpl.Cache", [], [], []],
+    ]);
+    const find = f.types[0]?.methods[0];
+    expect(find?.key).toBe("find/1");
+    expect(find?.calls.map((c) => `${c.type}#${c.method}/${c.arity}`)).toEqual([
+      "Mapper#toDto/-1",
+      "Mapper#toDto/1",
+      "Order#<init>/1",
+      "OrderRepository#findById/1",
+      "OrderRepository#save/1",
+      "OrderServiceImpl#audit/1",
+      "SlotRepository#next/1",
+    ]);
+    expect(f.types[1]?.methods[0]?.calls).toEqual([{ type: "Order", method: "getId", arity: 0 }]);
+  });
+
+  it("resolves calls to methods of the tree, through supertypes, and drops library calls", async () => {
+    const x = new JavaExtractor();
+    const files = {
+      [`${MAIN}/OrderServiceImpl.java`]: SRC,
+      [`${MAIN}/OrderService.java`]:
+        "package com.example.orders;\npublic interface OrderService extends Auditable { OrderDto find(String id); }\n",
+      [`${MAIN}/Auditable.java`]:
+        "package com.example.orders;\ninterface Auditable { default void audit(Order o) {} }\n",
+      [`${MAIN}/BaseService.java`]: "package com.example.orders;\nabstract class BaseService {}\n",
+      [`${MAIN}/OrderRepository.java`]:
+        "package com.example.orders;\nimport org.springframework.data.repository.CrudRepository;\ninterface OrderRepository extends CrudRepository<Order, String> { }\n",
+      [`${MAIN}/Order.java`]:
+        "package com.example.orders;\nimport lombok.Data;\n@Data public class Order { private String id; public Order(String id) { this.id = id; } }\n",
+      "src/main/java/com/example/slots/SlotRepository.java":
+        "package com.example.slots;\npublic class SlotRepository { public Slot next(Object o) { return null; } }\n",
+    };
+    const nodes = [];
+    const raw = [];
+    for (const [f, c] of Object.entries(files)) {
+      const facts = await x.extract(f, c);
+      nodes.push(...facts.nodes);
+      raw.push(...facts.edges);
+    }
+    const r = x.createResolver("", new Set(Object.keys(files)), nodes);
+    const resolved = raw
+      .filter((e) => e.from.startsWith(`${MAIN}/OrderServiceImpl.java#`) && e.relation !== "DEPENDS_ON")
+      .map((e) => [e.relation, e.to.slice(5), r.resolve(e.from, e.to.slice(5))]);
+    expect(resolved).toEqual([
+      // a getter Lombok generates: the class
+      ["CALLS", "call:Order#getId/0", `${MAIN}/Order.java#Order`],
+      ["CALLS", "call:Mapper#toDto/-1", null],
+      ["CALLS", "call:Mapper#toDto/1", null],
+      ["CALLS", "call:Order#<init>/1", `${MAIN}/Order.java#Order.<init>/1`],
+      // inherited from the library: the class itself
+      ["CALLS", "call:OrderRepository#findById/1", `${MAIN}/OrderRepository.java#OrderRepository`],
+      ["CALLS", "call:OrderRepository#save/1", `${MAIN}/OrderRepository.java#OrderRepository`],
+      // a default method of an interface of an interface
+      ["CALLS", "call:OrderServiceImpl#audit/1", `${MAIN}/Auditable.java#Auditable.audit/1`],
+      [
+        "CALLS",
+        "call:SlotRepository#next/1",
+        "src/main/java/com/example/slots/SlotRepository.java#SlotRepository.next/1",
+      ],
+      ["EXTENDS", "type:BaseService", `${MAIN}/BaseService.java#BaseService`],
+      ["IMPLEMENTS", "type:OrderService", `${MAIN}/OrderService.java#OrderService`],
+    ]);
+    expect(r.resolve(`${MAIN}/OrderRepository.java#OrderRepository`, "type:CrudRepository")).toBe(
+      "pkg:org.springframework.data.repository.CrudRepository",
+    );
   });
 });

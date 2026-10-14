@@ -52,6 +52,7 @@ export interface Dependency {
     | "CALLS"
     | "REFERENCES"
     | "IMPLEMENTS"
+    | "EXTENDS"
     | "EXPOSES"
     | "PERSISTS"
     | "EMITS"
@@ -128,9 +129,16 @@ export interface ProjectGraphExtractor {
   readonly version: number;
   readonly extensions: readonly string[];
   extract(file: string, content: string): Promise<FileFacts>;
-  /** Tree-level resolution the per-file facts cannot do (aliases, workspace packages); part of the snapshot key. */
+  /**
+   * Tree-level resolution the per-file facts cannot do (aliases, workspace packages, the members of a
+   * class another file declares); part of the snapshot key. `nodes`: every node of the tree's facts.
+   */
   readonly resolverVersion?: number;
-  createResolver?(workspace: string, files: ReadonlySet<string>): SpecifierResolver;
+  createResolver?(
+    workspace: string,
+    files: ReadonlySet<string>,
+    nodes?: readonly GraphNode[],
+  ): SpecifierResolver;
 }
 
 export interface DetectionResult {
