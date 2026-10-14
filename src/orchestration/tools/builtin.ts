@@ -9,6 +9,7 @@ import { verifyModuleStep } from "../../onboarding/moduleRun.ts";
 import { filesFor, packageDirOf, rulesFor } from "../../tools/local/fix.ts";
 import type { DeterministicTool } from "../executors.ts";
 import { rebuildsFor } from "./rebuild.ts";
+import { classSelection, coveringTests, testRunnerOf } from "./relatedTests.ts";
 
 /**
  * Deterministic tools that need nothing but the stores. Repository, git, test and typecheck
@@ -19,7 +20,7 @@ export const QUICK_IMPACT = { maxFiles: 2, maxDependents: 15 } as const;
 /** The spec talks about telemetry or documentation: the agent decides what of it is affected. */
 const BEYOND_CODE =
   /\b(telemetry|metrics?|analytics|tracking|logging|events?|docs|documentation|readme|changelog)\b|метрик|аналитик|событи|документац/i;
-const CODE_FILE = /\.(tsx?|jsx?|mjs|cjs|vue|svelte|py|go|rs|java|kt|cs|rb|php|swift)$/;
+const CODE_FILE = /\.(tsx?|jsx?|mjs|cjs|vue|svelte|py|go|rs|java|kt|kts|groovy|scala|cs|rb|php|swift)$/;
 const TEST_FILE = /(\.|_)(test|spec)\.[a-z]+$|(^|\/)(__tests__|tests?)\//;
 
 /** Repository files named in a text: `src/a.ts`, `src/a.ts:89`, `apps/web/src/x.tsx:12-20`. */
@@ -207,7 +208,8 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
   /**
    * The project's own checks on what the run changed, without a model (stage of `verify`): every
    * `tools.local` command named `test*` or `typecheck*` whose package (`cd <dir> && …`) holds a
-   * changed file; jest runs only the tests related to the changed files (`--findRelatedTests`).
+   * changed file; jest runs only the tests related to the changed files (`--findRelatedTests`), a
+   * Gradle or Maven test task only the test classes the project graph says cover them.
    * A failing check → outcome `defects_found` with the command and the tail of its output, so the
    * implementation goes back with the evidence. Pilot: tests were "verified" by an agent, with no
    * plain run of jest or tsc.
@@ -366,11 +368,25 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
       });
       if (r.ok) rebuilt.push(name);
     }
+    // the tests that cover the change (project graph), asked once and only by a runner that takes classes
+    let coveringOnce: Promise<string[] | undefined> | undefined;
+    const covering = () => {
+      coveringOnce ??= coveringTests({
+        workspace,
+        store: ctx.runtime.graph,
+        extractors: (ctx.runtime.capabilities ?? new CapabilityRegistry())
+          .list()
+          .map((adapter) => adapter.graphExtractor?.())
+          .filter((e) => e !== undefined),
+        changed: changed.filter((f) => CODE_FILE.test(f)),
+      }).catch(() => undefined);
+      return coveringOnce;
+    };
     for (const [name, command] of Object.entries(tools.local)) {
       if (!/^(test|typecheck|lint)/.test(name)) continue;
       const dir = packageDirOf(command);
       const inScope = dir ? changed.filter((f) => f === dir || f.startsWith(`${dir}/`)) : changed;
-      const code = inScope.filter((f) => /\.(tsx?|jsx?|mjs|cjs)$/.test(f));
+      const code = inScope.filter((f) => CODE_FILE.test(f));
       // a package that reads what was rebuilt: its types may break with no file of its own changed
       if (code.length === 0 && name.startsWith("typecheck") && rebuilt.length > 0) {
         const r = await ctx.tools.invoke(`project.${name}`, {});
@@ -387,15 +403,30 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
         continue;
       }
       const present = code.filter((f) => existsSync(join(workspace, f)));
+      const runner = name.startsWith("test") ? testRunnerOf(command) : undefined;
+      // a class-taking runner: the test classes that cover the change, from the project graph
+      const selection =
+        runner === "gradle" || runner === "maven"
+          ? classSelection(
+              runner,
+              (await covering())?.filter((t) => !dir || t.startsWith(`${dir}/`)),
+            )
+          : undefined;
+      if (selection && "skip" in selection) {
+        results.push({ check: name, command, ok: true, skipped: selection.skip });
+        continue;
+      }
       const related =
-        name.startsWith("test") && /\bjest\b/.test(command)
-          ? // no test relates to the changed files: not a failure (pilot: jest exited 1 on «0 matches»)
-            ` --passWithNoTests --findRelatedTests ${filesFor(command, code)}`
-          : // the linter on the changed files only: errors elsewhere in the repo are not this run's
-            // (pilot: `yarn lint` failed on a package the run never touched, and agents could not tell)
-            name.startsWith("lint") && present.length > 0
-            ? ` ${filesFor(command, present)}`
-            : "";
+        selection && "args" in selection
+          ? ` ${selection.args}`
+          : runner === "jest"
+            ? // no test relates to the changed files: not a failure (pilot: jest exited 1 on «0 matches»)
+              ` --passWithNoTests --findRelatedTests ${filesFor(command, code)}`
+            : // the linter on the changed files only: errors elsewhere in the repo are not this run's
+              // (pilot: `yarn lint` failed on a package the run never touched, and agents could not tell)
+              name.startsWith("lint") && present.length > 0
+              ? ` ${filesFor(command, present)}`
+              : "";
       if (name.startsWith("lint") && present.length === 0) {
         results.push({
           check: name,

@@ -8,6 +8,7 @@ import { JavaResolver } from "../../src/adapters/java/resolver.ts";
 import { blankLiterals, parseJvmSource } from "../../src/adapters/java/source.ts";
 import type { Runtime } from "../../src/app/runtime.ts";
 import { impactOf, repoIdOf, updateGraph } from "../../src/knowledge/graph/update.ts";
+import { classSelection, testClassOf, testRunnerOf } from "../../src/orchestration/tools/relatedTests.ts";
 import { testRuntime } from "../helpers/engine.ts";
 import { type Sandbox, sandbox } from "../helpers/tmp.ts";
 
@@ -222,5 +223,28 @@ describe("JVM graph of a project", () => {
       `${TEST}/FindOrderSpecification.groovy`,
       "src/test/java/com/example/orders/web/OrderControllerTest.java",
     ]);
+  });
+});
+
+describe("related tests of a class-taking runner", () => {
+  it("knows the runner by its command, and a test file by its class", () => {
+    expect(testRunnerOf("./gradlew test")).toBe("gradle");
+    expect(testRunnerOf("cd svc && ./gradlew :svc:test")).toBe("gradle");
+    expect(testRunnerOf("./gradlew test jacocoTestReport")).toBeUndefined();
+    expect(testRunnerOf("mvn -q test")).toBe("maven");
+    expect(testRunnerOf("yarn jest")).toBe("jest");
+    expect(testClassOf("svc/src/test/groovy/a/b/OrderSpecification.groovy")).toBe("a.b.OrderSpecification");
+    expect(testClassOf("src/orders/order.test.ts")).toBeUndefined();
+  });
+
+  it("selects the classes, skips when none covers the change and runs all without a graph", () => {
+    expect(classSelection("gradle", ["src/test/java/a/BTest.java", "src/test/java/a/ATest.java"])).toEqual({
+      args: "--tests a.ATest --tests a.BTest",
+    });
+    expect(classSelection("maven", ["src/test/java/a/ATest.java"])).toEqual({
+      args: "-Dtest=a.ATest -Dsurefire.failIfNoSpecifiedTests=false",
+    });
+    expect(classSelection("gradle", [])).toEqual({ skip: "no test covers the changed code (project graph)" });
+    expect(classSelection("gradle", undefined)).toBeUndefined();
   });
 });

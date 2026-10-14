@@ -248,6 +248,87 @@ steps:
     );
   });
 
+  it("project.checks gives a Gradle test task the test classes the project graph says cover the change", async () => {
+    const main = "src/main/java/com/example/orders";
+    const test = "src/test/groovy/com/example/orders";
+    sb.write(
+      "project/.jarvis/project.yaml",
+      [
+        "version: 1",
+        "workspace: { mode: cwd, allowWrites: true }",
+        "tools:",
+        "  local:",
+        '    test: "echo ./gradlew test"',
+        '    test-slots: "cd slots && echo ./gradlew test"',
+      ].join("\n"),
+    );
+    sb.write("project/build.gradle", "plugins { id 'java' }\n");
+    sb.write(`project/${main}/Order.java`, "package com.example.orders;\npublic class Order {}\n");
+    sb.write(
+      `project/${main}/OrderRepository.java`,
+      "package com.example.orders;\npublic interface OrderRepository { Order find(); }\n",
+    );
+    sb.write(`project/${main}/Unrelated.java`, "package com.example.orders;\npublic class Unrelated {}\n");
+    sb.write(
+      `project/${test}/BaseOrderSpecification.groovy`,
+      "package com.example.orders\nabstract class BaseOrderSpecification { OrderRepository repo }\n",
+    );
+    sb.write(
+      `project/${test}/FindOrderSpecification.groovy`,
+      "package com.example.orders\nclass FindOrderSpecification extends BaseOrderSpecification {}\n",
+    );
+    sb.write(
+      "project/slots/src/test/java/com/example/slots/SlotTest.java",
+      "package com.example.slots;\nclass SlotTest { Order o; }\n",
+    );
+    sb.write(
+      "project/.jarvis/workflows/chk.yaml",
+      `name: chk
+entry: discover
+steps:
+  - id: discover
+    kind: deterministic
+    tool: project.discover
+    transitions: { onSuccess: change }
+  - id: change
+    kind: deterministic
+    tool: repo.write
+    args: { path: "${main}/Order.java", content: "package com.example.orders;\\npublic class Order { int total; }\\n" }
+    transitions: { onSuccess: added }
+  - id: added
+    kind: deterministic
+    tool: repo.write
+    args: { path: "${test}/NewOrderTest.groovy", content: "package com.example.orders\\nclass NewOrderTest {}\\n" }
+    transitions: { onSuccess: checks }
+  - id: checks
+    kind: deterministic
+    tool: project.checks
+    outputs: [checks]
+    transitions: { onSuccess: DONE }
+`,
+    );
+    sh(sb.project, ["add", "-A"]);
+    sh(sb.project, ["commit", "-q", "-m", "jvm"]);
+    const r = await jarvis(["work", "T-5", "--workflow", "chk"]);
+    expect(r.err).toContain("✓ [4/4] checks");
+    const loaded = await loadConfig({ cwd: sb.project, homeDir: sb.home, env: {} });
+    const rt = createRuntime(loaded, { env: {} });
+    const runId = rt.runs.list({ includeTerminal: true })[0]?.id as string;
+    const checks = JSON.parse(rt.artifacts.text(rt.artifacts.listLatest(runId, "checks")[0] as never)) as {
+      results: Array<{ check: string; command: string; ok: boolean; skipped?: string }>;
+    };
+    rt.close();
+    // through the base test class, and the new test of the run itself; not the other module's
+    expect(checks.results.map((x) => [x.check, x.command, x.skipped ?? ""])).toEqual([
+      [
+        "test",
+        "echo ./gradlew test --tests com.example.orders.FindOrderSpecification --tests com.example.orders.NewOrderTest",
+        "",
+      ],
+      ["test-slots", "cd slots && echo ./gradlew test", "no changed code in its scope"],
+    ]);
+  });
+
   it("project.checks fixes first, lints the changed files and runs a check its files call for (tools.fix, tools.checks)", async () => {
     sb.write(
       "project/.jarvis/project.yaml",
