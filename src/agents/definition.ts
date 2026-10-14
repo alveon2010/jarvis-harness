@@ -45,6 +45,8 @@ export interface AgentDefinition<T = unknown> {
   readonly baseChars?: number;
   /** Where the agent may write (globs); without — wherever its capabilities and the path policy allow. */
   readonly writes?: readonly string[];
+  /** `reasoning_effort` of the agent's calls (agents.<id>.reasoningEffort overrides it). */
+  readonly reasoningEffort?: "none" | "low" | "medium" | "high";
 }
 
 export const DEFAULT_LIMITS: AgentLimits = { maxToolCalls: 40, maxModelCalls: 60, checkpointEvery: 5 };

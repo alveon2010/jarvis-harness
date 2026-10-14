@@ -206,6 +206,8 @@ export class AgentRuntimeRunner implements AgentRunner {
       route.model.contextWindow,
       config.context.maxContext ?? route.model.contextWindow,
     );
+    // how long the model thinks on this agent's calls (agents.<id>.reasoningEffort, else the model's)
+    const effort = config.agents[def.id]?.reasoningEffort ?? def.reasoningEffort;
     // an agent of many calls has a task message of its own size: each call sends it again
     const lean = config.agents[def.id]?.baseChars ?? def.baseChars;
     const charBudget = Math.min(Math.floor(window * 0.45 * 3.5), lean ?? Number.POSITIVE_INFINITY);
@@ -472,6 +474,7 @@ export class AgentRuntimeRunner implements AgentRunner {
           messages: [...base, ...transcript],
           ...(allowTools ? { tools: toolDefs } : {}),
           temperature: 0,
+          ...(effort ? { reasoningEffort: effort } : {}),
         });
       } catch (error) {
         // a cap of the run, the quota window, a model that is down: go on from this very call later
@@ -685,7 +688,12 @@ export class AgentRuntimeRunner implements AgentRunner {
           name: def.output.type,
           schema: def.output.schema,
           messages: finalMessages,
-          request: { role: def.role, agentId: def.id, temperature: 0 },
+          request: {
+            role: def.role,
+            agentId: def.id,
+            temperature: 0,
+            ...(effort ? { reasoningEffort: effort } : {}),
+          },
         });
         result = { value: generated.value, repairs: generated.repairs, calls: 1 + generated.repairs };
       }

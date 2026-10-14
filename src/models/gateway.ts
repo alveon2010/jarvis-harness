@@ -11,6 +11,7 @@ import { errorFields, type Logger, NULL_LOGGER } from "../telemetry/log.ts";
 import { type CassetteMode, type CassetteStore, cassetteKey, cassetteRequest } from "./cassette.ts";
 import { ModelError } from "./errors.ts";
 import { type AdapterRegistry, adapterFor, defaultAdapters } from "./providers/index.ts";
+import { effortFor } from "./providers/openaiCompatible.ts";
 import { type AgentRequirements, rejectModel } from "./router.ts";
 import { charsOfMessages, TokenEstimator } from "./tokens.ts";
 import type { Message, ModelRequest, ModelResponse, ProviderResult, StreamProgress } from "./types.ts";
@@ -571,6 +572,11 @@ export class ModelGateway implements ModelCaller {
         ...(response.firstTokenMs !== undefined ? { firstTokenMs: response.firstTokenMs } : {}),
         ...(reuse !== undefined ? { prefixReuse: reuse } : {}),
         ...(estimated !== undefined ? { cachedEstimated: estimated } : {}),
+        ...((e) => (e ? { reasoningEffort: e } : {}))(
+          this.config.models[request.modelId]
+            ? effortFor(request, this.config.models[request.modelId] as ModelConfig)
+            : undefined,
+        ),
       },
     });
   }

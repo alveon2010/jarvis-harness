@@ -57,6 +57,7 @@ models:                        # ADR-0007, ADR-0017 §2
     maxConcurrency: 2
     stream: true               # ответ потоком (SSE); по умолчанию включено, см. ниже
     prefixCache: { ttlSeconds: 120, minTokens: 8192 }   # шлюз кэширует префикс, но не пишет это в usage
+    reasoningEffort: medium    # none | low | medium | high — reasoning_effort каждого вызова (см. ниже)
   embed:
     provider: openai-compatible
     baseUrl: https://llm.corp.local/v1
@@ -397,6 +398,21 @@ agents:
 | implementation | 80 | 100 |
 | onboard-mapper | 60 | 80 |
 | knowledge-answerer | 12 | 20 |
+
+**Сколько модель думает.** `reasoning_effort` (`none | low | medium | high`) — у модели (`models.<id>.reasoningEffort`,
+для всех вызовов) и у агента (`agents.<id>.reasoningEffort`, поверх модели). Агентский уходит только модели с
+`supports.reasoning: true` или своим `reasoningEffort` — другая может отклонить незнакомое поле. В `model.call`
+пишется, с каким значением шёл вызов. Пилот: до 10 тыс. токенов рассуждения перед ответом в одну строку, и они
+входят в `completion_tokens` и в квоту вывода; шлюз пилота параметр пока не пропускает (проверка — тот же
+запрос с `low` и `high`: длина `reasoning_content` должна отличаться стабильно).
+
+```yaml
+agents:
+  requirements:   { reasoningEffort: high }
+  review:         { reasoningEffort: high }
+  implementation: { reasoningEffort: low }
+  test:           { reasoningEffort: low }
+```
 
 **Сколько агент несёт в каждом вызове.** Шлюз пилота не кэширует префикс, поэтому каждый вызов модели
 заново отправляет сообщение задачи и весь разговор. Пилот: implementation отправлял ~240 тыс. символов

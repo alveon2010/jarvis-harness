@@ -104,6 +104,17 @@ function rateLimitFromHeaders(headers: Headers): RateLimitInfo | undefined {
   return Object.keys(info).length > 0 ? (info as RateLimitInfo) : undefined;
 }
 
+/**
+ * The `reasoning_effort` a call carries: the request's (an agent's), else the model's own. A request's
+ * goes only to a model that reasons (`supports.reasoning`) or has an effort of its own — a model that
+ * does not know the field may refuse the call.
+ */
+export function effortFor(request: ModelRequest, model: ModelConfig): string | undefined {
+  if (request.reasoningEffort && (model.supports.reasoning || model.reasoningEffort !== undefined))
+    return request.reasoningEffort;
+  return model.reasoningEffort;
+}
+
 export function buildChatBody(
   request: ModelRequest,
   model: ModelConfig,
@@ -118,6 +129,8 @@ export function buildChatBody(
   if (stream) body.stream_options = { include_usage: true };
   const maxOutput = request.maxOutput ?? model.maxOutput;
   body.max_tokens = Math.min(maxOutput, model.maxOutput);
+  const effort = effortFor(request, model);
+  if (effort) body.reasoning_effort = effort;
   if (request.temperature !== undefined) body.temperature = request.temperature;
   if (request.tools && request.tools.length > 0) {
     body.tools = request.tools.map((t) => ({

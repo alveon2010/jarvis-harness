@@ -47,6 +47,8 @@ export interface ModelRequest {
   readonly agentId?: string;
   /** One attempt only: a health check should say "down" now, not after the retries. */
   readonly noRetry?: boolean;
+  /** How long a reasoning model thinks (an agent's `reasoningEffort`); see `effortFor`. */
+  readonly reasoningEffort?: "none" | "low" | "medium" | "high";
 }
 
 export interface Usage {

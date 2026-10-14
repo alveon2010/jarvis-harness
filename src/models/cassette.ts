@@ -45,6 +45,7 @@ export function cassetteRequest(request: ModelRequest): Record<string, unknown> 
     responseFormat: request.responseFormat,
     maxOutput: request.maxOutput,
     temperature: request.temperature,
+    reasoningEffort: request.reasoningEffort,
   }) as Record<string, unknown>;
 }
 

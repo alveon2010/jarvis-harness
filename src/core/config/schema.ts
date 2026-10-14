@@ -38,6 +38,14 @@ export const ModelAuthSchema = z.discriminatedUnion("type", [
 ]);
 export type ModelAuth = z.infer<typeof ModelAuthSchema>;
 
+/**
+ * How long a reasoning model thinks before it answers (`reasoning_effort` of OpenAI-compatible APIs).
+ * Pilot: up to 10k output tokens of reasoning before a one-line answer, counted in completion_tokens
+ * and in the output quota; the gateway does not pass the parameter yet — set it once it does.
+ */
+export const ReasoningEffortSchema = z.enum(["none", "low", "medium", "high"]);
+export type ReasoningEffort = z.infer<typeof ReasoningEffortSchema>;
+
 export const ModelSupportsSchema = z.strictObject({
   tools: z.boolean().default(false),
   parallelTools: z.boolean().default(false),
@@ -58,6 +66,8 @@ export const ModelConfigSchema = z.strictObject({
   egress: EgressSchema,
   quotaPool: z.string().min(1).optional(),
   contextWindow: z.int().positive(),
+  /** `reasoning_effort` for every call to this model, unless an agent sets its own. */
+  reasoningEffort: ReasoningEffortSchema.optional(),
   /**
    * The gateway caches prompt prefixes but does not say so in `usage` (yet): a call within `ttlSeconds`
    * of the previous one of its step, sharing a prefix of at least `minTokens`, counts that prefix as
@@ -479,6 +489,11 @@ export const AgentConfigSchema = z.strictObject({
    * incomplete; `ask` — the run waits for a person to grant more or let it finish. Over the step's own.
    */
   onLimit: z.enum(["finish", "ask"]).optional(),
+  /**
+   * `reasoning_effort` of this agent's calls, over the model's own: sent to a model with
+   * `supports.reasoning` or a `reasoningEffort` of its own (others may refuse the field).
+   */
+  reasoningEffort: ReasoningEffortSchema.optional(),
   /** The task message's size in characters (inputs and knowledge), over the agent's own `baseChars`. */
   baseChars: z.int().positive().optional(),
 });

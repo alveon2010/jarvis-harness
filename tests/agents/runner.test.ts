@@ -1186,6 +1186,37 @@ context: { maxContext: 8000 }
     ]);
   });
 
+  it("agents.<id>.reasoningEffort goes with the agent's calls to a model that reasons, and on the record", async () => {
+    sb.write(
+      "home/.jarvis/config.yaml",
+      `version: 1
+models:
+  thinker:
+    provider: openai-compatible
+    baseUrl: ${server.baseUrl}
+    model: thinker
+    egress: private
+    contextWindow: 100000
+    maxOutput: 2000
+    supports: { tools: true, jsonMode: true, reasoning: true }
+roles:
+  research: { models: [thinker] }
+agents:
+  research: { reasoningEffort: low }
+`,
+    );
+    sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
+    rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
+    server.respond(() => completion(JSON.stringify(RESEARCH_DOC)));
+    const run = createRun(rt, "r");
+    await engineWith(rt, researchOnly).execute(run.id, { owner: "cli:t" });
+    expect(server.requests.length).toBeGreaterThan(0);
+    for (const r of server.requests)
+      expect((r.body as { reasoning_effort?: string }).reasoning_effort).toBe("low");
+    const call = rt.events.list({ runId: run.id, kind: "model.call" })[0];
+    expect(call?.payload).toMatchObject({ reasoningEffort: "low" });
+  });
+
   it("an agent of many calls has a task message of its own size, whatever the window (agents.<id>.baseChars)", async () => {
     sb.write(
       "home/.jarvis/config.yaml",
