@@ -3,10 +3,18 @@ import { resolve } from "node:path";
 import { z } from "zod";
 import { planProgressOf } from "../app/planProgress.ts";
 import { stableJson } from "../context/serialize.ts";
+import type { ProjectGraphExtractor } from "../core/capabilities/contracts.ts";
 import type { KnowledgeConfig } from "../core/config/schema.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import { ANSWERS, givenFor, SUGGESTIONS } from "../interaction/answers.ts";
 import { notesOf, notesText } from "../interaction/notes.ts";
+import {
+  currentSymbols,
+  findSymbol,
+  OUTLINE_ABOVE_LINES,
+  type OutlineSymbol,
+  outlineText,
+} from "../knowledge/graph/outline.ts";
 import { renderPackage } from "../knowledge/package.ts";
 import type { EngineeringContextPackage } from "../knowledge/resolver.ts";
 import type { Message } from "../models/types.ts";
@@ -137,6 +145,8 @@ export interface BuildInput {
    * repo.read of one of them, unchanged, is answered with a pointer (src/agents/rereads.ts).
    */
   readonly shown?: Map<string, string>;
+  /** Classes and methods of the long files the task message may show (`outlinesFor`): shown sliced. */
+  readonly outlines?: ReadonlyMap<string, readonly OutlineSymbol[]>;
 }
 
 /** L0–L4 as two messages: a byte-stable system message and the task message. */
@@ -182,12 +192,17 @@ export function buildBaseMessages(input: BuildInput): Message[] {
   if (named.length > 0)
     l3.push(`## Other inputs (available on request: knowledge.read with the ref)\n${named.join("\n")}`);
   // bounded: every model call of the step re-sends it (no prefix cache on the pilot gateway)
-  const read = codeReadInRun(ctx, Math.min(Math.floor(inputBudget * 0.25), 40_000), input.shown);
+  const read = codeReadInRun(
+    ctx,
+    Math.min(Math.floor(inputBudget * 0.25), 40_000),
+    input.shown,
+    input.outlines,
+  );
   if (read) l3.push(read);
   // an implementation starts on the plan step that is open, with its files as they are now
   const step =
     def.output.type === "implementation"
-      ? planStepNow(ctx, Math.min(Math.floor(inputBudget * 0.2), 30_000), input.shown)
+      ? planStepNow(ctx, Math.min(Math.floor(inputBudget * 0.2), 30_000), input.shown, input.outlines)
       : undefined;
   if (step) l3.push(step);
   // the version the human sent back comes first: the agent revises it rather than starting over
@@ -248,6 +263,116 @@ export function humanReviewOf(
   };
 }
 
+/** Files repo.read in this run (and the run it went on from): how often, by which steps, which parts. */
+function readsInRun(
+  ctx: StepContext,
+): Map<
+  string,
+  { n: number; last: number; steps: Set<string>; symbols: Set<string>; ranges: Array<[number, number]> }
+> {
+  const runs = [ctx.run.id];
+  const created = ctx.runtime.events.list({ runId: ctx.run.id, kind: "run.created", limit: 1 })[0];
+  const from = (created?.payload as { continuedFrom?: string } | undefined)?.continuedFrom;
+  if (from) runs.push(from);
+  const count = new Map<
+    string,
+    { n: number; last: number; steps: Set<string>; symbols: Set<string>; ranges: Array<[number, number]> }
+  >();
+  for (const runId of runs) {
+    for (const e of ctx.runtime.events.list({ runId, kind: "tool.call", limit: 100_000 })) {
+      const p = (e.payload ?? {}) as { capability?: string; ok?: boolean; args?: string };
+      if (p.capability !== "repo.read" || p.ok === false || typeof p.args !== "string") continue;
+      let args: { path?: unknown; symbol?: unknown; startLine?: unknown; endLine?: unknown };
+      try {
+        args = JSON.parse(p.args) as typeof args;
+      } catch {
+        continue;
+      }
+      const path = args.path;
+      if (typeof path !== "string" || path.length === 0) continue;
+      const entry = count.get(path) ?? {
+        n: 0,
+        last: 0,
+        steps: new Set<string>(),
+        symbols: new Set<string>(),
+        ranges: [],
+      };
+      entry.n += 1;
+      entry.last = Math.max(entry.last, e.seq);
+      if (e.stepId) entry.steps.add(e.stepId);
+      if (typeof args.symbol === "string" && args.symbol.trim()) entry.symbols.add(args.symbol.trim());
+      if (typeof args.startLine === "number" || typeof args.endLine === "number")
+        entry.ranges.push([Number(args.startLine ?? 1), Number(args.endLine ?? args.startLine ?? 1)]);
+      count.set(path, entry);
+    }
+  }
+  return count;
+}
+
+/**
+ * A long file for a task message: its outline, then the parts that matter — the symbols named, the
+ * line ranges given — numbered as in the file. Undefined when the file is short or has no outline.
+ */
+export function slicedFile(
+  path: string,
+  text: string,
+  symbols: readonly OutlineSymbol[],
+  wanted: Iterable<string>,
+  ranges: ReadonlyArray<readonly [number, number]> = [],
+): string | undefined {
+  const lines = text.split("\n");
+  if (lines.length <= OUTLINE_ABOVE_LINES || symbols.filter((x) => x.kind === "method").length < 2)
+    return undefined;
+  const parts = new Map<string, [number, number]>();
+  for (const w of wanted) for (const f of findSymbol(symbols, w)) parts.set(f.name, [f.line, f.endLine]);
+  ranges.forEach(([a, b], i) => {
+    if (b >= a) parts.set(`lines ${a}-${b}#${i}`, [a, Math.min(b, lines.length)]);
+  });
+  const bodies = [...parts.entries()]
+    .sort((x, y) => x[1][0] - y[1][0])
+    .map(([name, [a, b]]) => {
+      const body = lines
+        .slice(a - 1, b)
+        .map((l, i) => `${String(a + i).padStart(5)}  ${l}`)
+        .join("\n");
+      const title = name.startsWith("lines ") ? `lines ${a}-${b}` : `${name} (lines ${a}-${b})`;
+      return `#### ${title}\n${body}`;
+    });
+  return [outlineText(path, lines.length, symbols), ...bodies].join("\n\n");
+}
+
+/**
+ * Classes and methods of the long files a task message may show — read before, or the open plan
+ * step's — from the stack's extractor on each file as it is now.
+ */
+export async function outlinesFor(
+  ctx: StepContext,
+  extractors: readonly ProjectGraphExtractor[],
+): Promise<Map<string, readonly OutlineSymbol[]>> {
+  const out = new Map<string, readonly OutlineSymbol[]>();
+  if (extractors.length === 0) return out;
+  const reads = [...readsInRun(ctx).entries()]
+    .sort((a, b) => b[1].n - a[1].n || b[1].last - a[1].last)
+    .slice(0, 8);
+  const progress = planProgressOf(
+    ctx.runtime,
+    ctx.run,
+    ctx.runtime.events.list({ runId: ctx.run.id, limit: 100_000 }),
+  );
+  const at = progress?.current;
+  const stepFiles = at === undefined ? [] : (progress?.steps[at]?.files ?? []);
+  const root = resolve(ctx.workspace.ref.path);
+  for (const path of new Set([...reads.map(([p]) => p), ...stepFiles])) {
+    const full = resolve(root, path);
+    if (!full.startsWith(`${root}/`) || !existsSync(full) || ctx.runtime.pathPolicy.isDenied(path)) continue;
+    const text = readFileSync(full, "utf8");
+    if (text.split("\n").length <= OUTLINE_ABOVE_LINES) continue;
+    const symbols = await currentSymbols(extractors, path, text);
+    if (symbols.length > 0) out.set(path, symbols);
+  }
+  return out;
+}
+
 /**
  * The files earlier steps of this run (and of the run it went on from) read, in their current
  * content, most read first: the next agent starts with them instead of reading them again. Pilot:
@@ -258,30 +383,9 @@ export function codeReadInRun(
   ctx: StepContext,
   chars: number,
   shown?: Map<string, string>,
+  outlines?: ReadonlyMap<string, readonly OutlineSymbol[]>,
 ): string | undefined {
-  const runs = [ctx.run.id];
-  const created = ctx.runtime.events.list({ runId: ctx.run.id, kind: "run.created", limit: 1 })[0];
-  const from = (created?.payload as { continuedFrom?: string } | undefined)?.continuedFrom;
-  if (from) runs.push(from);
-  const count = new Map<string, { n: number; last: number; steps: Set<string> }>();
-  for (const runId of runs) {
-    for (const e of ctx.runtime.events.list({ runId, kind: "tool.call", limit: 100_000 })) {
-      const p = (e.payload ?? {}) as { capability?: string; ok?: boolean; args?: string };
-      if (p.capability !== "repo.read" || p.ok === false || typeof p.args !== "string") continue;
-      let path: unknown;
-      try {
-        path = (JSON.parse(p.args) as { path?: unknown }).path;
-      } catch {
-        continue;
-      }
-      if (typeof path !== "string" || path.length === 0) continue;
-      const entry = count.get(path) ?? { n: 0, last: 0, steps: new Set<string>() };
-      entry.n += 1;
-      entry.last = Math.max(entry.last, e.seq);
-      if (e.stepId) entry.steps.add(e.stepId);
-      count.set(path, entry);
-    }
-  }
+  const count = readsInRun(ctx);
   if (count.size === 0 || chars <= 0) return undefined;
   const root = ctx.workspace.ref.path;
   const ordered = [...count.entries()].sort((a, b) => b[1].n - a[1].n || b[1].last - a[1].last);
@@ -296,7 +400,10 @@ export function codeReadInRun(
     if (buffer.includes(0)) continue;
     const text = ctx.runtime.redactor.redact(buffer.toString("utf8")).text;
     const numbered = numberedLines(text);
-    const body = clip(numbered, Math.min(left, 16_000));
+    // a long file: its outline and the parts read before, not all of it
+    const symbols = outlines?.get(path);
+    const sliced = symbols ? slicedFile(path, text, symbols, info.symbols, info.ranges) : undefined;
+    const body = clip(sliced ?? numbered, Math.min(left, 16_000));
     left -= body.length;
     if (body === numbered) shown?.set(path, contentHash(numbered));
     sections.push(
@@ -320,6 +427,7 @@ export function planStepNow(
   ctx: StepContext,
   chars: number,
   shown?: Map<string, string>,
+  outlines?: ReadonlyMap<string, readonly OutlineSymbol[]>,
 ): string | undefined {
   const progress = planProgressOf(
     ctx.runtime,
@@ -347,13 +455,28 @@ export function planStepNow(
     // redacted as every other way a file reaches the model (it was not: a secret in a plan step's file
     // went into the prompt as it was)
     const text = ctx.runtime.redactor.redact(readFileSync(full, "utf8")).text;
+    // a long file: its outline and the methods the step names
+    const symbols = outlines?.get(path);
+    const named = symbols
+      ? symbols
+          .filter((x) => x.kind === "method")
+          .map((x) => x.name.replace(/\/-?\d+$/, ""))
+          .filter((n) =>
+            new RegExp(`\\b${n.replace(/^.*\./, "")}\\b`).test(
+              `${step.description} ${step.verification ?? ""}`,
+            ),
+          )
+      : [];
+    const shownText = (symbols && slicedFile(path, text, symbols, named)) || text;
     const body =
-      text.length > left
-        ? `${text.slice(0, left)}\n…[cut: ${text.length - left} more chars — repo.read it]`
-        : text;
+      shownText.length > left
+        ? `${shownText.slice(0, left)}\n…[cut: ${shownText.length - left} more chars — repo.read it]`
+        : shownText;
     left -= body.length;
     if (body === text) shown?.set(path, contentHash(numberedLines(text)));
-    lines.push(`### ${path} (as it is now)\n${body}`);
+    lines.push(
+      `### ${path} (as it is now${shownText !== text ? ": outline and the methods this step names" : ""})\n${body}`,
+    );
   }
   return lines.join("\n\n");
 }

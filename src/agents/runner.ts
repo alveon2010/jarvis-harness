@@ -24,7 +24,7 @@ import type { AgentRunner } from "../orchestration/executors.ts";
 import { InterruptedError, interruption } from "../orchestration/interrupt.ts";
 import { type StepContext, type StepOutcome, SuspendRun } from "../orchestration/types.ts";
 import type { ToolResult } from "../tools/types.ts";
-import { buildBaseMessages } from "./context.ts";
+import { buildBaseMessages, outlinesFor } from "./context.ts";
 import type { AgentRegistry } from "./definition.ts";
 import { packageForStep } from "./knowledge.ts";
 import { ReadLedger, readKey } from "./rereads.ts";
@@ -211,6 +211,11 @@ export class AgentRuntimeRunner implements AgentRunner {
     // an agent of many calls has a task message of its own size: each call sends it again
     const lean = config.agents[def.id]?.baseChars ?? def.baseChars;
     const charBudget = Math.min(Math.floor(window * 0.45 * 3.5), lean ?? Number.POSITIVE_INFINITY);
+    // long files the task message may show: their outline and the parts that matter (context.ts)
+    const outlines = await outlinesFor(
+      ctx,
+      (rt.capabilities?.list() ?? []).map((a) => a.graphExtractor?.()).filter((x) => x !== undefined),
+    ).catch(() => new Map());
     // the files the task message shows whole: a read of one of them gets a pointer (rereads.ts)
     let baseShown = new Map<string, string>();
     const buildBase = (chars: number) => {
@@ -224,6 +229,7 @@ export class AgentRuntimeRunner implements AgentRunner {
         knowledgeConfig: config.knowledge,
         budget: { chars },
         shown: baseShown,
+        outlines,
       });
     };
     let base = buildBase(charBudget);
@@ -592,6 +598,7 @@ export class AgentRuntimeRunner implements AgentRunner {
           call.id,
           formatToolResult(call.name, results[i], parseError),
           transcript,
+          fileHashOf(results[i]?.data),
         );
         if (answered.kind !== "first")
           emit("tool.reread", { capability: call.name, path: args.path, kind: answered.kind });
@@ -770,6 +777,12 @@ export class AgentRuntimeRunner implements AgentRunner {
       throw error;
     }
   }
+}
+
+/** The hash of the whole file a repo.read answered with its outline (src/tools/local/provider.ts). */
+function fileHashOf(data: unknown): string | undefined {
+  const hash = data && typeof data === "object" ? (data as { fileHash?: unknown }).fileHash : undefined;
+  return typeof hash === "string" ? hash : undefined;
 }
 
 function formatToolResult(

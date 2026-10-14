@@ -122,3 +122,20 @@ describe("a file the task message already shows whole", () => {
     expect(ledger.answer(ranged, "c4", file, [call("c4")]).kind).toBe("first");
   });
 });
+
+describe("reads of a long file: its outline, a symbol, all of it", () => {
+  it("are reads of their own; the outline of a file the task message shows is a pointer", () => {
+    expect(readKey("repo.read", { path: "a/S.java" })).toBe("a/S.java#-");
+    expect(readKey("repo.read", { path: "a/S.java", full: true })).toBe("a/S.java#-!");
+    expect(readKey("repo.read", { path: "a/S.java", symbol: "S.find" })).toBe("a/S.java@S.find");
+    expect(readKey("repo.read", { path: "a/S.java", symbol: "S.find", startLine: 3 })).toBe("a/S.java#3-");
+    const ledger = new ReadLedger();
+    ledger.seed(new Map([["a/S.java", "hash-of-the-whole-file"]]));
+    const outline =
+      "[repo.read] ok\na/S.java: 900 lines — its outline (read whole only if you need all of it):";
+    expect(ledger.answer("a/S.java#-", "c1", outline, [], "hash-of-the-whole-file").kind).toBe("in-task");
+    expect(new ReadLedger().answer("a/S.java#-", "c1", outline, [], "hash-of-the-whole-file").kind).toBe(
+      "first",
+    );
+  });
+});

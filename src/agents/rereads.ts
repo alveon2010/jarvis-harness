@@ -31,11 +31,14 @@ const hashOf = (text: string) => createHash("sha256").update(text).digest("hex")
 /** Of a file's text as the task message shows it (src/agents/context.ts). */
 export const contentHash = hashOf;
 
-/** Which reads count as the same: one path and one range. */
+/** Which reads count as the same: one path and one range (or one symbol, or the whole of a long file). */
 export function readKey(name: string, args: Record<string, unknown>): string | undefined {
   if (name !== "repo.read" || typeof args.path !== "string") return undefined;
   const path = args.path.replace(/^\.\//, "");
-  return `${path}#${args.startLine ?? ""}-${args.endLine ?? ""}`;
+  const ranged = args.startLine !== undefined || args.endLine !== undefined;
+  if (!ranged && typeof args.symbol === "string" && args.symbol.trim())
+    return `${path}@${args.symbol.trim()}`;
+  return `${path}#${args.startLine ?? ""}-${args.endLine ?? ""}${!ranged && args.full === true ? "!" : ""}`;
 }
 
 export class ReadLedger {
@@ -95,13 +98,19 @@ export class ReadLedger {
     callId: string,
     content: string,
     transcript: readonly Message[],
+    /** Of the whole file as numbered lines, when the answer is not the file (its outline). */
+    fileHash?: string,
   ): { content: string; kind: "first" | "in-task" | "unchanged" | "again" | "changed" } {
     if (!key || !/^\[repo\.read\] ok/.test(content)) return { content, kind: "first" };
     const hash = hashOf(content);
     const before = this.reads.get(key);
-    const path = key.endsWith("#-") ? key.slice(0, -2) : undefined;
+    const path = key.endsWith("#-") ? key.slice(0, -2) : key.endsWith("#-!") ? key.slice(0, -3) : undefined;
     const inTask = path ? this.inTask.get(path) : undefined;
-    if (!before && inTask !== undefined && inTask === hashOf(content.replace(/^\[repo\.read\] ok\n/, ""))) {
+    if (
+      !before &&
+      inTask !== undefined &&
+      inTask === (fileHash ?? hashOf(content.replace(/^\[repo\.read\] ok\n/, "")))
+    ) {
       // the pointer stands for the read: asked again, the text comes
       this.reads.set(key, { callId });
       return {
@@ -116,7 +125,10 @@ export class ReadLedger {
     if (intact && before.hash === hash) {
       // the earlier result stays the one to look at
       this.reads.set(key, before);
-      const what = key.replace(/#-$/, "").replace(/#(\d*)-(\d*)$/, " (lines $1-$2)");
+      const what = key
+        .replace(/#-!?$/, "")
+        .replace(/#(\d*)-(\d*)$/, " (lines $1-$2)")
+        .replace(/@(.+)$/, " ($1)");
       return {
         content: `[repo.read] ok\n${UNCHANGED} you read ${what} in this step already and it has not changed — its text is in your context above, in the result of call ${before.callId}. Use it; do not read it again.)`,
         kind: "unchanged",

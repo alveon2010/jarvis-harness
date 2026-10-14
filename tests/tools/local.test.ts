@@ -405,3 +405,60 @@ describe("builds the checks read (tools.rebuild)", () => {
     );
   });
 });
+
+describe("repo.read of a long file", () => {
+  // a Java class of ~450 lines: two methods among filler
+  const LONG = [
+    "package a;",
+    "@Service",
+    "public class OrderService implements Orders {",
+    "  private final OrderRepository repo;",
+    "  @Transactional",
+    "  public Order find(String id) {",
+    "    return repo.find(id);",
+    "  }",
+    ...Array.from({ length: 440 }, (_, i) => `  // filler ${i}`),
+    "  void cancel(Order o, String why) {",
+    "    repo.save(o);",
+    "  }",
+    "}",
+  ].join("\n");
+
+  it("comes as its outline; a symbol as its lines; full as all of it", async () => {
+    const { bind } = await setup();
+    writeFileSync(join(sb.project, "src", "OrderService.java"), LONG);
+    const tools = bind();
+    const outline = await tools.invoke("repo.read", { path: "src/OrderService.java" });
+    expect(outline.text.split("\n")).toEqual([
+      "src/OrderService.java: 452 lines — its outline (read whole only if you need all of it):",
+      "@Service class OrderService implements Orders  [2-452]",
+      "  fields: repo: OrderRepository",
+      "  @Transactional find(String): Order  [5-8]",
+      "  cancel(Order, String): void  [449-451]",
+      'Read a part: repo.read with symbol (e.g. "OrderService.find") or startLine/endLine; full: true for the whole file.',
+    ]);
+    const find = await tools.invoke("repo.read", {
+      path: "src/OrderService.java",
+      symbol: "OrderService.find",
+    });
+    expect(find.text.split("\n")).toEqual([
+      "OrderService.find/1 (src/OrderService.java:5-8)",
+      "    5    @Transactional",
+      "    6    public Order find(String id) {",
+      "    7      return repo.find(id);",
+      "    8    }",
+    ]);
+    expect(
+      (await tools.invoke("repo.read", { path: "src/OrderService.java", symbol: "cancel" })).text,
+    ).toContain("  450      repo.save(o);");
+    const missing = await tools.invoke("repo.read", { path: "src/OrderService.java", symbol: "refund" });
+    expect(missing).toMatchObject({ ok: false });
+    expect(missing.error).toContain("it has: OrderService, OrderService.find, OrderService.cancel");
+    const full = await tools.invoke("repo.read", { path: "src/OrderService.java", full: true });
+    expect(full.text.split("\n")).toHaveLength(452);
+    // a short file or a range reads as before
+    expect(
+      (await tools.invoke("repo.read", { path: "src/OrderService.java", startLine: 6, endLine: 6 })).text,
+    ).toBe("    6    public Order find(String id) {");
+  });
+});

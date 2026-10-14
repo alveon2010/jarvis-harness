@@ -1,8 +1,15 @@
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import type { ResolvedConfig } from "../../core/config/schema.ts";
 import { changedFiles } from "../../knowledge/check.ts";
 import { globMatches } from "../../knowledge/frontmatter.ts";
+import {
+  currentSymbols,
+  findSymbol,
+  OUTLINE_ABOVE_LINES,
+  outlineText,
+} from "../../knowledge/graph/outline.ts";
 import { readByRef } from "../../knowledge/resolver.ts";
 import { refreshIndex, search } from "../../knowledge/retrieval/service.ts";
 import { knowledgeRootsOf } from "../../knowledge/sources.ts";
@@ -165,7 +172,7 @@ export class LocalToolProvider implements ToolProvider {
     const caps: Capability[] = [
       {
         name: "repo.read",
-        description: "Read a file inside the workspace. Optional 1-based startLine/endLine.",
+        description: `Read a file inside the workspace. Optional 1-based startLine/endLine, or symbol: a class or method of the file ("OrderService.find") — its lines. A file over ${OUTLINE_ABOVE_LINES} lines whose classes and methods are known comes as its outline (each with its lines) unless full: true.`,
         network: "none",
         access: "read",
         effect: false,
@@ -175,6 +182,11 @@ export class LocalToolProvider implements ToolProvider {
             path: { type: "string" },
             startLine: { type: "integer" },
             endLine: { type: "integer" },
+            symbol: {
+              type: "string",
+              description: 'a class or method of the file, e.g. "OrderService.find"',
+            },
+            full: { type: "boolean", description: "the whole file even when it is long" },
           },
           required: ["path"],
         },
@@ -184,7 +196,62 @@ export class LocalToolProvider implements ToolProvider {
             const buffer = readFileSync(absolute);
             if (isProbablyBinary(buffer))
               return { ok: false, error: `${rel} is binary (${buffer.length} bytes)` };
-            const lines = buffer.toString("utf8").split("\n");
+            const content = buffer.toString("utf8");
+            const lines = content.split("\n");
+            const ranged = args.startLine !== undefined || args.endLine !== undefined;
+            const symbol = typeof args.symbol === "string" ? args.symbol.trim() : "";
+            // classes and methods with their lines, from the stack's extractor on the file as it is now
+            const extractors = () =>
+              (ctx.runtime.capabilities?.list() ?? [])
+                .map((a) => a.graphExtractor?.())
+                .filter((x) => x !== undefined);
+            if (symbol && !ranged) {
+              const symbols = await currentSymbols(extractors(), rel, content);
+              const found = findSymbol(symbols, symbol);
+              if (found.length === 0)
+                return {
+                  ok: false,
+                  error: `no "${symbol}" in ${rel}${
+                    symbols.length > 0
+                      ? `; it has: ${symbols
+                          .map((x) => x.name.replace(/\/-?\d+$/, ""))
+                          .slice(0, 30)
+                          .join(", ")}`
+                      : " (no outline for this file: read it by lines)"
+                  }`,
+                };
+              const text = found
+                .map((f) => {
+                  const body = lines
+                    .slice(f.line - 1, f.endLine)
+                    .map((l, i) => `${String(f.line + i).padStart(5)}  ${l}`)
+                    .join("\n");
+                  return `${f.name} (${rel}:${f.line}-${f.endLine})\n${body}`;
+                })
+                .join("\n\n");
+              return {
+                ok: true,
+                text,
+                data: { path: rel, lines: lines.length, symbol: found.map((f) => f.name) },
+              };
+            }
+            if (!ranged && args.full !== true && lines.length > OUTLINE_ABOVE_LINES) {
+              const symbols = await currentSymbols(extractors(), rel, content);
+              if (symbols.filter((x) => x.kind === "method").length >= 2)
+                return {
+                  ok: true,
+                  text: outlineText(rel, lines.length, symbols),
+                  data: {
+                    path: rel,
+                    lines: lines.length,
+                    outline: true,
+                    // the whole file, as a task message shows it: a file the agent has there needs no outline
+                    fileHash: createHash("sha256")
+                      .update(lines.map((l, i) => `${String(i + 1).padStart(5)}  ${l}`).join("\n"))
+                      .digest("hex"),
+                  },
+                };
+            }
             const start = Math.max(1, num(args, "startLine", 1));
             const end = Math.min(lines.length, num(args, "endLine", lines.length));
             const slice = lines.slice(start - 1, end);
