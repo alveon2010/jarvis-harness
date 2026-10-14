@@ -250,7 +250,29 @@ function candidateHtml(
   page: ModulesPage,
   actions: Actions,
 ): Html {
-  const c = r.candidate;
+  return candidateReviewHtml(
+    r.candidate,
+    r.run,
+    page.root,
+    actions,
+    page.conflict ? { conflict: page.conflict } : {},
+  );
+}
+
+/**
+ * A module research's candidate to decide: the claims, what the check dropped, the document, Accept and
+ * Send back. On the Modules page and on the research's own run page (`back`: where the decision returns).
+ */
+export function candidateReviewHtml(
+  c: Candidate,
+  run: Run,
+  root: string,
+  actions: Actions,
+  opts: { readonly conflict?: ModulesPage["conflict"]; readonly back?: string } = {},
+): Html {
+  const r = { run };
+  const page = { root, conflict: opts.conflict };
+  const backField = opts.back ? html`<input type="hidden" name="back" value="${opts.back}">` : "";
   const claims = c.claims;
   const dropped = c.doc.dropped ?? [];
   const target = targetOf(page.root, c, undefined);
@@ -260,7 +282,7 @@ function candidateHtml(
   const accept = form(
     actions,
     `/knowledge/candidates/${encodeURIComponent(c.artifact.artifactId)}/accept`,
-    html`${
+    html`${backField}${
       c.review.length > 0
         ? html`<fieldset class="mchecks"><legend><b>Check these first</b> <span class="hint">— the excerpts show one place, the statement speaks for the whole folder. Tick when you agree.</span></legend>
 ${c.review.map((s, i) => html`<label class="mcheck"><input type="checkbox" name="checked" value="${String(i)}" required><span>${s}</span></label>`)}
@@ -278,7 +300,7 @@ ${taken ? html`<label class="field inline">or as<input type="text" name="id" pla
   const again = form(
     actions,
     `/knowledge/candidates/${encodeURIComponent(c.artifact.artifactId)}/reject`,
-    html`<label class="field">Note for the next research <span class="hint">what was wrong or missing</span><textarea name="comment" rows="2" maxlength="2000"></textarea></label>
+    html`${backField}<label class="field">Note for the next research <span class="hint">what was wrong or missing</span><textarea name="comment" rows="2" maxlength="2000"></textarea></label>
 <div class="row"><button type="submit" class="btn" name="again" value="1">Research again with the note</button><button type="submit" class="btn">Discard</button></div>`,
   );
   return html`<div class="row">

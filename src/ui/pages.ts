@@ -1164,7 +1164,14 @@ export function timeHtml(time: TimeSplit): Html {
   return html`<span class="timew" tabindex="0" aria-describedby="tpop">${duration(total)}${total - working >= 60_000 ? html` <span class="work">· ${duration(working)} working</span>` : ""}<span class="tpop" id="tpop" role="tooltip"><b class="ttl">Time of this run</b><span class="bar">${bar}</span><table>${rows}<tr class="total"><td>Total</td><td class="v">${duration(total)}</td><td class="pc"></td></tr></table><span class="note">From the run's journal, ${when}. Working time is what the run cost in time; the rest is where it waited.</span></span></span>`;
 }
 
-export function runContent(page: RunPage, now: number, actions?: Actions, notice?: Html): Html {
+export function runContent(
+  page: RunPage,
+  now: number,
+  actions?: Actions,
+  notice?: Html,
+  /** Above the run's card: a module research's candidate to decide (src/ui/modules.ts). */
+  review?: Html,
+): Html {
   const r = page.run;
   const t = page.tokens;
   const extra =
@@ -1210,6 +1217,7 @@ ${cancelling(r) ? html`<div class="banner bad" data-live="cancelling" role="stat
 <ol style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:2px">${page.steps.map((s) => stepRow(s, now, s.status === "running" ? page.planProgress : undefined))}</ol>
 </section>
 <div class="mainc">
+${review ?? ""}
 ${card ? (card.kind === "loop" ? loopCardHtml(card, page, actions) : card.kind === "approval" ? approvalCardHtml(card, page, actions) : card.kind === "budget" ? budgetCardHtml(card, page, actions) : card.kind === "clarify" ? clarifyCardHtml(card, page, actions) : otherCardHtml(card.what, page)) : page.wait ? waitHtml(page, page.wait, now, actions) : page.next || page.continuedBy ? continuationHtml(page, actions) : page.evalReady || page.evalCase ? evalHtml(page, actions) : nowHtml(page, now, actions)}
 ${feedHtml(page.feed)}
 <section class="panel arts" aria-labelledby="artifacts" data-live="arts">

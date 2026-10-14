@@ -7,6 +7,7 @@ import { createEngine } from "../../src/app/engine.ts";
 import { createRuntime, type Runtime } from "../../src/app/runtime.ts";
 import { loadConfig } from "../../src/core/config/load.ts";
 import { MODULE_MARKER } from "../../src/onboarding/render.ts";
+import { shortRunId } from "../../src/storage/runStore.ts";
 import type { Launch, Launcher } from "../../src/ui/launcher.ts";
 import { startUiServer, type UiServer } from "../../src/ui/server.ts";
 import { type Sandbox, sandbox } from "../helpers/tmp.ts";
@@ -232,6 +233,31 @@ describe("Knowledge → Modules", () => {
     const c = await post("/knowledge/commit", [["path", "src/orders"]]);
     expect(c.location).toContain("notice=committed");
     expect(git("log", "-1", "--format=%s %ae")).toContain("knowledge: module-orders t@t");
+  });
+
+  it("the research's run page has the same review: decided there, it comes back there", async () => {
+    const { run, candidate } = researched();
+    const short = shortRunId(run.id);
+    const body = await page(`/runs/${short}`);
+    expect(body).toContain("Review what the research found: <code>src/orders</code>");
+    expect(body).toContain("Every order is priced before tax.");
+    expect(body).toContain("Accept as a draft");
+    expect(body).toContain(`<input type="hidden" name="back" value="/runs/${short}">`);
+    const at = `/knowledge/candidates/${candidate.artifactId}/accept`;
+    expect((await post(at, [["back", `/runs/${short}`]])).location).toBe(`/runs/${short}?notice=check-all`);
+    const ok = await post(at, [
+      ["back", `/runs/${short}`],
+      ["checked", "0"],
+    ]);
+    expect(ok.location).toBe(`/runs/${short}?notice=accepted&file=.jarvis%2Fknowledge%2Fmodule-orders.md`);
+    const after = await page(ok.location as string);
+    expect(after).toContain("Written to <code>.jarvis/knowledge/module-orders.md</code>");
+    expect(after).toContain('Accepted — <a href="/knowledge/modules?path=src%2Forders">');
+    expect(after).not.toContain("Accept as a draft");
+    // anywhere else: still the Modules page
+    expect((await post(at, [["back", "https://example.com/"]])).location).toContain(
+      "/knowledge/modules?path=src%2Forders&notice=decided",
+    );
   });
 
   it("a document a person wrote at the target is replaced only on Replace (with the diff shown)", async () => {

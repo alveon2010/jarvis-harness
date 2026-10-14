@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join as joinPath } from "node:path";
 import { budgetGranted, budgetStopOf, grantBudget } from "../app/budgetStop.ts";
 import {
+  type Candidate,
   CandidateTargetTaken,
   candidatesOf,
   contentOf,
@@ -89,6 +90,7 @@ import {
 import { type Launch, type Launcher, WORKFLOWS, type Workflow } from "./launcher.ts";
 import { artifactPage, runPage, runsPage } from "./model.ts";
 import {
+  candidateReviewHtml,
   type Draft,
   draftsHtml,
   type ModulesPage,
@@ -545,7 +547,11 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
   /** What replacing a person's document with the candidate changes, as a diff. */
   const conflictOf = async (page: Pick<ModulesPage, "selected" | "research">) => {
     const r = page.selected ? page.research.get(page.selected.path) : undefined;
-    if (!root || r?.kind !== "candidate") return undefined;
+    return r?.kind === "candidate" ? conflictFor(r.candidate) : undefined;
+  };
+  const conflictFor = async (candidate: Candidate) => {
+    if (!root) return undefined;
+    const r = { candidate };
     const file = targetOf(root, r.candidate, undefined);
     const before = existingAt(file);
     if (!before || before.generated) return undefined;
@@ -562,6 +568,22 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  };
+  /** The candidate of a module research, to decide on its run page; what became of it once decided. */
+  const candidateOnRun = async (run: Run): Promise<Html | undefined> => {
+    if (run.workflow !== "onboard-module" || !root) return undefined;
+    const c = candidatesOf(runtime, (x) => x.id === run.id).at(-1);
+    if (!c) return undefined;
+    const module = c.doc.module ?? "";
+    const modulePage = `/knowledge/modules?path=${encodeURIComponent(module)}`;
+    if (c.decision)
+      return html`<div class="banner ${c.decision === "approve" ? "ok" : "info"}">${c.decision === "approve" ? "Accepted" : "Discarded"} — <a href="${modulePage}">the module <code>${module}</code></a></div>`;
+    if (!actions)
+      return html`<div class="banner info">The candidate waits for a review: <a href="${modulePage}">the module <code>${module}</code></a></div>`;
+    const conflict = await conflictFor(c);
+    return html`<section class="panel mresearch" aria-labelledby="candidate"><h2 id="candidate">Review what the research found: <code>${module}</code></h2>
+${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)}`, ...(conflict ? { conflict } : {}) })}
+</section>`;
   };
   const knowledgeNotice = (r: Request): Html | undefined => {
     const n = r.url.searchParams.get("notice");
@@ -704,12 +726,16 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
     const c = all.find((x) => x.artifact.artifactId === id);
     if (!c) return notFound(r, "No such candidate.");
     const module = c.doc.module ?? "";
-    if (c.decision) return redirect(r, back(module, "decided"));
+    // decided on the research's run page: back there
+    const onRun = /^\/runs\/[A-Za-z0-9_-]+$/.exec(form.get("back") ?? "")?.[0];
+    const after = (path: string, notice: string, extra = "") =>
+      onRun ? `${onRun}?notice=${notice}${extra}` : back(path, notice, extra);
+    if (c.decision) return redirect(r, after(module, "decided"));
     const who = options.actor ? await options.actor() : undefined;
-    if (!who) return redirect(r, back(module, "actor"));
+    if (!who) return redirect(r, after(module, "actor"));
     if (m[2] === "accept") {
       const checked = new Set(form.getAll("checked").map(Number));
-      if (c.review.some((_, i) => !checked.has(i))) return redirect(r, back(module, "check-all"));
+      if (c.review.some((_, i) => !checked.has(i))) return redirect(r, after(module, "check-all"));
       const fileId = (form.get("id") ?? "").trim();
       try {
         const done = promoteCandidate(runtime, {
@@ -721,10 +747,10 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
           channel: "ui",
           checked: checked.size,
         });
-        return redirect(r, back(module, "accepted", `&file=${encodeURIComponent(done.path)}`));
+        return redirect(r, after(module, "accepted", `&file=${encodeURIComponent(done.path)}`));
       } catch (error) {
         if (!(error instanceof CandidateTargetTaken)) throw error;
-        return redirect(r, back(module, "taken"));
+        return redirect(r, after(module, "taken"));
       }
     }
     const comment = (form.get("comment") ?? "").trim().slice(0, NOTE_MAX);
@@ -741,9 +767,9 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
         .join("\n\n")
         .slice(0, NOTE_MAX);
       options.launcher.startModule({ module, repoRoot: root, ...(note ? { note } : {}) });
-      return redirect(r, back(module, "again"));
+      return redirect(r, after(module, "again"));
     }
-    return redirect(r, back(module, "rejected"));
+    return redirect(r, after(module, "rejected"));
   };
 
   /* ---- Knowledge: overview, documents, standards, skills, glossary (read-only, a glossary term added) ---- */
@@ -1478,6 +1504,8 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
         ...withResume(await runPage(runtime, engine, run, { homeDir: options.homeDir })),
         driven: options.launcher?.drives(run.id) === true,
       };
+      // a module research: its candidate is decided right here, not only on the Modules page
+      const review = await candidateOnRun(run);
       const ticking =
         run.state === "RUNNING" ||
         model.card?.kind === "loop" ||
@@ -1492,7 +1520,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
           back: { href: "/", label: "Runs" },
           ...(ticking ? { tick: 3000 } : {}),
         },
-        runContent(model, now, actions, noticeOf(r)),
+        runContent(model, now, actions, noticeOf(r) ?? knowledgeNotice(r), review),
       );
     }
     const artMatch = /^\/runs\/([^/]+)\/artifacts\/([^/]+)\/([^/]+)$/.exec(path);
