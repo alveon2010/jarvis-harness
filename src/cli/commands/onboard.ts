@@ -1,13 +1,15 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createRuntime } from "../../app/runtime.ts";
-import type { GraphEdge } from "../../core/capabilities/contracts.ts";
+import type { GraphEdge, GraphNode } from "../../core/capabilities/contracts.ts";
+import { codeContractsOf } from "../../design/codeContracts.ts";
 import { repoIdOf, updateGraph } from "../../knowledge/graph/update.ts";
 import { mapModule, taskFor } from "../../onboarding/deep.ts";
 import {
   applyCommands,
   ONBOARD_MARKER,
   renderArchitecture,
+  renderContracts,
   renderConventions,
 } from "../../onboarding/render.ts";
 import { type ScanReport, scanProject, scopeFacts } from "../../onboarding/scan.ts";
@@ -45,7 +47,7 @@ export async function runOnboard(ctx: CliContext, options: OnboardOptions): Prom
     throw new CliExit(EXIT.error);
   }
 
-  let graph: { edges: GraphEdge[]; nodes: number } | undefined;
+  let graph: { edges: GraphEdge[]; nodes: number; all: GraphNode[] } | undefined;
   let graphReason: string | undefined;
   if (options.graph !== false) {
     const runtime = createRuntime(loaded, { env: ctx.env });
@@ -63,7 +65,11 @@ export async function runOnboard(ctx: CliContext, options: OnboardOptions): Prom
           extractors,
           store: runtime.graph,
         });
-        graph = { edges: [...result.snapshot.edges], nodes: result.snapshot.nodes.length };
+        graph = {
+          edges: [...result.snapshot.edges],
+          nodes: result.snapshot.nodes.length,
+          all: [...result.snapshot.nodes],
+        };
       }
     } catch (error) {
       graphReason = error instanceof Error ? error.message : String(error);
@@ -94,8 +100,11 @@ export async function runOnboard(ctx: CliContext, options: OnboardOptions): Prom
     }
     files.push({ path: `.jarvis/knowledge/${name}`, action });
   };
-  write("architecture.md", renderArchitecture(report));
+  const contracts = graph ? codeContractsOf(graph.all) : undefined;
+  write("architecture.md", renderArchitecture(report, contracts));
   write("conventions.md", renderConventions(report));
+  const contractsDoc = contracts ? renderContracts(contracts) : undefined;
+  if (contractsDoc) write("contracts.md", contractsDoc);
 
   let configApplied = false;
   const configPath = loaded.project?.configFile;

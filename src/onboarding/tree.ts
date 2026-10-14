@@ -5,7 +5,7 @@ import { loadSourceDocuments } from "../knowledge/sources.ts";
 import type { KnowledgeRoots } from "../knowledge/standards.ts";
 import { git } from "../tools/local/exec.ts";
 import { MODULE_MARKER, ONBOARD_MARKER } from "./render.ts";
-import { countFile, moduleOf, rolOf, trackedFiles } from "./scan.ts";
+import { countFile, moduleLayoutOf, moduleOf, rolOf, trackedFiles } from "./scan.ts";
 
 /**
  * What can be researched, for the Modules page of `jarvis ui`: the modules of the scan (`src/x`,
@@ -186,8 +186,9 @@ export async function moduleTree(roots: KnowledgeRoots): Promise<ModuleTree> {
     s: { files: 0, lines: 0, langs: new Set() },
     kids: new Map(),
   });
+  const layout = moduleLayoutOf(files);
   for (const f of files) {
-    const m = moduleOf(f);
+    const m = moduleOf(f, layout);
     if (m === "(root)" || rolOf(m, m.split("/")[0] as string) !== "source") continue;
     const top = tops.get(m) ?? fresh(m, true);
     tops.set(m, top);

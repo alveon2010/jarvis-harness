@@ -1,3 +1,5 @@
+import { basename } from "node:path";
+import type { CodeContracts } from "../design/codeContracts.ts";
 import type { ModuleFacts, ScanReport } from "./scan.ts";
 import { isSweeping, type VerifiedModuleMap } from "./verify.ts";
 
@@ -12,7 +14,7 @@ export const ONBOARD_MARKER =
 const list = (items: readonly string[], none = "none found") => (items.length > 0 ? items.join(", ") : none);
 const code = (s: string) => `\`${s}\``;
 
-export function renderArchitecture(r: ScanReport): string {
+export function renderArchitecture(r: ScanReport, contracts?: CodeContracts): string {
   const source = r.modules.filter((m) => m.role === "source" || m.role === "other");
   const lines: string[] = [
     "---",
@@ -32,13 +34,34 @@ export function renderArchitecture(r: ScanReport): string {
     for (const [glob, stacks] of scopes) lines.push(`  - ${code(glob)} — ${stacks.join(", ")}`);
   }
   lines.push("", "## Modules", "");
+  // the packages of a JVM tree share a long base: shown once, the modules by what follows it
+  const base = commonBase(source.map((m) => m.path).filter((p) => p !== "(root)"));
+  // modules of the tree first, then a few libraries: a JVM module imports dozens of packages
+  const deps = (all: readonly string[]) => {
+    const own = all.filter((d) => !d.startsWith("pkg:")).map((d) => code(short(d)));
+    const libs = all.filter((d) => d.startsWith("pkg:"));
+    const shown = libs.slice(0, 5).map(code);
+    return (
+      [
+        ...own,
+        ...shown,
+        ...(libs.length > shown.length ? [`+${libs.length - shown.length} libraries`] : []),
+      ].join(", ") || "—"
+    );
+  };
+  const short = (p: string) => (base && p.startsWith(`${base}/`) ? p.slice(base.length + 1) : p);
   if (source.length === 0) lines.push("No source modules found.");
   else {
     const shown = source.slice(0, 40);
+    if (base)
+      lines.push(
+        `Modules are the packages under ${code(`${base}/`)}, named below by the rest of their path.`,
+        "",
+      );
     lines.push("| module | files | lines | depends on | used by |", "|---|---:|---:|---|---|");
     for (const m of shown)
       lines.push(
-        `| ${code(m.path)} | ${m.files} | ${m.lines} | ${m.dependsOn.map(code).join(", ") || "—"} | ${m.usedBy.map(code).join(", ") || "—"} |`,
+        `| ${code(short(m.path))} | ${m.files} | ${m.lines} | ${deps(m.dependsOn)} | ${m.usedBy.map((d) => code(short(d))).join(", ") || "—"} |`,
       );
     if (source.length > shown.length)
       lines.push("", `… and ${source.length - shown.length} smaller modules.`);
@@ -47,6 +70,15 @@ export function renderArchitecture(r: ScanReport): string {
         "",
         `Module dependencies are not listed: no project graph for this stack${r.graph.reason ? ` (${r.graph.reason})` : ""}.`,
       );
+  }
+  if (contracts && (contracts.endpoints.length > 0 || contracts.topics.length > 0)) {
+    const served = contracts.endpoints.filter((e) => e.direction !== "out");
+    lines.push(
+      "",
+      "## Contracts",
+      "",
+      `${served.length} HTTP endpoints served in ${new Set(served.map((e) => e.file)).size} controllers, ${contracts.endpoints.length - served.length} calls to other services, ${contracts.topics.length} message topics in the config (${contracts.listeners.length} listeners) — listed in ${code(".jarvis/knowledge/contracts.md")}.`,
+    );
   }
   if (r.entryPoints.length > 0) {
     lines.push("", "## Entry points", "");
@@ -63,6 +95,16 @@ export function renderArchitecture(r: ScanReport): string {
     if (r.docs.length > shown.length) lines.push(`- … and ${r.docs.length - shown.length} more`);
   }
   return `${lines.join("\n")}\n`;
+}
+
+/** The directory every path is under, when they share one deeper than a single segment. */
+function commonBase(paths: readonly string[]): string | undefined {
+  if (paths.length < 2) return undefined;
+  const split = paths.map((p) => p.split("/"));
+  const first = split[0] as string[];
+  let n = 0;
+  while (n < first.length - 1 && split.every((p) => p.length > n + 1 && p[n] === first[n])) n += 1;
+  return n >= 2 ? first.slice(0, n).join("/") : undefined;
 }
 
 export function renderConventions(r: ScanReport): string {
@@ -88,6 +130,24 @@ export function renderConventions(r: ScanReport): string {
   }[r.tests.layout];
   lines.push(`- Tests: ${r.tests.files} files; ${layout}`);
   lines.push(`- CI: ${list(r.tooling.ci, "none found")}`);
+  if (r.jvm && r.jvm.testRoots.length > 0) {
+    lines.push("", "## Tests by source root", "");
+    for (const t of r.jvm.testRoots)
+      lines.push(
+        `- ${code(t.root)}: ${t.tests} tests named ${t.suffixes.join(", ") || "—"}; they use ${t.frameworks.join(", ") || "—"}`,
+      );
+    if (r.jvm.shared.length > 0) {
+      lines.push(
+        "",
+        "Shared test code — base classes, fixtures, configurations other tests extend or use (a new test starts from one of these):",
+        "",
+      );
+      for (const s of r.jvm.shared)
+        lines.push(`- ${code(s.file)} — used by ${s.tests} test${s.tests === 1 ? "" : "s"}`);
+    }
+  }
+  if (r.jvm && r.jvm.libraries.length > 0)
+    lines.push("", "## Libraries of the main code", "", `- ${r.jvm.libraries.join(", ")}`);
   if (r.commands.length > 0) {
     lines.push("", "## Commands", "");
     for (const c of r.commands) lines.push(`- ${c.name}: ${code(c.command)}`);
@@ -196,6 +256,84 @@ export function renderModuleDoc(map: VerifiedModuleMap, facts?: ModuleFacts): st
   if (map.unknowns.length > 0) {
     lines.push("", "## Not established from the code", "");
     for (const u of map.unknowns) lines.push(`- ${oneLine(u)}`);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+/**
+ * The contracts of the code (`contracts.md`): the HTTP endpoints it serves by controller, the
+ * ones it calls through clients of other services, the message topics of its config and their
+ * listeners. Scoped by `paths` to the files that declare them: in the context of work on those.
+ */
+export function renderContracts(c: CodeContracts): string | undefined {
+  if (c.endpoints.length === 0 && c.topics.length === 0) return undefined;
+  const files = [
+    ...new Set([
+      ...c.endpoints.map((e) => e.file),
+      ...c.listeners.map((l) => l.file),
+      ...c.topics.map((t) => t.file),
+    ]),
+  ];
+  const dirs = [...new Set(files.map((f) => f.slice(0, f.lastIndexOf("/"))))].sort();
+  const lines: string[] = [
+    "---",
+    "tags: [contracts, generated]",
+    `paths: [${dirs.map((d) => JSON.stringify(`${d}/**`)).join(", ")}]`,
+    "---",
+    ONBOARD_MARKER,
+    "# Contracts of the code",
+    "",
+    "Read off the code without a model: what this service serves, what it calls, which topics it reads. A task's `METHOD /path` and topic names are checked against the same facts in the sources step.",
+  ];
+  const group = (items: readonly (typeof c.endpoints)[number][]) => {
+    const by = new Map<string, Array<(typeof c.endpoints)[number]>>();
+    for (const e of items) by.set(e.file, [...(by.get(e.file) ?? []), e]);
+    return [...by.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  };
+  const served = c.endpoints.filter((e) => e.direction !== "out");
+  const called = c.endpoints.filter((e) => e.direction === "out");
+  if (served.length > 0) {
+    lines.push("", `## HTTP endpoints served (${served.length})`);
+    for (const [file, es] of group(served)) {
+      lines.push("", `### ${basename(file).replace(/\.\w+$/, "")} (${code(file)})`);
+      for (const e of [...es].sort(
+        (a, b) =>
+          (a.path ?? "").localeCompare(b.path ?? "") || (a.method ?? "").localeCompare(b.method ?? ""),
+      ))
+        lines.push(
+          `- ${code(`${e.method ?? "ANY"} ${e.path ?? ""}`)}${e.key ? ` — ${code(e.key)}` : ""}${e.line ? ` :${e.line}` : ""}`,
+        );
+    }
+  }
+  if (called.length > 0) {
+    lines.push("", `## Calls to other services (${called.length})`);
+    for (const [file, es] of group(called)) {
+      lines.push(
+        "",
+        `### ${es[0]?.client ? `${code(es[0].client)} through ` : ""}${basename(file).replace(/\.\w+$/, "")} (${code(file)})`,
+      );
+      for (const e of es)
+        lines.push(`- ${code(`${e.method ?? "ANY"} ${e.path ?? ""}`)}${e.key ? ` — ${code(e.key)}` : ""}`);
+    }
+  }
+  if (c.topics.length > 0) {
+    lines.push(
+      "",
+      `## Message topics (${c.topics.length})`,
+      "",
+      "| property | topic | config | listened to by |",
+      "|---|---|---|---|",
+    );
+    for (const t of [...c.topics].sort(
+      (a, b) => a.property.localeCompare(b.property) || a.file.localeCompare(b.file),
+    )) {
+      const by = c.listeners
+        .filter((l) => l.property === t.property || l.topic === t.topic)
+        .map((l) => code(l.handler ?? basename(l.file)));
+      lines.push(
+        `| ${code(t.property)} | ${code(t.topic)} | ${basename(t.file)}${t.line ? `:${t.line}` : ""} | ${by.join(", ") || "—"} |`,
+      );
+    }
   }
   return `${lines.join("\n")}\n`;
 }

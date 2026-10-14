@@ -43,6 +43,16 @@ const joinPath = (a: string, b: string) =>
 
 export function codeContractsOf(nodes: readonly GraphNode[]): CodeContracts {
   const endpoints: ContractEntry[] = [];
+  // an API interface a controller implements is served, not called (generated from an OpenAPI spec)
+  const list = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  const servedApis = new Set(
+    nodes
+      .filter((n) => n.kind === "Type")
+      .filter((n) => list(n.metadata?.annotations).some((a) => a === "RestController" || a === "Controller"))
+      .flatMap((n) => list(n.metadata?.implements))
+      .map((x) => x.replace(/^.*\./, "")),
+  );
   // a module with a route of its own that extends a class with endpoints serves them under its route
   const subclasses = new Map<string, Array<{ file: string; route: string }>>();
   for (const n of nodes) {
@@ -61,7 +71,10 @@ export function codeContractsOf(nodes: readonly GraphNode[]): CodeContracts {
       ...opt("method", m.method),
       path: p,
       ...(line !== undefined ? { line } : {}),
-      ...(m.direction === "out" ? { direction: "out" as const } : { direction: "in" as const }),
+      ...(m.direction === "out" &&
+      (str(m.client) || !servedApis.has(String(m.handler ?? "").split(".")[0] ?? ""))
+        ? { direction: "out" as const }
+        : { direction: "in" as const }),
       ...opt("client", m.client),
     });
     const handler = str(m.handler);

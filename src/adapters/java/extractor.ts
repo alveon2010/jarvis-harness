@@ -26,7 +26,7 @@ import { SPRING_CONFIG, springFacts, topicFacts } from "./spring.ts";
  * `spec:url:` — the resolver links the test to the controller that serves the path: a MockMvc test
  * names no controller class, only its URL.
  */
-export const JAVA_EXTRACTOR_VERSION = 4;
+export const JAVA_EXTRACTOR_VERSION = 5;
 
 /** Path literals of a test: `"/api/orders/$id"`, `'/slots/${zone}'` → `/api/orders/{p}`, once each. */
 export function urlsIn(content: string): string[] {

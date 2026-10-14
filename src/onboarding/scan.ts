@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { extname, join } from "node:path";
 import { detectStackScopes, detectStacks } from "../capabilities/detector.ts";
-import type { GraphEdge } from "../core/capabilities/contracts.ts";
+import type { GraphEdge, GraphNode } from "../core/capabilities/contracts.ts";
 import { git } from "../tools/local/exec.ts";
 
 /**
@@ -49,6 +49,17 @@ export interface ScanReport {
   readonly files: number;
   readonly lines: number;
   readonly graph: { available: boolean; nodes?: number; edges?: number; reason?: string };
+  /** A JVM tree's tests and libraries, from the graph (`jvmFactsOf`). */
+  readonly jvm?: JvmFacts;
+}
+
+export interface JvmFacts {
+  /** Per test source root: the runnable tests, their naming and the frameworks they import. */
+  readonly testRoots: Array<{ root: string; tests: number; suffixes: string[]; frameworks: string[] }>;
+  /** Test code other tests extend or use (base classes, fixtures, configurations), most used first. */
+  readonly shared: Array<{ file: string; tests: number }>;
+  /** Libraries the main code imports, by name. */
+  readonly libraries: string[];
 }
 
 const CODE_EXT: Record<string, string> = {
@@ -64,6 +75,9 @@ const CODE_EXT: Record<string, string> = {
   ".rs": "rust",
   ".java": "java",
   ".kt": "kotlin",
+  ".kts": "kotlin",
+  ".groovy": "groovy",
+  ".scala": "scala",
   ".rb": "ruby",
   ".php": "php",
   ".swift": "swift",
@@ -78,28 +92,73 @@ const DOC_DIRS = new Set(["docs", "doc", "documentation"]);
 const TEST_FILE = /(\.|_)(test|spec)\.[a-z]+$|(^|\/)test_[^/]+\.py$|Tests?\.cs$|_test\.go$/;
 
 export function rolOf(path: string, first: string): ModuleFacts["role"] {
-  if (TEST_DIRS.has(first)) return "tests";
+  if (TEST_DIRS.has(first) || TEST_SOURCE_SET.test(path)) return "tests";
+  if (/(^|\/)src\/[^/]+\/resources$/.test(path)) return "config";
+  if (/(^|\/)src\/docs(\/|$)/.test(path)) return "docs";
   if (DOC_DIRS.has(first)) return "docs";
-  if (first.startsWith(".") || first === "scripts" || first === "tools") return "config";
+  if (first.startsWith(".") || first === "scripts" || first === "tools" || first === "gradle")
+    return "config";
   return path === "(root)" ? "other" : "source";
 }
 
-/** An external package by name — `pkg:react`, `pkg:@scope/name` — not a module of this tree. */
+/** An external package by name — `pkg:react`, `pkg:@scope/name`, `pkg:org.example.web` — not a module of this tree. */
 function externalOf(target: string): string | undefined {
   if (!target.startsWith("pkg:")) return undefined;
   const name = target.slice(4);
+  // a JVM package: its first three parts (`org.springframework.web`), a library more than a class
+  if (!name.includes("/") && /^[a-z][\w]*(\.[\w]+)+$/.test(name))
+    return `pkg:${name.split(".").slice(0, 3).join(".")}`;
   return `pkg:${name
     .split("/")
     .slice(0, name.startsWith("@") ? 2 : 1)
     .join("/")}`;
 }
 
-/** The module of a graph target: a file's module, or the external package it names. */
-function targetModuleOf(target: string): string {
-  return externalOf(target) ?? moduleOf(target);
+/** Test source sets of a JVM build: `src/test/…`, `src/integrationTest/…`. */
+const TEST_SOURCE_SET = /(^|\/)src\/(test|it|integrationTest|testFixtures)(\/|$)/;
+
+/**
+ * Where the modules of a JVM tree are: each source root (`src/main/java`, `svc/src/test/groovy`) with
+ * its base package — the directory every source file of the root is under. A module is a package
+ * right below the base (`…/orders/service`): the layers and features of the service, not one
+ * `src/main` for everything.
+ */
+export interface ModuleLayout {
+  readonly jvm: ReadonlyArray<{ readonly root: string; readonly base: string }>;
 }
 
-export function moduleOf(file: string): string {
+export function moduleLayoutOf(files: readonly string[]): ModuleLayout {
+  const dirs = new Map<string, string[][]>();
+  for (const f of files) {
+    const m = /^(.*?src\/[^/]+\/(?:java|groovy|kotlin))\/(.+)\/[^/]+\.(?:java|groovy|kt)$/.exec(f);
+    if (!m) continue;
+    const root = m[1] as string;
+    dirs.set(root, [...(dirs.get(root) ?? []), (m[2] as string).split("/")]);
+  }
+  const jvm = [...dirs.entries()].map(([root, all]) => {
+    const first = all[0] ?? [];
+    let n = 0;
+    while (n < first.length && all.every((d) => d[n] === first[n])) n += 1;
+    return { root, base: [root, ...first.slice(0, n)].join("/") };
+  });
+  return { jvm: jvm.sort((a, b) => b.root.length - a.root.length) };
+}
+
+/** The module of a graph target: a file's module, or the external package it names. */
+function targetModuleOf(target: string, layout?: ModuleLayout): string {
+  return externalOf(target) ?? moduleOf(target, layout);
+}
+
+export function moduleOf(file: string, layout?: ModuleLayout): string {
+  for (const { root, base } of layout?.jvm ?? []) {
+    if (file.startsWith(`${base}/`)) {
+      const rest = file.slice(base.length + 1).split("/");
+      return rest.length > 1 ? `${base}/${rest[0]}` : base;
+    }
+    if (file.startsWith(`${root}/`)) return root;
+  }
+  const resources = /^(.*?src\/[^/]+\/resources)\//.exec(file);
+  if (resources && layout && layout.jvm.length > 0) return resources[1] as string;
   const parts = file.split("/");
   if (parts.length === 1) return "(root)";
   const [a, b] = parts as [string, string];
@@ -162,8 +221,11 @@ function commandsOf(root: string, pm: string | undefined, files: readonly string
     out.push({ name: "lint", command: "cargo clippy", source: "Cargo.toml" });
   }
   if (exists(root, "pom.xml")) out.push({ name: "tests", command: "mvn test", source: "pom.xml" });
-  else if (exists(root, "build.gradle") || exists(root, "build.gradle.kts"))
+  else if (exists(root, "build.gradle") || exists(root, "build.gradle.kts")) {
     out.push({ name: "tests", command: "./gradlew test", source: "build.gradle" });
+    // compiles main and tests: what a typecheck is for Java (the test task must stay last in `tests`)
+    out.push({ name: "typecheck", command: "./gradlew classes testClasses -q", source: "build.gradle" });
+  }
   if (exists(root, "pyproject.toml") || exists(root, "pytest.ini") || exists(root, "requirements.txt")) {
     const toml = exists(root, "pyproject.toml") ? readFileSync(join(root, "pyproject.toml"), "utf8") : "";
     if (/pytest/.test(toml) || exists(root, "pytest.ini") || has(/(^|\/)test_[^/]+\.py$/))
@@ -229,9 +291,18 @@ function entryPointsOf(root: string, files: readonly string[]): string[] {
 }
 
 function testsOf(files: readonly string[]): ScanReport["tests"] {
-  const tests = files.filter((f) => TEST_FILE.test(f) || TEST_DIRS.has(f.split("/")[0] ?? ""));
-  const inDir = tests.filter((f) => TEST_DIRS.has(f.split("/")[0] ?? ""));
-  const colocated = tests.filter((f) => !TEST_DIRS.has(f.split("/")[0] ?? ""));
+  // a JVM test source set (`src/test/java`) is a directory of tests too
+  const setOf = (f: string) => /^(.*?src\/(?:test|it|integrationTest|testFixtures)\/[^/]+)\//.exec(f)?.[1];
+  const dirOf = (f: string) =>
+    TEST_DIRS.has(f.split("/")[0] ?? "") ? (f.split("/")[0] as string) : setOf(f);
+  const tests = files.filter(
+    (f) =>
+      TEST_FILE.test(f) ||
+      TEST_DIRS.has(f.split("/")[0] ?? "") ||
+      (setOf(f) !== undefined && CODE_EXT[extname(f)] !== undefined),
+  );
+  const inDir = tests.filter((f) => dirOf(f) !== undefined);
+  const colocated = tests.filter((f) => dirOf(f) === undefined);
   const layout: ScanReport["tests"]["layout"] =
     tests.length === 0
       ? "none"
@@ -243,7 +314,7 @@ function testsOf(files: readonly string[]): ScanReport["tests"] {
   return {
     files: tests.length,
     layout,
-    dirs: [...new Set(inDir.map((f) => f.split("/")[0] as string))].sort(),
+    dirs: [...new Set(inDir.map((f) => dirOf(f) as string))].sort(),
   };
 }
 
@@ -293,7 +364,7 @@ async function commitsOf(
       conventional,
       ticketPrefix: ticket,
       scopes: [...scopes.entries()]
-        .sort((a, b) => b[1] - a[1])
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
         .slice(0, 6)
         .map(([k]) => k),
     },
@@ -363,20 +434,21 @@ export async function scopeFacts(
   const s = { files: 0, lines: 0, langs: new Set<string>() };
   for (const f of files) countFile(root, f, s);
 
-  const home = moduleOf(`${path}/x`);
+  const layout = moduleLayoutOf(await trackedFiles(root));
+  const home = moduleOf(`${path}/x`, layout);
   const depth = path.split("/").length;
   const inside = (f: string) => f.startsWith(`${path}/`);
   const keyOf = (f: string) => {
     const external = externalOf(f);
     if (external) return external;
-    if (moduleOf(f) !== home) return moduleOf(f);
+    if (moduleOf(f, layout) !== home) return moduleOf(f, layout);
     const parts = f.split("/");
     return parts.length > depth ? parts.slice(0, depth).join("/") : parts.slice(0, -1).join("/") || f;
   };
   const dependsOn = new Set<string>();
   const usedBy = new Set<string>();
   for (const e of graph?.edges ?? []) {
-    if (e.relation !== "DEPENDS_ON" || e.to.startsWith("unresolved:")) continue;
+    if (e.relation !== "DEPENDS_ON" || e.to.startsWith("unresolved:") || e.from.includes("#")) continue;
     if (inside(e.from) && !inside(e.to)) dependsOn.add(keyOf(e.to));
     else if (inside(e.to) && !inside(e.from)) usedBy.add(keyOf(e.from));
   }
@@ -401,7 +473,9 @@ export async function trackedFiles(root: string): Promise<string[]> {
 export interface ScanOptions {
   readonly root: string;
   /** Edges of the project graph, when one is available: module dependencies come from it. */
-  readonly graph?: { edges: readonly GraphEdge[]; nodes: number } | undefined;
+  readonly graph?:
+    | { edges: readonly GraphEdge[]; nodes: number; all?: readonly GraphNode[] | undefined }
+    | undefined;
   readonly graphReason?: string;
 }
 
@@ -411,10 +485,11 @@ export async function scanProject(options: ScanOptions): Promise<ScanReport> {
   const all = listed.code === 0 ? listed.stdout.split("\0").filter(Boolean) : [];
   const files = all.filter((f) => !SKIP_FILE.test(f) && !SKIP_DIR.test(f));
 
+  const layout = moduleLayoutOf(files);
   const stats = new Map<string, { files: number; lines: number; langs: Set<string> }>();
   let totalLines = 0;
   for (const f of files) {
-    const m = moduleOf(f);
+    const m = moduleOf(f, layout);
     const s = stats.get(m) ?? { files: 0, lines: 0, langs: new Set<string>() };
     totalLines += countFile(root, f, s);
     stats.set(m, s);
@@ -424,10 +499,13 @@ export async function scanProject(options: ScanOptions): Promise<ScanReport> {
   if (options.graph) {
     for (const e of options.graph.edges) {
       if (e.relation !== "DEPENDS_ON" || e.to.startsWith("unresolved:")) continue;
-      const a = moduleOf(e.from);
+      // a symbol (`file#Type.method`) belongs to its file's module; symbol edges are not modules' ones
+      if (e.from.includes("#") || e.to.includes("#")) continue;
+      const a = moduleOf(e.from, layout);
       // pilot: `pkg:react` has no slash and became the module "(root)"
-      const b = targetModuleOf(e.to);
-      if (a === b) continue;
+      const b = targetModuleOf(e.to, layout);
+      // the JDK is everyone's dependency: no fact about a module
+      if (a === b || /^pkg:(java|javax\.annotation|jdk|kotlin|groovy)(\.|$)/.test(b)) continue;
       const row = deps.get(a) ?? new Map<string, number>();
       row.set(b, (row.get(b) ?? 0) + 1);
       deps.set(a, row);
@@ -451,6 +529,10 @@ export async function scanProject(options: ScanOptions): Promise<ScanReport> {
 
   const pm = packageManagerOf(root);
   const { commits, hotspots } = await commitsOf(root);
+  const jvm =
+    layout.jvm.length > 0 && options.graph
+      ? jvmFactsOf(layout, options.graph.edges, options.graph.all ?? [])
+      : undefined;
   return {
     root,
     stacks: detectStacks(root),
@@ -468,7 +550,12 @@ export async function scanProject(options: ScanOptions): Promise<ScanReport> {
           .map((file) => ({ tool, file })),
       ),
       ci: [...new Set(CI.filter(([, re]) => files.some((f) => re.test(f))).map(([n]) => n))],
-      testFrameworks: frameworksOf(root, files),
+      testFrameworks: [
+        ...new Set([
+          ...frameworksOf(root, files),
+          ...(jvm?.testRoots ?? []).flatMap((r) => r.frameworks.map((f) => f.replace(/ \(\d+\)$/, ""))),
+        ]),
+      ].sort(),
     },
     tests: testsOf(files),
     commits,
@@ -479,5 +566,106 @@ export async function scanProject(options: ScanOptions): Promise<ScanReport> {
     graph: options.graph
       ? { available: true, nodes: options.graph.nodes, edges: options.graph.edges.length }
       : { available: false, ...(options.graphReason ? { reason: options.graphReason } : {}) },
+    ...(jvm ? { jvm } : {}),
+  };
+}
+
+const TEST_FRAMEWORKS: Array<[RegExp, string]> = [
+  [/^org\.junit\.jupiter/, "JUnit 5"],
+  [/^org\.junit(\.|$)(?!jupiter)/, "JUnit 4"],
+  [/^spock\./, "Spock"],
+  [/^org\.mockito/, "Mockito"],
+  [/^org\.testcontainers/, "Testcontainers"],
+  [/^org\.springframework\.boot\.test/, "Spring Boot Test"],
+  [/^org\.springframework\.test\.web\.servlet/, "MockMvc"],
+  [/^org\.springframework\.test\.web\.reactive/, "WebTestClient"],
+  [/^org\.springframework\.cloud\.stream\.binder\.test/, "Spring Cloud Stream test binder"],
+  [/^org\.springframework\.kafka\.test/, "Spring Kafka test"],
+  [/^org\.assertj/, "AssertJ"],
+  [/^(com\.github\.tomakehurst\.wiremock|org\.wiremock)/, "WireMock"],
+];
+const LIBRARIES: Array<[RegExp, string]> = [
+  [/^lombok/, "Lombok"],
+  [/^org\.mapstruct/, "MapStruct"],
+  [/^org\.springframework\.web/, "Spring MVC"],
+  [/^org\.springframework\.data\.mongodb/, "Spring Data MongoDB"],
+  [/^org\.springframework\.data\.jpa|^jakarta\.persistence|^javax\.persistence/, "JPA"],
+  [/^org\.springframework\.kafka/, "Spring Kafka"],
+  [/^org\.springframework\.cloud\.stream/, "Spring Cloud Stream"],
+  [/^org\.springframework\.cloud\.openfeign/, "OpenFeign"],
+  [/^(jakarta|javax)\.validation/, "Bean Validation"],
+  [/^io\.swagger|^org\.springdoc/, "OpenAPI annotations"],
+  [/^com\.fasterxml\.jackson/, "Jackson"],
+  [/^reactor\.|^org\.springframework\.web\.reactive/, "Reactor / WebFlux"],
+];
+
+/**
+ * A JVM tree's tests and libraries from its graph: what each test source root's runnable tests are
+ * called and import, the test code others extend or use, the libraries of the main code. The
+ * conventions a test agent needs before it writes one — which framework where, which base class.
+ */
+export function jvmFactsOf(
+  layout: ModuleLayout,
+  edges: readonly GraphEdge[],
+  nodes: readonly GraphNode[],
+): JvmFacts | undefined {
+  const testRoots = layout.jvm.filter((r) => TEST_SOURCE_SET.test(`${r.root}/`));
+  const runnable = new Set(nodes.filter((n) => n.kind === "Test" && n.file).map((n) => n.file as string));
+  const rootOf = (f: string) => testRoots.find((r) => f.startsWith(`${r.root}/`))?.root;
+  const imports = new Map<string, Set<string>>(); // test file → packages
+  const usedBy = new Map<string, Set<string>>(); // test-source file → runnable tests
+  const mainLibs = new Set<string>();
+  for (const e of edges) {
+    if (e.from.includes("#") || e.to.includes("#")) continue;
+    // a runnable test's imports are TESTED_BY edges into it; other files' are DEPENDS_ON out of them
+    const [file, target] =
+      e.relation === "TESTED_BY" ? [e.to, e.from] : e.relation === "DEPENDS_ON" ? [e.from, e.to] : [];
+    if (!file || !target) continue;
+    if (target.startsWith("pkg:")) {
+      const pkg = target.slice(4);
+      if (rootOf(file)) imports.set(file, (imports.get(file) ?? new Set()).add(pkg));
+      else if (/\.(java|groovy|kt)$/.test(file))
+        for (const [re, name] of LIBRARIES) if (re.test(pkg)) mainLibs.add(name);
+    } else if (e.relation === "TESTED_BY" && rootOf(target) && runnable.has(file)) {
+      usedBy.set(target, (usedBy.get(target) ?? new Set()).add(file));
+    }
+  }
+  if (testRoots.length === 0 && mainLibs.size === 0) return undefined;
+  return {
+    testRoots: testRoots
+      .map(({ root }) => {
+        const tests = [...runnable].filter((f) => f.startsWith(`${root}/`));
+        const suffixes = new Map<string, number>();
+        for (const t of tests) {
+          const s = /(Test|Tests|Spec|Specification|IT)\.\w+$/.exec(t)?.[1];
+          if (s) suffixes.set(s, (suffixes.get(s) ?? 0) + 1);
+        }
+        // frameworks: what the root's test code imports, counted by its runnable tests and support code
+        const code = [...imports.keys()].filter((f) => f.startsWith(`${root}/`));
+        const frameworks = new Map<string, number>();
+        for (const t of code)
+          for (const name of new Set(
+            [...(imports.get(t) ?? [])].flatMap((p) =>
+              TEST_FRAMEWORKS.filter(([re]) => re.test(p)).map(([, n]) => n),
+            ),
+          ))
+            frameworks.set(name, (frameworks.get(name) ?? 0) + 1);
+        return {
+          root,
+          tests: tests.length,
+          suffixes: [...suffixes]
+            .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+            .map(([s, n]) => `*${s} (${n})`),
+          frameworks: [...frameworks]
+            .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+            .map(([f, n]) => `${f} (${n})`),
+        };
+      })
+      .filter((r) => r.tests > 0),
+    shared: [...usedBy]
+      .map(([file, tests]) => ({ file, tests: tests.size }))
+      .sort((a, b) => b.tests - a.tests || a.file.localeCompare(b.file))
+      .slice(0, 12),
+    libraries: [...mainLibs].sort(),
   };
 }

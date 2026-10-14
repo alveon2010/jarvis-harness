@@ -83,7 +83,11 @@ export function springFacts(
   if (!/@(\w+Mapping|FeignClient|KafkaListener)\b/.test(content)) return { nodes: [] };
   const code = blankLiterals(content, true);
   const lineAt = (index: number) => code.slice(0, index).split("\n").length;
-  const types = [...code.matchAll(TYPE)].map((m) => ({ name: m[2] as string, at: m.index ?? 0 }));
+  const types = [...code.matchAll(TYPE)].map((m) => ({
+    kind: m[1] as string,
+    name: m[2] as string,
+    at: m.index ?? 0,
+  }));
   const first = types[0];
   const typeAt = (at: number) => [...types].reverse().find((t) => t.at < at)?.name ?? first?.name ?? "";
   let prefix = "";
@@ -94,6 +98,9 @@ export function springFacts(
   const abstract =
     first !== undefined &&
     /\babstract\s+(?:[\w\s]*\s)?class\s+$/.test(code.slice(Math.max(0, first.at - 80), first.at + 6));
+  // an interface with mappings and no controller annotation: the client of another service (Feign
+  // declared elsewhere, an HTTP interface) — controllers are classes
+  const asClient = first?.kind === "interface" && !/@(Rest)?Controller\b/.test(code);
   const base = first
     ? new RegExp(`\\b${first.name}\\s*(?:<[^{]*?>)?\\s+extends\\s+([A-Z]\\w*)`).exec(code)?.[1]
     : undefined;
@@ -148,7 +155,7 @@ export function springFacts(
             ...(method ? { method } : {}),
             path: full,
             ...(handler ? { handler: `${typeAt(at)}.${handler}` } : {}),
-            direction: client !== undefined ? "out" : "in",
+            direction: client !== undefined || asClient ? "out" : "in",
             ...(client ? { client } : {}),
             ...(abstract ? { inherited: true } : {}),
             line: lineAt(at),
