@@ -74,7 +74,7 @@ models:
     baseUrl: ${server.baseUrl}
     model: flash
     egress: private
-    contextWindow: 16000
+    contextWindow: 17000   # room for the research agent's tool definitions
     maxOutput: 1000
     supports: { tools: true, jsonMode: true }
 roles:

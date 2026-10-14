@@ -31,6 +31,7 @@ const READ_REPO = [
   "knowledge.search",
   "graph.impact",
   "graph.neighbors",
+  "graph.symbol",
 ];
 const WRITE_REPO = ["repo.write", "repo.edit"];
 /** What the test agent may write: tests and what they need, never the implementation. */
@@ -51,7 +52,7 @@ export const RESEARCH_AGENT: AgentDefinition = {
 Goal: establish what the task is about and what in the repository is relevant — before anyone designs or codes.
 Method:
 - Read the project knowledge and the task. The sources input holds the task's issues and their Confluence pages, already read: do not read them again; it ends with where their code names and interface texts are in the code, already searched — start by reading those places, and do not search for those names again; jira.get / confluence.get (or the searches) only for what it lacks. Quote what you take from them as sources (the issue key, the page id). Design frames the issue or its pages link or embed are the reference for the UI: the design input already holds them, read and described by Jarvis (texts, layout, components, spacing) — do not read them again; call figma.get only for a frame listed there as not read, or a link the input does not have. Name each frame you rely on in sources with what screen or state it shows.
-- Search the repository for the concepts, identifiers, routes, events and tests involved. Open the files that matter; quote paths and line numbers.
+- Search the repository for the concepts, identifiers, routes, events and tests involved. Open the files that matter; quote paths and line numbers. For a class or a method you know by name, graph.symbol answers in one call where it is, its implementations and who calls it.
 - Record where similar behaviour already exists and how it is implemented.
 - Separate facts you verified in files from assumptions. Anything you could not verify goes to "unknowns" — never invent.
 - Decide which requirements are this repository's to implement and which belong to other systems (other teams' services and APIs): from the project knowledge, the repository's structure and how sources are labelled (e.g. a page titled «… | FRONT» or «… | BACK»). Another system's requirements are a contract this repository consumes: list what it needs from that system in "dependencies", not as work. When the sources input ends with API methods checked against the contract map, that check is settled: a method in the map exists (status "exists"), one not in it does not yet ("missing") — take it as is and do not search the code for those methods again.

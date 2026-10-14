@@ -48,6 +48,8 @@ export class JavaResolver implements SpecifierResolver {
   private readonly byName = new Map<string, string[]>();
   private readonly types = new Map<string, TypeEntry>();
   private readonly scopes = new Map<string, FileScope>();
+  /** Routes the tree serves: a controller file and its path's segments. */
+  private readonly routes: Array<{ readonly file: string; readonly segments: readonly string[] }> = [];
 
   constructor(files: ReadonlySet<string>, nodes: readonly GraphNode[] = []) {
     for (const f of files) {
@@ -86,12 +88,50 @@ export class JavaResolver implements SpecifierResolver {
       scope.declared.set(path, fqn);
       scope.declared.set(path.replace(/^.*\./, ""), fqn);
     }
+    this.indexRoutes(nodes);
     const byId = new Map([...this.types.values()].map((t) => [t.id, t]));
     for (const m of methods) {
       const cut = m.id.lastIndexOf(".");
       const owner = byId.get(m.id.slice(0, cut));
       owner?.methods.set(m.id.slice(cut + 1), m.id);
     }
+  }
+
+  /** The endpoints served here; a base controller's under each subclass's route, at the subclass. */
+  private indexRoutes(nodes: readonly GraphNode[]): void {
+    const subclasses = new Map<string, Array<{ file: string; route: string }>>();
+    for (const n of nodes) {
+      const m = n.metadata ?? {};
+      if (n.kind === "Module" && n.file && typeof m.route === "string" && typeof m.extends === "string")
+        subclasses.set(m.extends, [...(subclasses.get(m.extends) ?? []), { file: n.file, route: m.route }]);
+    }
+    const segs = (p: string) => p.split("/").filter(Boolean);
+    for (const n of nodes) {
+      const m = n.metadata ?? {};
+      if (n.kind !== "Endpoint" || !n.file || m.direction === "out" || typeof m.path !== "string") continue;
+      if (m.inherited !== true) this.routes.push({ file: n.file, segments: segs(m.path) });
+      else {
+        const owner = typeof m.handler === "string" ? (m.handler.split(".")[0] as string) : "";
+        for (const s of subclasses.get(owner) ?? [])
+          this.routes.push({ file: s.file, segments: [...segs(s.route), ...segs(m.path)] });
+      }
+    }
+  }
+
+  /** The controller serving a path a test names: segments equal or a parameter, one named at least. */
+  private routeOf(path: string): string | undefined {
+    const want = path.split("/").filter(Boolean);
+    const param = (s: string) => /^\$?\{[^}]*\}$/.test(s);
+    const found = this.routes.filter(
+      (r) =>
+        r.segments.length === want.length &&
+        r.segments.every(
+          (s, i) =>
+            param(s) || param(want[i] as string) || s.toLowerCase() === (want[i] as string).toLowerCase(),
+        ) &&
+        r.segments.some((s, i) => !param(s) && !param(want[i] as string)),
+    );
+    return [...new Set(found.map((r) => r.file))].sort()[0];
   }
 
   /** A type name as written in `file` → its fqn in the tree, `ext:<fqn>` outside it, undefined unknown. */
@@ -143,6 +183,7 @@ export class JavaResolver implements SpecifierResolver {
   }
 
   resolve(from: string, spec: string): string | null | undefined {
+    if (spec.startsWith("url:")) return this.routeOf(spec.slice(4)) ?? null;
     if (spec.startsWith("type:") || spec.startsWith("call:")) {
       const file = from.slice(0, from.indexOf("#") < 0 ? undefined : from.indexOf("#"));
       if (spec.startsWith("type:")) {

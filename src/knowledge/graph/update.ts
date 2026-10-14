@@ -168,7 +168,9 @@ export async function updateGraph(options: UpdateOptions): Promise<UpdateResult>
   const resolvers = new Map(
     options.extractors.map((x) => [x, x.createResolver?.(options.workspace, known, nodes)] as const),
   );
-  const resolverOf = (file: string) => {
+  const resolverOf = (from: string) => {
+    // a symbol (`file#Type.method`) resolves with its file's extractor
+    const file = from.includes("#") ? from.slice(0, from.indexOf("#")) : from;
     const x = options.extractors.find((ex) => ex.extensions.some((ext) => file.endsWith(ext)));
     return x ? resolvers.get(x) : undefined;
   };
@@ -233,20 +235,49 @@ export interface ImpactResult {
   readonly unresolved: string[];
 }
 
+/**
+ * What a change reaches: the files that depend on the changed ones (transitively, up to `maxDepth`),
+ * and the tests of all of them. A file whose types implement or extend types of other files reaches
+ * the users of those too — code holds the interface, the implementation runs (a change in
+ * `OrderServiceImpl` reaches whoever is given an `OrderService`).
+ */
 export function impactOf(snapshot: Snapshot, changed: readonly string[], maxDepth = 3): ImpactResult {
   const reverse = new Map<string, string[]>();
   const tests = new Map<string, string[]>();
+  const supers = new Map<string, Set<string>>();
+  /** Super file → files of concrete types under it: other implementations, not users. */
+  const concrete = new Map<string, Set<string>>();
+  const fileOf = (id: string) => (id.includes("#") ? id.slice(0, id.indexOf("#")) : id);
+  const abstract = new Set(snapshot.nodes.filter((n) => n.metadata?.abstract === true).map((n) => n.id));
   for (const e of snapshot.edges) {
     if (e.relation === "DEPENDS_ON") reverse.set(e.to, [...(reverse.get(e.to) ?? []), e.from]);
     if (e.relation === "TESTED_BY") tests.set(e.from, [...(tests.get(e.from) ?? []), e.to]);
+    if ((e.relation === "IMPLEMENTS" || e.relation === "EXTENDS") && e.to.includes("#")) {
+      const [a, b] = [fileOf(e.from), fileOf(e.to)];
+      if (a !== b) supers.set(a, (supers.get(a) ?? new Set()).add(b));
+      if (a !== b && !abstract.has(e.from)) concrete.set(b, (concrete.get(b) ?? new Set()).add(a));
+    }
   }
+  /** A file and the files of its supertypes, up their chain. */
+  const asSeen = (file: string): string[] => {
+    const out = [file];
+    for (let i = 0; i < out.length; i += 1)
+      for (const s of supers.get(out[i] as string) ?? []) if (!out.includes(s)) out.push(s);
+    return out;
+  };
   const distance = new Map<string, number>();
   const queue: Array<[string, number]> = changed.map((c) => [c, 0]);
   for (const c of changed) distance.set(c, 0);
   while (queue.length > 0) {
     const [file, d] = queue.shift() as [string, number];
     if (d >= maxDepth) continue;
-    for (const dep of reverse.get(file) ?? []) {
+    // through a supertype: its users and the interfaces that extend it, not the other implementations
+    const reached = asSeen(file).flatMap((s) =>
+      s === file
+        ? (reverse.get(s) ?? [])
+        : (reverse.get(s) ?? []).filter((dep) => !concrete.get(s)?.has(dep)),
+    );
+    for (const dep of reached) {
       if (!distance.has(dep)) {
         distance.set(dep, d + 1);
         queue.push([dep, d + 1]);
@@ -259,7 +290,7 @@ export function impactOf(snapshot: Snapshot, changed: readonly string[], maxDept
     .sort((a, b) => a.distance - b.distance || a.file.localeCompare(b.file));
   const covering = new Set<string>();
   for (const f of [...changed, ...dependents.map((d) => d.file)])
-    for (const t of tests.get(f) ?? []) covering.add(t);
+    for (const s of asSeen(f)) for (const t of tests.get(s) ?? []) covering.add(t);
   const unresolved = [
     ...new Set(
       snapshot.edges
@@ -282,4 +313,101 @@ export function neighborsOf(
       .filter((n) => n.file === file && n.id !== file)
       .map((n) => n.id.split("#")[1] as string),
   };
+}
+
+/* ---- symbols (classes, methods) of extractors that record them ---- */
+
+export interface SymbolRefLine {
+  readonly id: string;
+  readonly file: string;
+  readonly line?: number;
+  /** A caller reached through a supertype's method: its id. */
+  readonly via?: string;
+}
+
+export interface SymbolFacts extends SymbolRefLine {
+  readonly endLine?: number;
+  readonly supertypes: SymbolRefLine[];
+  readonly subtypes: SymbolRefLine[];
+  readonly callers: SymbolRefLine[];
+  readonly callees: SymbolRefLine[];
+}
+
+/**
+ * A class or a method by name — `Type`, `Outer.Inner`, `Type.method`, `Type.method/2` or a node id —
+ * with its supertypes, subtypes, callers and callees. Callers of a method include the callers of the
+ * same method of its supertypes (code calls the interface; this one runs).
+ */
+export function symbolOf(snapshot: Snapshot, name: string): SymbolFacts[] {
+  const q = name.trim();
+  if (!q) return [];
+  const byId = new Map(snapshot.nodes.map((n) => [n.id, n]));
+  const ref = (id: string, via?: string): SymbolRefLine => {
+    const n = byId.get(id);
+    const line = n?.metadata?.line;
+    return {
+      id,
+      file: n?.file ?? id.slice(0, Math.max(0, id.indexOf("#"))),
+      ...(typeof line === "number" ? { line } : {}),
+      ...(via ? { via } : {}),
+    };
+  };
+  const local = (id: string) => id.slice(id.indexOf("#") + 1);
+  const matches = snapshot.nodes.filter((n) => {
+    if (n.kind !== "Type" && n.kind !== "Function") return false;
+    if (n.id === q) return true;
+    const l = local(n.id);
+    return (
+      l === q ||
+      l.endsWith(`.${q}`) ||
+      (n.kind === "Function" &&
+        (l.replace(/\/-?\d+$/, "") === q || l.replace(/\/-?\d+$/, "").endsWith(`.${q}`)))
+    );
+  });
+  const out = (rel: string, from: string) =>
+    snapshot.edges.filter((e) => e.relation === rel && e.from === from).map((e) => e.to);
+  const into = (rel: string, to: string) =>
+    snapshot.edges.filter((e) => e.relation === rel && e.to === to).map((e) => e.from);
+  const supersOf = (type: string): string[] => {
+    const seen: string[] = [];
+    const queue = [type];
+    while (queue.length > 0) {
+      const t = queue.shift() as string;
+      for (const s of [...out("EXTENDS", t), ...out("IMPLEMENTS", t)])
+        if (s.includes("#") && !seen.includes(s)) {
+          seen.push(s);
+          queue.push(s);
+        }
+    }
+    return seen;
+  };
+  return matches.slice(0, 5).map((n) => {
+    const isType = n.kind === "Type";
+    const type = isType ? n.id : n.id.slice(0, n.id.lastIndexOf("."));
+    const key = isType ? "" : n.id.slice(n.id.lastIndexOf(".") + 1);
+    const supertypes = isType ? supersOf(n.id) : [];
+    const subtypes = isType ? [...into("EXTENDS", n.id), ...into("IMPLEMENTS", n.id)] : [];
+    const callerIds = isType
+      ? snapshot.edges
+          .filter((e) => e.relation === "CALLS" && (e.to === n.id || e.to.startsWith(`${n.id}.`)))
+          .map((e) => e.from)
+      : into("CALLS", n.id);
+    const callers = [...new Set(callerIds)].map((id) => ref(id));
+    if (!isType)
+      for (const s of supersOf(type)) {
+        const same = `${s}.${key}`;
+        for (const id of new Set(into("CALLS", same)))
+          if (!callers.some((c) => c.id === id)) callers.push(ref(id, local(same)));
+      }
+    const callees = isType ? [] : [...new Set(out("CALLS", n.id))].map((id) => ref(id));
+    const endLine = n.metadata?.endLine;
+    return {
+      ...ref(n.id),
+      ...(typeof endLine === "number" ? { endLine } : {}),
+      supertypes: supertypes.map((id) => ref(id)),
+      subtypes: subtypes.map((id) => ref(id)),
+      callers: callers.sort((a, b) => a.id.localeCompare(b.id)),
+      callees,
+    };
+  });
 }

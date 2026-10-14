@@ -22,9 +22,24 @@ import { SPRING_CONFIG, springFacts, topicFacts } from "./spring.ts";
  * src/adapters/java/ast.ts): its types and methods are nodes (`file#Outer.Inner`,
  * `file#Type.method/arity`), with EXTENDS / IMPLEMENTS of their supertypes and CALLS of the methods
  * their bodies call, named as written (`spec:type:…`, `spec:call:Type#method/arity`) for the resolver.
- * Groovy and Kotlin keep the lexical reading.
+ * Groovy and Kotlin keep the lexical reading. A test file's path literals (`"/api/orders/$id"`) are
+ * `spec:url:` — the resolver links the test to the controller that serves the path: a MockMvc test
+ * names no controller class, only its URL.
  */
-export const JAVA_EXTRACTOR_VERSION = 3;
+export const JAVA_EXTRACTOR_VERSION = 4;
+
+/** Path literals of a test: `"/api/orders/$id"`, `'/slots/${zone}'` → `/api/orders/{p}`, once each. */
+export function urlsIn(content: string): string[] {
+  const out = new Set<string>();
+  for (const m of content.matchAll(/["'](\/[^"'\s?#]*)/g)) {
+    const path = (m[1] as string)
+      .replace(/\$\{[^}]*\}/g, "{p}")
+      .replace(/\$[A-Za-z_]\w*/g, "{p}")
+      .replace(/\/+$/, "");
+    if (/[A-Za-z]/.test(path) && !/\.(json|xml|csv|txt|pdf|yml|yaml|sql|html?)$/i.test(path)) out.add(path);
+  }
+  return [...out].sort();
+}
 
 const TEST_SOURCES = /(^|\/)src\/(test|it|integrationTest|testFixtures|[a-z]+Test)\//;
 const RUNNABLE = /(Test|Tests|Spec|Specification|IT)\.(java|groovy|kt)$/;
@@ -111,6 +126,8 @@ export class JavaExtractor implements ProjectGraphExtractor {
     const scopes = [src.pkg, ...src.imports.filter((i) => i.wildcard && !i.isStatic).map((i) => i.name)];
     for (const name of src.used) for (const scope of scopes) specs.add(`?${scope ? `${scope}.` : ""}${name}`);
     const relation: GraphEdge["relation"] = isTest ? "TESTED_BY" : "DEPENDS_ON";
+    // a test reaches a controller through its URL
+    if (isTestSource(file)) for (const url of urlsIn(content)) specs.add(`url:${url}`);
     const edges: GraphEdge[] = [
       ...[...specs].map((spec) => ({ from: file, to: `spec:${spec}`, relation })),
       ...(java ? symbolEdges(file, java) : []),

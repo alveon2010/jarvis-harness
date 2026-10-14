@@ -8,7 +8,7 @@ import { JavaExtractor } from "../../src/adapters/java/extractor.ts";
 import { JavaResolver } from "../../src/adapters/java/resolver.ts";
 import { blankLiterals, parseJvmSource } from "../../src/adapters/java/source.ts";
 import type { Runtime } from "../../src/app/runtime.ts";
-import { impactOf, repoIdOf, updateGraph } from "../../src/knowledge/graph/update.ts";
+import { impactOf, repoIdOf, symbolOf, updateGraph } from "../../src/knowledge/graph/update.ts";
 import { classSelection, testClassOf, testRunnerOf } from "../../src/orchestration/tools/relatedTests.ts";
 import { testRuntime } from "../helpers/engine.ts";
 import { type Sandbox, sandbox } from "../helpers/tmp.ts";
@@ -183,6 +183,83 @@ describe("JVM graph of a project", () => {
       evidence: ["build.gradle"],
     });
     expect(a.defaultCommands().test).toBe("./gradlew test");
+  });
+
+  it("reaches the users of an interface from its implementation, and a controller's MockMvc test by its URL", async () => {
+    write(
+      `${MAIN}/OrderService.java`,
+      "package com.example.orders;\npublic interface OrderService { Order find(String id); }\n",
+    );
+    write(
+      `${MAIN}/OrderServiceImpl.java`,
+      "package com.example.orders;\n@Service class OrderServiceImpl implements OrderService { OrderRepository repo; public Order find(String id) { return repo.find(); } }\n",
+    );
+    write(
+      `${MAIN}/LegacyOrderService.java`,
+      "package com.example.orders;\nclass LegacyOrderService implements OrderService { public Order find(String id) { return null; } }\n",
+    );
+    write(
+      `${MAIN}/web/OrderApi.java`,
+      'package com.example.orders.web;\nimport com.example.orders.OrderService;\n@RestController @RequestMapping("/api/orders")\npublic class OrderApi {\n  private final OrderService service;\n  @GetMapping("/{id}")\n  public Order get(@PathVariable String id) { return service.find(id); }\n}\n',
+    );
+    write(
+      "src/test/java/com/example/orders/web/OrderApiIT.java",
+      'package com.example.orders.web;\nclass OrderApiIT { static final String URL = "/api/orders/"; void get() { mockMvc.perform(get(URL + "42")); mockMvc.perform(get("/api/orders/$id")); } }\n',
+    );
+    git(["add", "-A"]);
+    git(["commit", "-q", "-m", "api"]);
+    rt = await testRuntime(sb);
+    const extractors = rt.capabilities
+      .list()
+      .map((a) => a.graphExtractor?.())
+      .filter((e) => e !== undefined);
+    const { snapshot } = await updateGraph({
+      workspace: sb.project,
+      repoId: repoIdOf(sb.project),
+      cacheRoot: rt.loaded.home.cacheDir,
+      extractors,
+      store: rt.graph,
+    });
+    expect(snapshot.edges).toEqual(
+      expect.arrayContaining([
+        {
+          from: `${MAIN}/web/OrderApi.java`,
+          to: "src/test/java/com/example/orders/web/OrderApiIT.java",
+          relation: "TESTED_BY",
+        },
+        {
+          from: `${MAIN}/OrderServiceImpl.java#OrderServiceImpl`,
+          to: `${MAIN}/OrderService.java#OrderService`,
+          relation: "IMPLEMENTS",
+        },
+        {
+          from: `${MAIN}/web/OrderApi.java#OrderApi.get/1`,
+          to: `${MAIN}/OrderService.java#OrderService.find/1`,
+          relation: "CALLS",
+        },
+      ]),
+    );
+    const impact = impactOf(snapshot, [`${MAIN}/OrderServiceImpl.java`]);
+    // the controller holds the interface; the other implementation is no user of it
+    expect(impact.dependents.map((d) => d.file)).toContain(`${MAIN}/web/OrderApi.java`);
+    expect(impact.dependents.map((d) => d.file)).not.toContain(`${MAIN}/LegacyOrderService.java`);
+    expect(impact.tests).toContain("src/test/java/com/example/orders/web/OrderApiIT.java");
+    // one call instead of a search: the interface's implementations, the implementation's callers through it
+    const [iface] = symbolOf(snapshot, "OrderService");
+    expect(iface?.subtypes.map((r) => r.id)).toEqual([
+      `${MAIN}/LegacyOrderService.java#LegacyOrderService`,
+      `${MAIN}/OrderServiceImpl.java#OrderServiceImpl`,
+    ]);
+    const [impl] = symbolOf(snapshot, "OrderServiceImpl.find");
+    expect(impl).toMatchObject({ id: `${MAIN}/OrderServiceImpl.java#OrderServiceImpl.find/1`, line: 2 });
+    expect(impl?.callers).toEqual([
+      {
+        id: `${MAIN}/web/OrderApi.java#OrderApi.get/1`,
+        file: `${MAIN}/web/OrderApi.java`,
+        line: 6,
+        via: "OrderService.find/1",
+      },
+    ]);
   });
 
   it("finds the tests of a change through a base test class and a wildcard import", async () => {

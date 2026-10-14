@@ -182,7 +182,7 @@ flowchart LR
   files[файлы workspace] -->|адаптер стека| facts[факты по файлу<br/>modules, symbols, imports, tests]
   facts -->|по хешу содержимого| cache[(~/.jarvis/cache/graph/&lt;repo&gt;/blobs)]
   cache --> snap[снимок дерева<br/>nodes + edges в SQLite]
-  snap --> impact[graph.impact / graph.neighbors]
+  snap --> impact[graph.impact / graph.neighbors / graph.symbol]
   impact --> agent[агент impact: evidence]
 ```
 
@@ -200,6 +200,12 @@ flowchart LR
   workspace-монорепо (`workspaces` корневого `package.json`): `@acme/lib/billing` через `exports` пакета
   (`./*` → `./.publish/*.js`) отображается обратно в `packages/lib/src/billing/index.ts`. Внешние пакеты
   остаются узлами `pkg:<имя>`. Без этого правка библиотеки не находила затронутые приложения.
+- Адаптер, который знает классы и методы (Java), добавляет узлы типов и методов и рёбра `EXTENDS`,
+  `IMPLEMENTS`, `CALLS`. `graph.impact` идёт и через супертипы: изменение реализации достаёт тех, кто держит
+  её интерфейс (но не другие реализации). Тест, который обращается к контроллеру по URL (MockMvc), связан
+  с ним по пути. `graph.symbol(name)` — класс или метод по имени (`OrderService`, `OrderService.find`): где
+  определён, супертипы, реализации, кто вызывает (и через интерфейс), что вызывает — одним вызовом вместо
+  поиска.
 
 ### Уровни возможностей
 
