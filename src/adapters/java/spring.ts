@@ -192,7 +192,9 @@ export function topicFacts(file: string, content: string): GraphNode[] {
         visit(pair.value as Node, [...path, key], topical);
       }
     } else if (isSeq(node)) {
-      node.items.forEach((item, i) => visit(item as Node, [...path, String(i)], underTopic));
+      node.items.forEach((item, i) => {
+        visit(item as Node, [...path, String(i)], underTopic);
+      });
     } else if (isScalar(node) && underTopic && typeof node.value === "string" && node.value.trim()) {
       const last = path.filter((p) => !/^\d+$/.test(p)).at(-1) ?? "";
       if (NOT_A_TOPIC.test(last) || (/\$\{/.test(node.value) && !/^[\w.-]+$/.test(node.value))) return;

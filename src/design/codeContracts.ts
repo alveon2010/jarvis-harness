@@ -111,9 +111,9 @@ export interface TopicHit {
   readonly listeners: readonly ListenerEntry[];
 }
 
-const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const literal = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const named = (text: string, name: string) =>
-  new RegExp(`(?<![\\w.-])${escape(name)}(?![\\w-]|\\.[\\w])`).test(text);
+  new RegExp(`(?<![\\w.-])${literal(name)}(?![\\w-]|\\.[\\w])`).test(text);
 
 /** The topics the sources name, by the topic or its property, with where the code listens to them. */
 export function topicsNamedIn(

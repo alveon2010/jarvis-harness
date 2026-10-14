@@ -267,6 +267,7 @@ describe("Spring contracts in the graph", () => {
         "  Order create(@RequestBody Order o) { return o; }",
         '  @RequestMapping(method = RequestMethod.PUT, value = "/{id}/slot")',
         "  void slot() {}",
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: a Spring placeholder in Java source
         '  @KafkaListener(topics = "${orders.topics.paid.name}", groupId = "g")',
         "  void onPaid(String m) {}",
         "}",
@@ -281,6 +282,7 @@ describe("Spring contracts in the graph", () => {
         { method: "GET", path: "/api/orders/{id}", handler: "OrderController.get", direction: "in", line: 5 },
       ],
       [
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: a Spring placeholder in Java source
         "listens ${orders.topics.paid.name}",
         { role: "listens", property: "orders.topics.paid.name", handler: "OrderController.onPaid", line: 12 },
       ],
@@ -311,6 +313,7 @@ describe("Spring contracts in the graph", () => {
     ]);
     const client = await x.extract(
       `${MAIN}/client/SlotsClient.java`,
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: a Spring placeholder in Java source
       'package com.example.orders.client;\n@FeignClient(name = "slots", url = "${slots.url}")\npublic interface SlotsClient {\n  @GetMapping("/slots/{zone}")\n  List<Slot> slots(@PathVariable String zone);\n}\n',
     );
     expect(client.nodes.find((n) => n.kind === "Endpoint")?.metadata).toEqual({
