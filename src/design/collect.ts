@@ -1,5 +1,8 @@
+import type { GraphNode } from "../core/capabilities/contracts.ts";
+import { repoIdOf } from "../knowledge/graph/update.ts";
 import type { DeterministicTool } from "../orchestration/executors.ts";
 import { type AnchorHit, anchorsIn, anchorsSection, hitOf } from "./anchors.ts";
+import { type CodeContracts, codeContractsOf } from "./codeContracts.ts";
 import { type ContractCheck, checkContracts, contractsSection } from "./contracts.ts";
 import { figmaLinksIn } from "./figma.ts";
 
@@ -54,8 +57,14 @@ export const collectSources: DeterministicTool = async (ctx, args) => {
     }
   const outputs: string[] = [];
   const read = sources.slice(1);
-  // the API methods they name, checked against the project's contract maps: settled before the agents
-  const contracts = checkContracts(ctx.workspace.ref.path, ctx.runtime.loaded.config.contracts, sources);
+  // the API methods and topics they name, checked against the project's contract maps and the
+  // contracts of its code (project graph, built by discover): settled before the agents
+  const contracts = checkContracts(
+    ctx.workspace.ref.path,
+    ctx.runtime.loaded.config.contracts,
+    sources,
+    codeContracts(ctx.runtime.graph, ctx.workspace.ref.path),
+  );
   if (contracts)
     ctx.runtime.events.emit({
       kind: "sources.contracts",
@@ -66,6 +75,8 @@ export const collectSources: DeterministicTool = async (ctx, args) => {
         files: contracts.files,
         mentions: contracts.results.length,
         found: contracts.results.filter((r) => r.matches.length > 0).length,
+        ...(contracts.codeEndpoints ? { codeEndpoints: contracts.codeEndpoints } : {}),
+        ...(contracts.topics ? { topics: contracts.topics.length } : {}),
         ...(contracts.unreadable.length > 0 ? { unreadable: contracts.unreadable } : {}),
       },
     });
@@ -188,6 +199,23 @@ export const collectSources: DeterministicTool = async (ctx, args) => {
 const withoutHead = (text: string): string => text.replace(/^\[[a-z.]+\] ok\n/, "");
 
 /** The issues and pages as read, in order, each clipped, all within the total. */
+/** The endpoints and topics of the latest graph snapshot of the repository; none without one. */
+function codeContracts(
+  graph: {
+    latest(repoId: string): { id: string } | undefined;
+    load(id: string): { nodes: GraphNode[] } | undefined;
+  },
+  workspace: string,
+): CodeContracts | undefined {
+  try {
+    const latest = graph.latest(repoIdOf(workspace));
+    const snapshot = latest ? graph.load(latest.id) : undefined;
+    return snapshot ? codeContractsOf(snapshot.nodes) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function sourcesDoc(
   read: ReadonlyArray<{ from: string; text: string }>,
   contracts?: ContractCheck,

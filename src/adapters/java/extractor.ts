@@ -7,6 +7,7 @@ import type {
 } from "../../core/capabilities/contracts.ts";
 import { JAVA_RESOLVER_VERSION, JavaResolver } from "./resolver.ts";
 import { parseJvmSource } from "./source.ts";
+import { SPRING_CONFIG, springFacts, topicFacts } from "./spring.ts";
 
 /**
  * Java / Groovy / Kotlin facts (ADR-0008 §1, ADR-0021 §6): a pure function of one file's content,
@@ -15,8 +16,10 @@ import { parseJvmSource } from "./source.ts";
  * when the tree has that class. A runnable test (under a test source set, named *Test, *Tests,
  * *Spec, *Specification or *IT, not abstract) is TESTED_BY what it uses; a base test class or a
  * fixture depends on what it uses, so the tests that extend or use it are found through it.
+ * Spring endpoints, Feign client calls, Kafka listeners and the topics of `application*.yml` are
+ * `Endpoint` and `Event` nodes (src/adapters/java/spring.ts).
  */
-export const JAVA_EXTRACTOR_VERSION = 1;
+export const JAVA_EXTRACTOR_VERSION = 2;
 
 const TEST_SOURCES = /(^|\/)src\/(test|it|integrationTest|testFixtures|[a-z]+Test)\//;
 const RUNNABLE = /(Test|Tests|Spec|Specification|IT)\.(java|groovy|kt)$/;
@@ -35,7 +38,7 @@ function sorted<T extends { id?: string; from?: string; to?: string; relation?: 
 
 export class JavaExtractor implements ProjectGraphExtractor {
   readonly version = JAVA_EXTRACTOR_VERSION;
-  readonly extensions = [".java", ".groovy", ".kt"];
+  readonly extensions = [".java", ".groovy", ".kt", ".yml", ".yaml"];
   readonly resolverVersion = JAVA_RESOLVER_VERSION;
 
   createResolver(_workspace: string, files: ReadonlySet<string>): SpecifierResolver {
@@ -43,17 +46,34 @@ export class JavaExtractor implements ProjectGraphExtractor {
   }
 
   async extract(file: string, content: string): Promise<FileFacts> {
+    if (/\.ya?ml$/.test(file)) {
+      // only a Spring config: its topics; any other YAML is no part of the graph
+      if (!SPRING_CONFIG.test(file)) return { nodes: [], edges: [] };
+      const lines = content.split("\n").length;
+      return {
+        nodes: sorted([
+          { id: file, kind: "Module", file, metadata: { lines } },
+          ...topicFacts(file, content),
+        ]),
+        edges: [],
+      };
+    }
     const src = parseJvmSource(content);
     const own = file.replace(/^.*\//, "").replace(/\.\w+$/, "");
     const main = src.types.find((t) => t.name === own) ?? src.types[0];
     const isTest =
       isTestSource(file) && RUNNABLE.test(file) && !main?.abstract && !own.startsWith("Abstract");
+    const spring = isTestSource(file) ? { nodes: [] } : springFacts(file, content);
     const nodes: GraphNode[] = [
       {
         id: file,
         kind: isTest ? "Test" : "Module",
         file,
-        metadata: { lines: src.lines, ...(src.pkg ? { package: src.pkg } : {}) },
+        metadata: {
+          lines: src.lines,
+          ...(src.pkg ? { package: src.pkg } : {}),
+          ...("route" in spring ? { route: spring.route, extends: spring.base } : {}),
+        },
       },
       ...src.types.map(
         (t): GraphNode => ({
@@ -63,6 +83,7 @@ export class JavaExtractor implements ProjectGraphExtractor {
           metadata: { exported: t.exported, line: t.line },
         }),
       ),
+      ...spring.nodes,
     ];
     const specs = new Set<string>();
     for (const i of src.imports) {

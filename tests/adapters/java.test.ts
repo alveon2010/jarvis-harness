@@ -248,3 +248,128 @@ describe("related tests of a class-taking runner", () => {
     expect(classSelection("gradle", undefined)).toBeUndefined();
   });
 });
+
+describe("Spring contracts in the graph", () => {
+  const x = new JavaExtractor();
+
+  it("reads endpoints under the class route, Feign calls and Kafka listeners", async () => {
+    const ctl = await x.extract(
+      `${MAIN}/web/OrderController.java`,
+      [
+        "package com.example.orders.web;",
+        '// @GetMapping("/commented")',
+        '@RequestMapping("/api/orders")',
+        "public class OrderController {",
+        '  @GetMapping("/{id}")',
+        '  public Order get(@PathVariable String id, @RequestHeader("X-User") String user) { return null; }',
+        '  @PostMapping(value = {"", "/new"}, headers = "X-V=2")',
+        "  @ResponseStatus(HttpStatus.CREATED)",
+        "  Order create(@RequestBody Order o) { return o; }",
+        '  @RequestMapping(method = RequestMethod.PUT, value = "/{id}/slot")',
+        "  void slot() {}",
+        '  @KafkaListener(topics = "${orders.topics.paid.name}", groupId = "g")',
+        "  void onPaid(String m) {}",
+        "}",
+      ].join("\n"),
+    );
+    const meta = ctl.nodes
+      .filter((n) => n.kind !== "Module" && n.kind !== "Type")
+      .map((n) => [n.id.split("#")[1], n.metadata]);
+    expect(meta).toEqual([
+      [
+        "GET /api/orders/{id}",
+        { method: "GET", path: "/api/orders/{id}", handler: "OrderController.get", direction: "in", line: 5 },
+      ],
+      [
+        "listens ${orders.topics.paid.name}",
+        { role: "listens", property: "orders.topics.paid.name", handler: "OrderController.onPaid", line: 12 },
+      ],
+      [
+        "POST /api/orders",
+        { method: "POST", path: "/api/orders", handler: "OrderController.create", direction: "in", line: 7 },
+      ],
+      [
+        "POST /api/orders/new",
+        {
+          method: "POST",
+          path: "/api/orders/new",
+          handler: "OrderController.create",
+          direction: "in",
+          line: 7,
+        },
+      ],
+      [
+        "PUT /api/orders/{id}/slot",
+        {
+          method: "PUT",
+          path: "/api/orders/{id}/slot",
+          handler: "OrderController.slot",
+          direction: "in",
+          line: 10,
+        },
+      ],
+    ]);
+    const client = await x.extract(
+      `${MAIN}/client/SlotsClient.java`,
+      'package com.example.orders.client;\n@FeignClient(name = "slots", url = "${slots.url}")\npublic interface SlotsClient {\n  @GetMapping("/slots/{zone}")\n  List<Slot> slots(@PathVariable String zone);\n}\n',
+    );
+    expect(client.nodes.find((n) => n.kind === "Endpoint")?.metadata).toEqual({
+      method: "GET",
+      path: "/slots/{zone}",
+      handler: "SlotsClient.slots",
+      direction: "out",
+      client: "slots",
+      line: 4,
+    });
+  });
+
+  it("marks a base controller's endpoints inherited and its subclass's route", async () => {
+    const base = await x.extract(
+      `${MAIN}/web/BaseAdminController.java`,
+      'package com.example.orders.web;\npublic abstract class BaseAdminController<T> {\n  @DeleteMapping("/{id}")\n  void remove() {}\n}\n',
+    );
+    expect(base.nodes.find((n) => n.kind === "Endpoint")?.metadata).toMatchObject({
+      path: "/{id}",
+      inherited: true,
+    });
+    const sub = await x.extract(
+      `${MAIN}/web/OrderAdminController.java`,
+      'package com.example.orders.web;\n@RequestMapping(\n  "/admin/orders")\npublic class OrderAdminController extends BaseAdminController<Order> {}\n',
+    );
+    expect(sub.nodes[0]?.metadata).toMatchObject({ route: "/admin/orders", extends: "BaseAdminController" });
+  });
+
+  it("reads the topics of a Spring config, each profile's, and no other YAML", async () => {
+    const yml = [
+      "orders:",
+      "  topics:",
+      "    paid:",
+      "      name: orders.paid",
+      "      group-id: orders-svc",
+      "spring:",
+      "  cloud:",
+      "    stream:",
+      "      bindings:",
+      "        slots-out-0:",
+      "          destination: slots.changed",
+      "---",
+      "orders:",
+      "  topics:",
+      "    paid:",
+      "      name: orders.paid.test",
+      "    refunds: [orders.refund.a, orders.refund.b]",
+    ].join("\n");
+    const facts = await x.extract("src/main/resources/application.yml", yml);
+    expect(
+      facts.nodes
+        .filter((n) => n.kind === "Event")
+        .map((n) => [n.metadata?.property, n.metadata?.topic, n.metadata?.line]),
+    ).toEqual([
+      ["orders.topics.paid.name", "orders.paid", 4],
+      ["orders.topics.refunds.0", "orders.refund.a", 17],
+      ["orders.topics.refunds.1", "orders.refund.b", 17],
+      ["spring.cloud.stream.bindings.slots-out-0.destination", "slots.changed", 11],
+    ]);
+    expect(await x.extract(".github/workflows/ci.yml", "topics: [a]\n")).toEqual({ nodes: [], edges: [] });
+  });
+});

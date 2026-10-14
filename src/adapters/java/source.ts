@@ -23,8 +23,8 @@ export interface JvmSource {
   readonly lines: number;
 }
 
-/** Comments and the contents of string and char literals as spaces; newlines stay. */
-export function blankLiterals(src: string): string {
+/** Comments and (unless `keepStrings`) string and char literals as spaces; newlines stay. */
+export function blankLiterals(src: string, keepStrings = false): string {
   const out: string[] = [];
   const blank = (s: string) => s.replace(/[^\n]/g, " ");
   let i = 0;
@@ -51,7 +51,8 @@ export function blankLiterals(src: string): string {
       out.push(c);
       i += 1;
     } else {
-      out.push(blank(src.slice(i, end)));
+      const comment = two === "//" || two === "/*";
+      out.push(comment || !keepStrings ? blank(src.slice(i, end)) : src.slice(i, end));
       i = end;
     }
   }

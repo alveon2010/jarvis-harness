@@ -8,8 +8,8 @@ import { quoteArg } from "../../tools/local/args.ts";
 /**
  * How a `test*` command takes the tests to run, by its runner: jest finds the tests related to the
  * changed files itself; a Gradle or Maven test task takes test classes — the ones the project graph
- * says cover the change. Pilot (a Spring service, ~120 test classes, Testcontainers): the whole
- * suite on every round of verify, for a change two test classes cover.
+ * says cover the change. A Spring service of ~120 test classes on Testcontainers would otherwise run
+ * the whole suite on every round of verify, for a change two test classes cover.
  */
 export type TestRunner = "jest" | "gradle" | "maven";
 

@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { type CodeContracts, type TopicHit, topicsNamedIn } from "./codeContracts.ts";
 
 /**
  * API methods the task's sources name (`GET /delivery-slots`), checked by code against the project's
@@ -22,6 +23,11 @@ export interface ContractEntry {
   readonly method?: string;
   readonly path?: string;
   readonly url?: string;
+  /** An endpoint of the repository's code (src/design/codeContracts.ts): where it is declared. */
+  readonly line?: number;
+  /** Served here (`in`) or called through a client of another service (`out`). */
+  readonly direction?: "in" | "out";
+  readonly client?: string;
 }
 
 export interface Mention {
@@ -62,7 +68,7 @@ export function segmentsOf(path: string): string[] {
   return bare.split("/").filter((s) => s.length > 0);
 }
 
-const isParam = (s: string) => /^\{[^}]*\}$/.test(s) || /^:[A-Za-z_]/.test(s);
+const isParam = (s: string) => /^\$?\{[^}]*\}$/.test(s) || /^:[A-Za-z_]/.test(s);
 const sameSegment = (a: string, b: string) => isParam(a) || isParam(b) || a.toLowerCase() === b.toLowerCase();
 
 /** The mention's segments are the end of the target's (`/delivery-slots` in `/logistics-api/delivery-slots`). */
@@ -148,17 +154,29 @@ export interface ContractCheck {
   readonly results: ReadonlyArray<{ mention: Mention; matches: ContractEntry[] }>;
   /** Files named in the config that were not there or not JSON. */
   readonly unreadable: readonly string[];
+  /** Endpoints of the repository's code checked too (project graph). */
+  readonly codeEndpoints?: number;
+  /** Topics the sources name, found in the code's config. */
+  readonly topics?: readonly TopicHit[];
 }
 
-/** Every mention against every map the project names; undefined when it names none or nothing is mentioned. */
+/**
+ * Every mention against every map the project names and the contracts of its code (`code`, from the
+ * project graph); undefined when there is nothing to check against or nothing is mentioned.
+ */
 export function checkContracts(
   root: string,
   maps: readonly ContractMapConfig[],
   sources: ReadonlyArray<{ from: string; text: string }>,
+  code?: CodeContracts,
 ): ContractCheck | undefined {
-  if (maps.length === 0) return undefined;
-  const mentions = mentionsIn(sources);
-  if (mentions.length === 0) return undefined;
+  const fromCode = code ?? { endpoints: [], topics: [], listeners: [] };
+  if (maps.length === 0 && fromCode.endpoints.length === 0 && fromCode.topics.length === 0) return undefined;
+  const all = mentionsIn(sources);
+  // a method checks only against something: the code's endpoints or a map
+  const mentions = maps.length > 0 || fromCode.endpoints.length > 0 ? all : [];
+  const topics = topicsNamedIn(sources, fromCode);
+  if (mentions.length === 0 && topics.length === 0) return undefined;
   const files: string[] = [];
   const unreadable: string[] = [];
   const entries: ContractEntry[] = [];
@@ -174,12 +192,15 @@ export function checkContracts(
           unreadable.push(f);
         }
     }
+  entries.push(...fromCode.endpoints);
   return {
     files,
-    entries: entries.length,
+    entries: entries.length - fromCode.endpoints.length,
     about: maps.flatMap((m) => (m.about ? [m.about] : [])),
     results: mentions.map((mention) => ({ mention, matches: matchesOf(mention, entries) })),
     unreadable,
+    ...(fromCode.endpoints.length > 0 ? { codeEndpoints: fromCode.endpoints.length } : {}),
+    ...(topics.length > 0 ? { topics } : {}),
   };
 }
 
@@ -187,16 +208,18 @@ const MAX_MATCHES = 3;
 
 /** The section of `sources.md`: what was found and what not, settled for the agents. */
 export function contractsSection(check: ContractCheck): string {
+  const where = (e: ContractEntry) => `${basename(e.file)}${e.line ? `:${e.line}` : ""}`;
   const lines = check.results.map(({ mention, matches }) => {
     const head = `- \`${mention.method} ${mention.path}\` (${mention.from})`;
-    if (matches.length === 0) return `${head} — **not in the map**`;
+    if (matches.length === 0)
+      return `${head} — **${check.codeEndpoints ? (check.files.length > 0 ? "not in the map nor in the code" : "not in the code") : "not in the map"}**`;
     // the same entry in several files (one map per app) is one line with its files
     const byEntry = new Map<string, { e: ContractEntry; files: string[] }>();
     for (const e of matches) {
-      const id = `${e.key ?? ""}|${e.method ?? ""}|${e.path ?? ""}|${e.url ?? ""}`;
+      const id = `${e.key ?? ""}|${e.method ?? ""}|${e.path ?? ""}|${e.url ?? ""}|${e.direction ?? ""}`;
       const had = byEntry.get(id);
-      if (had) had.files.push(basename(e.file));
-      else byEntry.set(id, { e, files: [basename(e.file)] });
+      if (had) had.files.push(where(e));
+      else byEntry.set(id, { e, files: [where(e)] });
     }
     const shown = [...byEntry.values()].slice(0, MAX_MATCHES).map(({ e, files }) => {
       const parts = [
@@ -204,20 +227,65 @@ export function contractsSection(check: ContractCheck): string {
         e.method ? e.method : undefined,
         e.path ? `path \`${e.path}\`` : undefined,
         e.url ? `url \`${e.url}\`` : undefined,
+        e.direction === "out"
+          ? `called here through the client of ${e.client ? `\`${e.client}\`` : "another service"}`
+          : undefined,
+        e.direction === "in" ? "served here" : undefined,
       ].filter(Boolean);
       return `${parts.join(" · ")} (${files.join(", ")})`;
     });
     const more = byEntry.size > MAX_MATCHES ? `; ${byEntry.size - MAX_MATCHES} more` : "";
-    return `${head} — in the map: ${shown.join("; ")}${more}`;
+    return `${head} — ${matches.every((m) => m.direction) ? "in the code" : "in the map"}: ${shown.join("; ")}${more}`;
   });
-  return [
-    "## API methods named in the sources, checked against the contract map",
-    "",
-    `Checked by Jarvis without a model: every \`METHOD /path\` in the task, its issues and pages, against ${check.files.map((f) => `\`${f}\``).join(", ") || "no readable file"} (${check.entries} entries${check.about.length > 0 ? ` — ${check.about.join("; ")}` : ""}). The map is the source of truth: what is here is settled — do not search the code for these methods again; a method not in the map has no route to it yet.`,
-    ...(check.unreadable.length > 0
-      ? ["", `Not read: ${check.unreadable.map((f) => `\`${f}\``).join(", ")}.`]
+  const against = [
+    ...(check.files.length > 0 || !check.codeEndpoints
+      ? [
+          `${check.files.map((f) => `\`${f}\``).join(", ") || "no readable file"} (${check.entries} entries${check.about.length > 0 ? ` — ${check.about.join("; ")}` : ""})`,
+        ]
       : []),
-    "",
-    ...lines,
-  ].join("\n");
+    ...(check.codeEndpoints
+      ? [
+          `the HTTP endpoints of this repository's code (${check.codeEndpoints}, from the project graph: served here, or called through a client of another service)`,
+        ]
+      : []),
+  ].join(" and ");
+  const methods =
+    check.results.length > 0
+      ? [
+          "## API methods named in the sources, checked against the contract map",
+          "",
+          `Checked by Jarvis without a model: every \`METHOD /path\` in the task, its issues and pages, against ${against}. ${
+            check.codeEndpoints
+              ? "What is here is settled — do not search the code for these methods again; a method not found is neither served nor called by this code yet."
+              : "The map is the source of truth: what is here is settled — do not search the code for these methods again; a method not in the map has no route to it yet."
+          }`,
+          ...(check.unreadable.length > 0
+            ? ["", `Not read: ${check.unreadable.map((f) => `\`${f}\``).join(", ")}.`]
+            : []),
+          "",
+          ...lines,
+        ]
+      : [];
+  const topics = (check.topics ?? []).map((h) => {
+    const config = h.topics.map(
+      (t) => `\`${t.topic}\` — property \`${t.property}\` (${basename(t.file)}${t.line ? `:${t.line}` : ""})`,
+    );
+    const listeners = h.listeners.map(
+      (l) =>
+        `${l.handler ? `\`${l.handler}\`` : "a listener"} (${basename(l.file)}${l.line ? `:${l.line}` : ""})`,
+    );
+    return `- \`${h.name}\` (${h.from})${config.length > 0 ? ` — ${config.join("; ")}` : ""}${listeners.length > 0 ? `; listened to by ${listeners.join(", ")}` : "; no listener in this code"}`;
+  });
+  const topicPart =
+    topics.length > 0
+      ? [
+          ...(methods.length > 0 ? [""] : []),
+          "## Message topics named in the sources, found in the code",
+          "",
+          "Found by Jarvis without a model in the repository's config and listeners (project graph): the property a topic is configured under and the code that listens to it. Settled — do not search for them again. A topic per environment may differ from the one in the config.",
+          "",
+          ...topics,
+        ]
+      : [];
+  return [...methods, ...topicPart].join("\n");
 }
