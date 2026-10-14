@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { JavaAdapter } from "../adapters/java/adapter.ts";
 import { TypeScriptAdapter } from "../adapters/typescript/adapter.ts";
 import { BlobStore } from "../artifacts/blobs.ts";
 import { ArtifactStore } from "../artifacts/store.ts";
@@ -163,14 +164,14 @@ export function createRuntime(loaded: LoadedConfig, options: RuntimeOptions = {}
       ? new OpenAiCompatibleEmbedder(embeddingsModelId, embeddingsModel, secrets)
       : undefined;
   registry.register(new GraphToolProvider(graph));
-  // Adapter packs (ADR-0021 §8): TypeScript ships in-process; others arrive as packs.
+  // Adapter packs (ADR-0021 §8): TypeScript and JVM ship in-process; others arrive as packs.
   const capabilities = new CapabilityRegistry();
-  capabilities.register(
-    new TypeScriptAdapter((workspace) => {
-      const latest = graph.latest(repoIdOf(workspace));
-      return latest ? graph.load(latest.id) : undefined;
-    }),
-  );
+  const snapshotOf = (workspace: string) => {
+    const latest = graph.latest(repoIdOf(workspace));
+    return latest ? graph.load(latest.id) : undefined;
+  };
+  capabilities.register(new TypeScriptAdapter(snapshotOf));
+  capabilities.register(new JavaAdapter(snapshotOf));
   const pool = new McpPool({
     servers: loaded.config.mcp.servers,
     secrets,

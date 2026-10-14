@@ -116,9 +116,12 @@ export interface FileFacts {
   readonly error?: string;
 }
 
-/** Resolves a stack's import specifiers across the tree; undefined leaves the core's default. */
+/**
+ * Resolves a stack's import specifiers across the tree; undefined leaves the core's default, null
+ * drops the edge (a candidate the tree does not have — a name that may or may not be a class of it).
+ */
 export interface SpecifierResolver {
-  resolve(from: string, spec: string): string | undefined;
+  resolve(from: string, spec: string): string | null | undefined;
 }
 
 export interface ProjectGraphExtractor {

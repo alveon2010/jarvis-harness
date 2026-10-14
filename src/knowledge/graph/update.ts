@@ -175,10 +175,12 @@ export async function updateGraph(options: UpdateOptions): Promise<UpdateResult>
   const edges: GraphEdge[] = [];
   const seen = new Set<string>();
   for (const e of rawEdges) {
-    const to =
+    const own =
       e.spec.startsWith("pkg:") || e.spec.startsWith("unresolved:")
         ? e.spec
-        : (resolverOf(e.from)?.resolve(e.from, e.spec) ?? resolveSpecifier(e.from, e.spec, known));
+        : resolverOf(e.from)?.resolve(e.from, e.spec);
+    if (own === null) continue;
+    const to = own ?? resolveSpecifier(e.from, e.spec, known);
     // A test file's imports are the modules it tests: edge from the module to the test (TESTED_BY).
     const edge: GraphEdge =
       e.relation === "TESTED_BY"
