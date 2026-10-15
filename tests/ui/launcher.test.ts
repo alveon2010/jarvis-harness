@@ -716,13 +716,16 @@ describe("New task on the page", () => {
     expect((await post(`/runs/${short}/eval`, { t: token, suite: "pilot" })).location).toBe(
       `/runs/${short}?notice=eval-made`,
     );
-    const dir = join(sb.project, "evals", "pilot", "abc-42-delivery-slots-on-the-order-form");
+    // short: the ticket key and the run
+    const dir = join(sb.project, "evals", "pilot", `abc-42-${short}`);
     const yaml = readFileSync(join(dir, "case.yaml"), "utf8");
     expect(yaml).toContain("src/slots.ts");
     expect(yaml).toContain("3 days shown");
     expect(yaml).toContain("Remove it");
-    // the project's configuration, not committed, goes into the fixture too
-    expect(existsSync(join(dir, "fixture", ".jarvis", "project.yaml"))).toBe(true);
+    // the repository by reference at the base commit; the project's configuration, not committed, as an overlay
+    expect(yaml).toMatch(/fixture:\n\s+commit: /);
+    expect(existsSync(join(dir, "fixture"))).toBe(false);
+    expect(existsSync(join(dir, "overlay", ".jarvis", "project.yaml"))).toBe(true);
     const after = await page(`/runs/${short}`);
     expect(after).toContain("✓ eval case");
     expect(after).toContain("jarvis evals run --suite pilot --mode record");

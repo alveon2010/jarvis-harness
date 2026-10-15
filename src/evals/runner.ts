@@ -29,8 +29,18 @@ export const CaseSchema = z.strictObject({
   id: z.string().min(1).optional(),
   task: z.string().min(1),
   workflow: z.string().min(1).default("sdd"),
-  /** Fixture repository directory, relative to the case directory. */
-  fixture: z.string().min(1).default("fixture"),
+  /**
+   * The repository the case starts from: a directory relative to the case directory (a copy), or
+   * `{ commit }` — the repository the case lives in, at that commit (no copy: a service's repository is
+   * megabytes), with the case's `overlay/` directory (the run's `.jarvis/` configuration and knowledge)
+   * laid over it.
+   */
+  fixture: z
+    .union([
+      z.string().min(1),
+      z.strictObject({ commit: z.string().min(1), overlay: z.string().min(1).default("overlay") }),
+    ])
+    .default("fixture"),
   /** Written as the fixture's `.jarvis/project.yaml` (merged over the fixture's own if any). */
   project: z.record(z.string(), z.unknown()).optional(),
   gold: z
@@ -142,8 +152,22 @@ async function prepareWorkspace(
   variant: Record<string, string>,
   env: NodeJS.ProcessEnv,
 ): Promise<string> {
-  const root = mkdtempSync(join(tmpdir(), `jarvis-eval-${c.id}-`));
-  cpSync(join(c.dir, c.fixture), root, { recursive: true });
+  const root = mkdtempSync(join(tmpdir(), `jarvis-eval-${c.id.slice(0, 40)}-`));
+  if (typeof c.fixture === "string") cpSync(join(c.dir, c.fixture), root, { recursive: true });
+  else {
+    // the repository the case lives in, at the commit, and the run's .jarvis/ over it
+    const top = await git(["rev-parse", "--show-toplevel"], c.dir);
+    if (top.code !== 0)
+      throw new Error(`case ${c.id}: its fixture is a commit, and ${c.dir} is in no git repository`);
+    const archive = await runShell(`git archive --format=tar ${c.fixture.commit} | tar -x -C "${root}"`, {
+      cwd: top.stdout.trim(),
+      timeoutMs: 300_000,
+    });
+    if (archive.code !== 0)
+      throw new Error(`case ${c.id}: git archive ${c.fixture.commit} failed: ${archive.stderr.trim()}`);
+    const overlay = join(c.dir, c.fixture.overlay);
+    if (existsSync(overlay)) cpSync(overlay, root, { recursive: true });
+  }
   const projectFile = join(root, ".jarvis", "project.yaml");
   const base: Record<string, unknown> = existsSync(projectFile)
     ? ((parse(readFileSync(projectFile, "utf8")) as Record<string, unknown>) ?? {})

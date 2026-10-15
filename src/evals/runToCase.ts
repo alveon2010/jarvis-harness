@@ -1,9 +1,10 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 import { stringify } from "yaml";
 import type { Runtime } from "../app/runtime.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import { givenFor } from "../interaction/answers.ts";
+import { readableIdFor } from "../orchestration/worktree.ts";
 import { git, runShell } from "../tools/local/exec.ts";
 
 /**
@@ -63,21 +64,21 @@ export async function runToCase(
   options: RunToCaseOptions,
 ): Promise<RunToCaseResult> {
   const run = runtime.runs.require(runId);
-  const id =
-    options.id ??
-    run.task
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "");
+  // short and readable: the ticket key or the task's first words, and the run (pilot: a 230-character
+  // directory name made of every Latin word of a Russian task)
+  const id = options.id ?? readableIdFor(run.task, run.id);
   const caseDir = join(options.suiteDir, id);
   if (existsSync(join(caseDir, "case.yaml"))) throw new Error(`case ${caseDir} already exists`);
   mkdirSync(caseDir, { recursive: true });
 
   const ws = run.workspace;
   const base = ws.baseCommit ?? ws.baseRef;
-  const diffFrom = existsSync(ws.path) ? ws.path : ws.repoRoot;
-  const diff = await git(["diff", "--name-only", `${base}..HEAD`], diffFrom);
-  const working = await git(["diff", "--name-only", "HEAD"], diffFrom);
+  // the run's own work: its checkout, or — removed — its branch in the repository (not what is checked out there)
+  const inCheckout = existsSync(ws.path);
+  const diffFrom = inCheckout ? ws.path : ws.repoRoot;
+  const tip = inCheckout || !ws.branch ? "HEAD" : ws.branch;
+  const diff = await git(["diff", "--name-only", `${base}..${tip}`], diffFrom);
+  const working = inCheckout ? await git(["diff", "--name-only", "HEAD"], diffFrom) : { stdout: "" };
   const files = [
     ...new Set(`${diff.stdout}\n${working.stdout}`.split("\n").filter((f) => f && !f.startsWith(".jarvis/"))),
   ].sort();
@@ -124,11 +125,14 @@ export async function runToCase(
         .filter((g) => g.mode === "answer" && g.text)
         .map((g) => ({ question: g.question, answer: g.text as string })),
     );
+  // a suite inside the run's repository takes the repository at the base commit by reference: no copy
+  const rel = relative(ws.repoRoot, options.suiteDir);
+  const inRepo = options.fixture !== false && !rel.startsWith("..") && !isAbsolute(rel);
   const caseDoc = {
     id,
     task: run.task,
     workflow: run.workflow,
-    fixture: "fixture",
+    fixture: inRepo ? { commit: base, overlay: "overlay" } : "fixture",
     gold: {
       files,
       ...(tests ? { tests } : {}),
@@ -147,7 +151,14 @@ export async function runToCase(
   );
 
   let fixture = false;
-  if (options.fixture !== false) {
+  if (inRepo) {
+    // the project's configuration and knowledge as the run had them, also when they are not committed
+    for (const part of ["project.yaml", "knowledge"]) {
+      const from = join(ws.repoRoot, ".jarvis", part);
+      if (existsSync(from)) cpSync(from, join(caseDir, "overlay", ".jarvis", part), { recursive: true });
+    }
+    fixture = true;
+  } else if (options.fixture !== false) {
     const fixtureDir = join(caseDir, "fixture");
     mkdirSync(fixtureDir, { recursive: true });
     const archive = await runShell(`git archive --format=tar ${base} | tar -x -C "${fixtureDir}"`, {

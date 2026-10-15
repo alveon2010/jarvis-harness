@@ -102,6 +102,11 @@ export function worktreePathFor(worktreesDir: string, repoRoot: string, task: st
 
 const shortOf = (runId: string): string => runId.replace(/^run_/, "").slice(0, 8);
 
+/** A short readable name of a run's work: `abc-123-1a2b3c4d`, `servis-ne-startuet-1a2b3c4d`. */
+export function readableIdFor(task: string, runId: string): string {
+  return `${taskSlug(task, 40).toLowerCase()}-${shortOf(runId)}`;
+}
+
 /** A ticket key stays as it is (`ABC-123`), Cyrillic is spelt in Latin letters, punctuation goes. */
 function taskSlug(task: string, max: number): string {
   const key = /^\s*([A-Z][A-Z0-9]+-\d+)\b/.exec(task)?.[1];
@@ -283,12 +288,21 @@ export class WorktreeWorkspace implements Workspace {
     if (this.ref.checkout === "clone" && this.ref.branch) await pushBranch(this.ref.path, this.ref.branch);
   }
 
+  /** Where the run's commits are read: its checkout, or — removed — its branch in the repository. */
+  private tip(): { cwd: string; rev: string } {
+    return existsSync(this.ref.path) || !this.ref.branch
+      ? { cwd: this.ref.path, rev: "HEAD" }
+      : { cwd: this.ref.repoRoot, rev: this.ref.branch };
+  }
+
   async diff(): Promise<string> {
-    return (await git(["diff", "--no-color", `${this.ref.baseCommit}..HEAD`], this.ref.path)).stdout;
+    const t = this.tip();
+    return (await git(["diff", "--no-color", `${this.ref.baseCommit}..${t.rev}`], t.cwd)).stdout;
   }
 
   async changedFiles(): Promise<string[]> {
-    const r = await git(["diff", "--name-only", `${this.ref.baseCommit}..HEAD`], this.ref.path);
+    const t = this.tip();
+    const r = await git(["diff", "--name-only", `${this.ref.baseCommit}..${t.rev}`], t.cwd);
     return r.stdout.split("\n").filter((l) => l.length > 0);
   }
 
@@ -359,8 +373,19 @@ export class WorktreeWorkspace implements Workspace {
     await git(["worktree", "prune"], this.ref.repoRoot);
     if (moved) deleteInBackground(aside);
     if (options.pruneBranch && this.ref.branch)
-      await git(["branch", "-D", this.ref.branch], this.ref.repoRoot);
+      await deleteBranchKeepingTip(this.ref.repoRoot, this.ref.branch);
   }
+}
+
+/**
+ * Deletes a run's branch and keeps its last commit under `refs/jarvis/removed/<branch>`: a branch
+ * deleted with its run's work not taken can be brought back (`git branch <branch> refs/jarvis/removed/<branch>`).
+ * Pilot: a finished run's branch was deleted from its page before its changes were applied.
+ */
+export async function deleteBranchKeepingTip(repoRoot: string, branch: string): Promise<void> {
+  const tip = await git(["rev-parse", "--verify", "-q", `refs/heads/${branch}`], repoRoot);
+  if (tip.code === 0) await git(["update-ref", `refs/jarvis/removed/${branch}`, tip.stdout.trim()], repoRoot);
+  await git(["branch", "-D", branch], repoRoot);
 }
 
 /** The file in a clone's `.git` that names the repository it was cloned from (`mainCheckoutOf`). */

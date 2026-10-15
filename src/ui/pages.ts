@@ -904,7 +904,7 @@ ${
     : ""
 }
 ${t.verified ? html`<p class="hint">Jarvis already ran: tests ${t.verified.passed ? html`<span class="ok">✓ passed</span>` : html`<span class="bad">✗ ${t.verified.failures} failing</span>`}${t.verified.commands.length > 0 ? html` — ${t.verified.commands.slice(0, 3).map((c, i) => html`${i > 0 ? ", " : ""}<code>${cut(c, 80)}</code>`)}` : ""}</p>` : ""}
-<div class="facts after">${t.onAccept ? html`<span><b>Accept</b> → ${t.onAccept}; the branch stays — <code>${t.apply}</code> lands it on your branch as one commit</span>` : ""}${t.onSendBack ? html`<span><b>Send back</b> → ${t.onSendBack}</span>` : ""}<span><b>Fixed something yourself</b> in the checkout → it goes in as a <code>human edit</code> when the run goes on</span></div>
+<div class="facts after">${t.onAccept ? html`<span><b>Accept</b> → ${t.onAccept}; the branch stays — then <b>Apply</b> on the run's page (or <code>${t.apply}</code>) lands it on your branch as one commit</span>` : ""}${t.onSendBack ? html`<span><b>Send back</b> → ${t.onSendBack}</span>` : ""}<span><b>Fixed something yourself</b> in the checkout → it goes in as a <code>human edit</code> when the run goes on</span></div>
 </section>`;
 }
 

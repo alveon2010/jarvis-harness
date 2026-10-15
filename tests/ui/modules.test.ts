@@ -399,13 +399,32 @@ describe("Knowledge → Modules", () => {
     const finished = await make("ABC-2 finished", "COMPLETED");
     const fb = await page(`/runs/${finished.short}`);
     expect(fb).toMatch(/name="branch" value="1"> also delete the branch/);
-    expect(fb).toContain("Its changes were not applied");
+    expect(fb).toContain("<b>its changes are not applied</b>");
     expect((await post(`/runs/${finished.short}/cleanup`, [])).location).toBe(
       `/runs/${finished.short}?notice=cleaned`,
     );
     expect(existsSync(finished.wt.ref.path)).toBe(false);
     expect(git("branch", "--list", finished.wt.ref.branch as string).trim()).not.toBe("");
-    expect(await page(`/runs/${finished.short}`)).toContain("Delete the branch");
+    const left = await page(`/runs/${finished.short}`);
+    expect(left).toContain("Delete the branch");
+    expect(left).toContain("Apply to <code>main</code>");
+    // applied from the page with its checkout gone: from its branch in the repository
+    const applied = await post(`/runs/${finished.short}/apply`, []);
+    expect(applied.location).toMatch(
+      new RegExp(`^/runs/${finished.short}\\?notice=applied&files=1&commit=[0-9a-f]{10}$`),
+    );
+    expect(readFileSync(join(sb.project, "fix.txt"), "utf8")).toBe("ABC-2 finished\n");
+    expect(git("log", "-1", "--format=%s")).toContain("ABC-2 finished: apply jarvis run");
+    // taken: no Apply any more; deleting the branch keeps its last commit, and it can come back
+    expect(await page(`/runs/${finished.short}`)).not.toContain("Apply to");
+    await post(`/runs/${finished.short}/cleanup`, [["branch", "1"]]);
+    const branch = finished.wt.ref.branch as string;
+    expect(git("rev-parse", `refs/jarvis/removed/${branch}`).trim()).toMatch(/^[0-9a-f]{40}$/);
+    expect(await page(`/runs/${finished.short}`)).toContain("Restore the branch");
+    expect((await post(`/runs/${finished.short}/restore-branch`, [])).location).toBe(
+      `/runs/${finished.short}?notice=restored`,
+    );
+    expect(git("branch", "--list", branch).trim()).not.toBe("");
   });
 
   it("Cancel on a run's page: at once when nothing runs it, at the next safe point when something does", async () => {

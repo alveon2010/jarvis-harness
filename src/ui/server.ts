@@ -4,6 +4,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join as joinPath } from "node:path";
+import { applyRun } from "../app/applyRun.ts";
 import { budgetGranted, budgetStopOf, grantBudget } from "../app/budgetStop.ts";
 import {
   type Candidate,
@@ -71,7 +72,7 @@ import { loadStandards } from "../knowledge/standards.ts";
 import { NOTE_MAX } from "../onboarding/deep.ts";
 import { findNode, type ModuleTree, moduleTree } from "../onboarding/tree.ts";
 import type { LocalWorkflowEngine } from "../orchestration/runtime.ts";
-import { WorktreeWorkspace } from "../orchestration/worktree.ts";
+import { deleteBranchKeepingTip, WorktreeError, WorktreeWorkspace } from "../orchestration/worktree.ts";
 import { egressNotices } from "../security/policy/egress.ts";
 import { shortRunId } from "../storage/runStore.ts";
 import { git } from "../tools/local/exec.ts";
@@ -444,6 +445,10 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       "cancel-requested": html`<div class="banner ok">Cancel requested — the process running it stops at its next safe point (after the current model or tool call)</div>`,
       "already-ended": html`<div class="banner bad">The run has ended already: nothing to cancel</div>`,
       cleaned: html`<div class="banner ok">Checkout removed — the files go in the background; the branch stays</div>`,
+      applied: html`<div class="banner ok">Applied: ${r.url.searchParams.get("files") ?? "?"} file(s) as <code>${r.url.searchParams.get("commit") ?? ""}</code> on the branch checked out in the repository — not pushed</div>`,
+      "apply-failed": html`<div class="banner bad">Not applied: ${r.url.searchParams.get("why") ?? "see jarvis logs"}</div>`,
+      restored: html`<div class="banner ok">The branch is back — apply it, or remove it again</div>`,
+      "restore-failed": html`<div class="banner bad">The branch could not be restored (a branch of that name exists?)</div>`,
       "cleaned-all": html`<div class="banner ok">Checkout and branch removed — the files go in the background</div>`,
       "cleaned-branch-kept": html`<div class="banner bad">Checkout removed; the branch could not be deleted (checked out somewhere?) — <code>git branch -D</code> it by hand</div>`,
       "not-ended": html`<div class="banner bad">The run has not ended: cancel it first, then clean up</div>`,
@@ -588,9 +593,14 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       (await git(["rev-parse", "--verify", "-q", `refs/heads/${branch}`], ws.repoRoot)).code === 0;
     if (!exists && !branchExists) {
       const cleaned = runtime.events.list({ runId: run.id, kind: "run.gc", limit: 1 }).length > 0;
-      return cleaned
-        ? html`<section class="panel" aria-labelledby="checkout"><h2 id="checkout">Checkout</h2><p class="muted">Removed: no folder and no branch of this run are left.</p></section>`
-        : undefined;
+      const kept =
+        !!branch &&
+        (await git(["rev-parse", "--verify", "-q", `refs/jarvis/removed/${branch}`], ws.repoRoot)).code === 0;
+      if (!cleaned && !kept) return undefined;
+      return html`<section class="panel" aria-labelledby="checkout"><h2 id="checkout">Checkout</h2>
+<p class="muted">Removed: no folder and no branch of this run are left.${kept ? html` Its branch's last commit is kept as <code>refs/jarvis/removed/${branch}</code>.` : ""}</p>
+${kept && actions ? html`<form method="post" action="/runs/${encodeURIComponent(shortRunId(run.id))}/restore-branch"><input type="hidden" name="t" value="${actions.token}"><div class="row"><button type="submit" class="btn">Restore the branch</button><span class="hint">then Apply, or remove it again</span></div></form>` : ""}
+</section>`;
     }
     // its work taken (applied, or the branch merged into what is checked out): the branch can go
     const taken =
@@ -598,6 +608,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       (branchExists &&
         (await git(["merge-base", "--is-ancestor", branch as string, "HEAD"], ws.repoRoot)).code === 0);
     const keepWork = run.state === "COMPLETED" && !taken;
+    const current = (await git(["rev-parse", "--abbrev-ref", "HEAD"], ws.repoRoot)).stdout.trim();
     const what = [
       exists ? html`folder <code>${ws.path}</code>` : "",
       branchExists ? html`branch <code>${branch}</code>` : "",
@@ -605,9 +616,14 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
     return html`<section class="panel" aria-labelledby="checkout"><h2 id="checkout">Checkout</h2>
 <p class="muted">The run has ended; its ${what.map((w, i) => html`${i > 0 ? " and " : ""}${w}`)} ${what.length > 1 ? "are" : "is"} still there.</p>
 ${
+  actions && branchExists && !taken && run.state === "COMPLETED"
+    ? html`<form method="post" action="/runs/${encodeURIComponent(shortRunId(run.id))}/apply"><input type="hidden" name="t" value="${actions.token}"><div class="row"><button type="submit" class="btn primary">Apply to <code>${current}</code></button><span class="hint">the run's changes as one commit on the branch checked out in the repository, as <code>jarvis apply</code>; not pushed</span></div></form>`
+    : ""
+}
+${
   actions
     ? html`<form method="post" action="/runs/${encodeURIComponent(shortRunId(run.id))}/cleanup"><input type="hidden" name="t" value="${actions.token}">
-${branchExists ? html`<label class="row"><input type="checkbox" name="branch" value="1"${keepWork ? "" : " checked"}> also delete the branch <code>${branch}</code></label>${keepWork ? html`<p class="hint">Its changes were not applied: the branch is the only copy of them. <code>jarvis apply ${shortRunId(run.id)}</code> first, or keep the branch.</p>` : ""}` : ""}
+${branchExists ? html`<label class="row"><input type="checkbox" name="branch" value="1"${keepWork ? "" : " checked"}> also delete the branch <code>${branch}</code>${keepWork ? html` — <b>its changes are not applied</b>` : ""}</label>${keepWork ? html`<p class="hint">The branch is the only copy of the run's work: Apply it first, or keep the branch. Deleted, its last commit stays under <code>refs/jarvis/removed/</code> and can be restored here.</p>` : ""}` : ""}
 <div class="row"><button type="submit" class="btn">${exists ? "Remove the checkout" : "Delete the branch"}</button><span class="hint">as <code>jarvis gc</code> for this run</span></div>
 </form>`
     : ""
@@ -1225,7 +1241,7 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       });
     }
     const m =
-      /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|clarify|eval|note|pause|cleanup)$/.exec(
+      /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|clarify|eval|note|pause|cleanup|apply|restore-branch)$/.exec(
         r.url.pathname,
       );
     const run = m ? resolveRun(m[1] as string) : undefined;
@@ -1355,6 +1371,36 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
         editor ? `${where}?notice=opened&editor=${encodeURIComponent(editor)}` : `${where}?notice=no-editor`,
       );
     }
+    if (m[2] === "apply") {
+      // as `jarvis apply`: the run's own changes, one commit on the branch checked out in the repository
+      if (!isTerminal(run.state)) return redirect(r, `/runs/${short}?notice=not-ended`);
+      if (run.workspace.mode !== "worktree") return redirect(r, `/runs/${short}?notice=no-checkout`);
+      const who = await actor();
+      if (!who) return redirect(r, `/runs/${short}?notice=actor`);
+      try {
+        const done = await applyRun(runtime, run, who, process.env);
+        return redirect(
+          r,
+          `/runs/${short}?notice=applied&files=${done.files.length}&commit=${done.commit.slice(0, 10)}`,
+        );
+      } catch (error) {
+        if (!(error instanceof WorktreeError)) throw error;
+        return redirect(
+          r,
+          `/runs/${short}?notice=apply-failed&why=${encodeURIComponent(error.message.slice(0, 600))}`,
+        );
+      }
+    }
+    if (m[2] === "restore-branch") {
+      // a branch deleted with its checkout, back from the commit kept for it
+      const b = run.workspace.branch;
+      if (!b) return redirect(r, `/runs/${short}?notice=no-checkout`);
+      const kept = `refs/jarvis/removed/${b}`;
+      const made = await git(["branch", b, kept], run.workspace.repoRoot);
+      if (made.code !== 0) return redirect(r, `/runs/${short}?notice=restore-failed`);
+      await git(["update-ref", "-d", kept], run.workspace.repoRoot);
+      return redirect(r, `/runs/${short}?notice=restored`);
+    }
     if (m[2] === "cleanup") {
       // an ended run's own checkout, and on request its branch: as `jarvis gc` for one run
       if (!isTerminal(run.state)) return redirect(r, `/runs/${short}?notice=not-ended`);
@@ -1365,7 +1411,7 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       const pruneBranch = form.get("branch") === "1" && !!ws.branch;
       const hadCheckout = existsSync(ws.path);
       if (hadCheckout) await new WorktreeWorkspace(ws, process.env).remove({ pruneBranch });
-      else if (pruneBranch) await git(["branch", "-D", ws.branch as string], ws.repoRoot);
+      else if (pruneBranch) await deleteBranchKeepingTip(ws.repoRoot, ws.branch as string);
       const branchLeft =
         pruneBranch &&
         (await git(["rev-parse", "--verify", "-q", `refs/heads/${ws.branch}`], ws.repoRoot)).code === 0;

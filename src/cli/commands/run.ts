@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { clock } from "../../app/activity.ts";
+import { applyRun } from "../../app/applyRun.ts";
 import { nextWorkflowOf } from "../../app/continuation.ts";
 import { awaitedArtifact, DecisionTakenError, recordDecision } from "../../app/decide.ts";
 import { createEngine } from "../../app/engine.ts";
@@ -15,7 +16,6 @@ import { resolveActor } from "../../core/actor/resolve.ts";
 import type { Actor } from "../../core/domain/actor.ts";
 import type { ApprovalDecision } from "../../core/domain/artifact.ts";
 import type { FreshSource, Run, WorkspaceRef } from "../../core/domain/run.ts";
-import { removeMarkers } from "../../interaction/review/collector.ts";
 import { daemonTick } from "../../orchestration/daemon.ts";
 import { interruption } from "../../orchestration/interrupt.ts";
 import { leaseOwner } from "../../orchestration/lease.ts";
@@ -775,35 +775,8 @@ export async function runApply(ctx: CliContext, ref: string, options: { message?
       throw new CliExit(EXIT.error);
     }
     const actor = await actorFor(ctx, runtime);
-    const wt = WorktreeWorkspace.open(run.workspace, ctx.env, {
-      name: actor.display ?? actor.id,
-      email: actor.id,
-    });
     try {
-      if (loaded.config.human.review.removeMarkersAfterApproval) {
-        // ADR-0019 §5: markers leave the code once the work is approved; threads stay in the store.
-        const stripped = await removeMarkers(run.workspace.path);
-        if (stripped.length > 0) {
-          await wt.checkpoint("jarvis: remove review markers", {
-            "Jarvis-Run": run.id,
-            "Jarvis-Kind": "review-cleanup",
-          });
-          runtime.events.emit({ kind: "review.markersRemoved", runId: run.id, payload: { files: stripped } });
-        }
-      }
-      const trailer = `Jarvis-Run: ${run.id}`;
-      const message = options.message
-        ? options.message.includes(trailer)
-          ? options.message
-          : `${options.message.trimEnd()}\n\n${trailer}`
-        : `${run.task}: apply jarvis run ${shortRunId(run.id)}\n\n${trailer}`;
-      const result = await wt.apply(message);
-      runtime.events.emit({
-        kind: "run.applied",
-        runId: run.id,
-        actor: `${actor.kind}:${actor.id}`,
-        payload: { commit: result.commit, files: result.files.length },
-      });
+      const result = await applyRun(runtime, run, actor, ctx.env, options.message);
       ctx.out.result({ run: run.id, ...result }, () => {
         ctx.out.line(
           `applied ${result.files.length} file(s) as ${result.commit.slice(0, 10)} on the current branch`,

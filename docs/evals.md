@@ -98,15 +98,17 @@ jarvis evals diff pilot --tolerance 0.05      # ненулевой код при
 jarvis evals run-to-case <run> --suite pilot --id onboarding-restart
 ```
 
-Берёт fixture `git archive` базового коммита run; gold: `files` — файлы, которые run изменил (git diff),
+Fixture — базовый коммит run: в наборе внутри того же репозитория ссылкой (`fixture: { commit: <sha>, overlay: overlay }`,
+раннер распаковывает коммит через `git archive` и кладёт поверх `overlay/` — `.jarvis/` прогона; кейс весит килобайты,
+пилот: 4,3 МБ копии сервиса), в наборе снаружи — копией в `fixture/`; gold: `files` — файлы, которые run изменил (git diff),
 `acceptance` — из `requirements[].acceptance` в spec, обязательные источники — только из версий spec/impact/research,
-которые правил человек; id по умолчанию — slug задачи; тестовую
+которые правил человек; id по умолчанию — ключ задачи (или её первые слова) и короткий id прогона; тестовую
 команду из `tools.local.test|tests|check`; записывает `source` для трассируемости. `--no-fixture` —
 только `case.yaml`. Кассету для replay нужно записать отдельным `--mode record`.
 
 Ещё `run-to-case` кладёт в `gold.answers` ответы человека на открытые вопросы документов (со страницы одобрения;
-пока для ревью кейса, в метрики не входят) и копирует в фикстуру `.jarvis/project.yaml` и `.jarvis/knowledge` из
-рабочей копии, если их нет в коммите: прогон шёл с ними.
+пока для ревью кейса, в метрики не входят) и кладёт `.jarvis/project.yaml` и `.jarvis/knowledge` рабочей копии в
+`overlay/` (или в копию фикстуры): прогон шёл с ними, даже незакоммиченными.
 
 **Из `jarvis ui`.** На странице завершённого прогона с принятой реализацией — карточка «Keep it as an eval case»:
 набор (по умолчанию `pilot`) и **Make an eval case** — то же, что `jarvis evals run-to-case <run> --suite <набор>`,

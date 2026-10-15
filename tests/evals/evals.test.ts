@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Writable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -253,7 +253,13 @@ describe("jarvis evals", () => {
     expect(r.files).toEqual(["src/onboarding.ts"]);
     expect(r.acceptance).toEqual(["unit test"]);
     expect(r.fixture).toBe(true);
-    expect(existsSync(join(r.caseDir, "fixture", "src", "onboarding.ts"))).toBe(true);
+    // a suite in the run's repository: the repository at the base commit by reference, no copy of it
+    expect(existsSync(join(r.caseDir, "fixture"))).toBe(false);
+    expect(readFileSync(join(r.caseDir, "case.yaml"), "utf8")).toMatch(
+      /fixture:\n\s+commit: [0-9a-f]{40}\n\s+overlay: overlay/,
+    );
+    expect(existsSync(join(r.caseDir, "overlay", ".jarvis", "project.yaml"))).toBe(true);
+    expect(r.caseDir).toMatch(/\/evals\/derived\/abc-81-[0-9a-f]{8}$/);
     expect(existsSync(join(r.caseDir, "case.yaml"))).toBe(true);
     const again = await jarvis(["evals", "run-to-case", runId, "--suite", "derived"]);
     expect(again.code).toBe(1);
@@ -262,7 +268,7 @@ describe("jarvis evals", () => {
     expect(recorded.code).toBe(0);
     const result = JSON.parse(recorded.out) as SuiteResult;
     expect(result.cases[0]).toMatchObject({
-      id: "abc-81",
+      id: expect.stringMatching(/^abc-81-[0-9a-f]{8}$/),
       success: true,
       fileRecall: 1,
       acceptanceCoverage: 1,
