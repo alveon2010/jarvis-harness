@@ -179,6 +179,7 @@ tools:
 
 workspace:                     # ADR-0003
   mode: worktree               # worktree | cwd
+  checkout: worktree           # worktree | clone — см. ниже
   setup: "pnpm install --offline --frozen-lockfile"   # после создания worktree
   allowWrites: true            # по умолчанию true для worktree, false для cwd
   retentionDays: 7             # jarvis gc
@@ -189,6 +190,12 @@ workspace:                     # ADR-0003
   cache:                       # зависимости между worktree (по умолчанию выключено)
     key: [pnpm-lock.yaml]      # файлы, по содержимому которых кэш подходит
     paths: [node_modules, "packages/*/node_modules"]   # что сохранить; `*` — один уровень каталогов
+
+`workspace.checkout: clone` — рабочая копия прогона как `git clone --shared`, а не `git worktree`: свой каталог `.git`,
+объекты общие с репозиторием (быстро, без копий), ветка прогона создаётся в клоне и при каждом коммите (хук
+post-commit) и откате отправляется в репозиторий, так что `jarvis diff`, `apply`, `gc` и страницы видят её как обычно.
+Для сборок, чьи инструменты читают git через JGit, не знающий worktree: Gradle-плагин версионирования падал в каждой
+worktree с `Missing unknown <sha>` / `Bare Repository has neither a working tree, nor an index`.
 
 modelWait:                     # модель недоступна после повторов шлюза: прогон ждёт, а не падает
   checkEveryMinutes: 5         # как часто проверять (одна попытка, без повторов)

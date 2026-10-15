@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, join, posix } from "node:path";
 import type {
   FileFacts,
@@ -43,6 +43,9 @@ export interface UpdateResult {
 export function mainCheckoutOf(path: string): string {
   try {
     const dotGit = join(path, ".git");
+    // a run's clone (workspace.checkout: clone) names the repository it came from
+    const named = join(dotGit, "jarvis-main");
+    if (existsSync(named)) return readFileSync(named, "utf8").trim() || path;
     if (statSync(dotGit).isFile()) {
       const pointer = /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGit, "utf8"))?.[1]?.trim();
       const m = pointer ? /^(.*)[\\/]\.git[\\/]worktrees[\\/][^\\/]+$/.exec(pointer) : undefined;

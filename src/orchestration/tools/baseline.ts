@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { git, runShell } from "../../tools/local/exec.ts";
+import { runShell } from "../../tools/local/exec.ts";
 import { WorktreeWorkspace } from "../worktree.ts";
 import { testClassArgs } from "./relatedTests.ts";
 
@@ -72,6 +72,7 @@ export interface BaselineOptions {
   readonly cacheDir: string;
   readonly repoId: string;
   readonly setup?: string | undefined;
+  readonly checkout?: "worktree" | "clone";
   readonly depsCache?: { readonly dir: string; readonly key: string[]; readonly paths: string[] } | undefined;
   readonly timeoutMs: number;
   readonly env: NodeJS.ProcessEnv;
@@ -101,6 +102,7 @@ export async function failingOnBase(o: BaselineOptions): Promise<Set<string> | u
         task: "baseline",
         baseRef: o.baseCommit,
         ...(o.setup ? { setup: o.setup } : {}),
+        ...(o.checkout ? { checkout: o.checkout } : {}),
         setupTimeoutMs: o.timeoutMs,
         env: o.env,
         ...(o.depsCache ? { cache: o.depsCache } : {}),
@@ -118,8 +120,7 @@ export async function failingOnBase(o: BaselineOptions): Promise<Set<string> | u
       return undefined;
     } finally {
       if (wt) {
-        await git(["worktree", "remove", "--force", wt.ref.path], o.repoRoot);
-        await git(["branch", "-D", wt.ref.branch ?? ""], o.repoRoot);
+        await wt.remove({ pruneBranch: true });
         if (existsSync(wt.ref.path)) rmSync(wt.ref.path, { recursive: true, force: true });
       }
     }

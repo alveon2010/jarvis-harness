@@ -80,6 +80,8 @@ export const WorkspaceRefSchema = z.strictObject({
   baseRef: z.string().min(1),
   baseCommit: z.string().min(1).optional(),
   headCommit: z.string().min(1).optional(),
+  /** How the run's checkout is made (`workspace.checkout`): absent — a git worktree. */
+  checkout: z.enum(["clone"]).optional(),
 });
 export type WorkspaceRef = z.infer<typeof WorkspaceRefSchema>;
 

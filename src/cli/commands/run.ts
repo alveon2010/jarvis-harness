@@ -408,6 +408,7 @@ async function prepareWorkspace(
       task,
       ...(base ? { baseRef: base } : {}),
       ...(loaded.config.workspace.setup ? { setup: loaded.config.workspace.setup } : {}),
+      checkout: loaded.config.workspace.checkout,
       setupTimeoutMs: loaded.config.tools.commandTimeoutMs,
       env: ctx.env,
       ...(loaded.config.workspace.cache

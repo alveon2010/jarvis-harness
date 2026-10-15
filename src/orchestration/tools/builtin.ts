@@ -69,6 +69,7 @@ async function preexistingOf(
     cacheDir: loaded.home.cacheDir,
     repoId: repoIdOf(ref.repoRoot),
     setup: loaded.config.workspace.setup,
+    checkout: loaded.config.workspace.checkout,
     depsCache: loaded.config.workspace.cache
       ? { dir: join(loaded.home.cacheDir, "deps"), ...loaded.config.workspace.cache }
       : undefined,

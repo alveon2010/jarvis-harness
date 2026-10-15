@@ -287,6 +287,14 @@ export const HooksConfigSchema = z.strictObject({
 
 export const WorkspaceConfigSchema = z.strictObject({
   mode: WorkspaceModeSchema.default("worktree"),
+  /**
+   * How a run's own checkout is made in worktree mode: `worktree` (git worktree, the default) or
+   * `clone` — a `git clone --shared` with a `.git` directory of its own, the objects shared with the
+   * repository, the run's branch pushed back to it on every commit. For builds whose tools read git
+   * with a library that does not know worktrees (JGit: a Gradle versioning plugin failed with
+   * `Missing unknown <sha>` in every worktree).
+   */
+  checkout: z.enum(["worktree", "clone"]).default("worktree"),
   setup: z.string().min(1).optional(),
   /**
    * How a person tries the result before accepting it (the implementation gate's «Try it»): the commands

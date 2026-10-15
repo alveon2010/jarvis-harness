@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { WorkspaceRef } from "../core/domain/run.ts";
@@ -29,6 +29,8 @@ export interface CreateWorktreeOptions {
   readonly setup?: string;
   readonly setupTimeoutMs?: number;
   readonly env?: NodeJS.ProcessEnv;
+  /** `clone`: a `git clone --shared` instead of a git worktree (`workspace.checkout`). */
+  readonly checkout?: "worktree" | "clone";
   /** Dependencies kept between worktrees: where, and what (`workspace.cache`). */
   readonly cache?: { readonly dir: string } & DepsCacheConfig;
   /** Told when the worktree exists and before `setup` runs (it can take minutes: say so). */
@@ -161,10 +163,13 @@ export class WorktreeWorkspace implements Workspace {
     const branch = branchNameFor(options.task, options.runId);
     const path = worktreePathFor(options.worktreesDir, options.repoRoot, options.task, options.runId);
     mkdirSync(join(path, ".."), { recursive: true });
-    await must(
-      git(["worktree", "add", "--quiet", path, "-b", branch, baseCommit], options.repoRoot),
-      "create worktree",
-    );
+    const clone = options.checkout === "clone";
+    if (clone) await createClone(options.repoRoot, path, branch, baseCommit);
+    else
+      await must(
+        git(["worktree", "add", "--quiet", path, "-b", branch, baseCommit], options.repoRoot),
+        "create worktree",
+      );
     const ref: WorkspaceRef = {
       mode: "worktree",
       repoRoot: options.repoRoot,
@@ -173,6 +178,7 @@ export class WorktreeWorkspace implements Workspace {
       baseRef,
       baseCommit,
       headCommit: baseCommit,
+      ...(clone ? { checkout: "clone" as const } : {}),
     };
     options.onStage?.("worktree", path);
     const cache = options.cache;
@@ -201,7 +207,8 @@ export class WorktreeWorkspace implements Workspace {
       });
       if (r.code !== 0 || r.timedOut) {
         // a failed setup leaves no half-made worktree or branch behind (pilot: `jarvis c` failed silently)
-        await git(["worktree", "remove", "--force", path], options.repoRoot);
+        if (clone) rmSync(path, { recursive: true, force: true });
+        else await git(["worktree", "remove", "--force", path], options.repoRoot);
         await git(["branch", "-D", branch], options.repoRoot);
         throw new WorktreeError(
           `workspace.setup failed (${r.timedOut ? "timed out" : `exit ${r.code ?? "killed"}`}): ${(r.stderr || r.stdout).trim().slice(-2000)}`,
@@ -272,6 +279,8 @@ export class WorktreeWorkspace implements Workspace {
     if (!target) return;
     await must(git(["reset", "-q", "--hard", target], this.ref.path), "git reset");
     await must(git(["clean", "-fdq"], this.ref.path), "git clean");
+    // a clone's branch moved back: the repository's copy of it too
+    if (this.ref.checkout === "clone" && this.ref.branch) await pushBranch(this.ref.path, this.ref.branch);
   }
 
   async diff(): Promise<string> {
@@ -344,13 +353,58 @@ export class WorktreeWorkspace implements Workspace {
     } catch {
       // another disk or no permission: let git remove it, without the usual timeout
     }
-    if (!moved)
+    if (!moved && this.ref.checkout === "clone") rmSync(path, { recursive: true, force: true });
+    else if (!moved)
       await git(["worktree", "remove", "--force", path], this.ref.repoRoot, { timeoutMs: 3_600_000 });
     await git(["worktree", "prune"], this.ref.repoRoot);
     if (moved) deleteInBackground(aside);
     if (options.pruneBranch && this.ref.branch)
       await git(["branch", "-D", this.ref.branch], this.ref.repoRoot);
   }
+}
+
+/** The file in a clone's `.git` that names the repository it was cloned from (`mainCheckoutOf`). */
+export const CLONE_MAIN_FILE = "jarvis-main";
+
+/**
+ * A run's checkout as a `git clone --shared`: a `.git` directory of its own (tools that read git with
+ * JGit do not know worktrees), the objects borrowed from the repository, the run's branch made there
+ * and pushed back to the repository on every commit (a post-commit hook), so `jarvis diff`, `apply`
+ * and the pages see it there as they see a worktree's.
+ */
+async function createClone(
+  repoRoot: string,
+  path: string,
+  branch: string,
+  baseCommit: string,
+): Promise<void> {
+  await must(
+    git(["clone", "--quiet", "--shared", "--no-checkout", repoRoot, path], repoRoot),
+    "git clone --shared",
+  );
+  try {
+    await must(git(["checkout", "-q", "-b", branch, baseCommit], path), "checkout the run's branch");
+    writeFileSync(join(path, ".git", CLONE_MAIN_FILE), `${repoRoot}\n`);
+    const hook = join(path, ".git", "hooks", "post-commit");
+    mkdirSync(join(path, ".git", "hooks"), { recursive: true });
+    writeFileSync(
+      hook,
+      `#!/bin/sh\n# jarvis: the run's branch goes back to the repository it came from\ngit push --quiet --force origin "HEAD:refs/heads/${branch}" >/dev/null 2>&1 || true\n`,
+    );
+    chmodSync(hook, 0o755);
+    await pushBranch(path, branch);
+  } catch (error) {
+    rmSync(path, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+/** The clone's branch, as it is, into the repository it came from. */
+async function pushBranch(path: string, branch: string): Promise<void> {
+  await must(
+    git(["push", "--quiet", "--force", "origin", `HEAD:refs/heads/${branch}`], path),
+    "push the run's branch",
+  );
 }
 
 export function workspaceFactory(env?: NodeJS.ProcessEnv): WorkspaceFactory {

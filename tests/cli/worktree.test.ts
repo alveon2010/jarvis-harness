@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { Writable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -133,6 +133,37 @@ describe("worktree workspace end to end (ADR-0003)", () => {
       await new Promise((r) => setTimeout(r, 50));
     expect(readdirSync(dirname(ws.path)).filter((n) => n.includes(".removing-"))).toEqual([]);
     expect(sh(sb.project, ["worktree", "list"]).trim().split("\n")).toHaveLength(1);
+  });
+
+  it("checkout: clone — a shared clone with its own .git; its branch in the repository, diffs, applies and gcs", async () => {
+    sb.write(
+      "project/.jarvis/project.yaml",
+      "version: 1\nworkspace:\n  checkout: clone\n  setup: 'echo setup > .setup-ran'\ntools:\n  local: { lines: 'wc -l README.md' }\n",
+    );
+    sh(sb.project, ["add", "-A"]);
+    sh(sb.project, ["commit", "-q", "-m", "clone"]);
+    const r = await jarvis(["--json", "work", "ABC-10", "--workflow", "touch"]);
+    expect(r.code).toBe(0);
+    const detail = JSON.parse(r.out) as {
+      run: { id: string; workspace: { path: string; branch: string; checkout?: string } };
+    };
+    const ws = detail.run.workspace;
+    expect(ws.checkout).toBe("clone");
+    // a .git directory of its own (tools that read git with JGit), the objects borrowed
+    expect(statSync(join(ws.path, ".git")).isDirectory()).toBe(true);
+    expect(readFileSync(join(ws.path, ".git", "objects", "info", "alternates"), "utf8")).toContain(
+      sb.project,
+    );
+    expect(sh(sb.project, ["worktree", "list"]).trim().split("\n")).toHaveLength(1);
+    // every commit of the run is on its branch in the repository
+    expect(sh(sb.project, ["rev-parse", ws.branch]).trim()).toBe(sh(ws.path, ["rev-parse", "HEAD"]).trim());
+    expect((await jarvis(["diff", detail.run.id])).out).toContain("+export const generated = true;");
+    expect((await jarvis(["apply", detail.run.id])).code).toBe(0);
+    expect(readFileSync(join(sb.project, "src", "generated.ts"), "utf8")).toContain("generated = true");
+    const gc = await jarvis(["--json", "gc", "--days", "0", "--prune-branches"]);
+    expect(JSON.parse(gc.out)).toMatchObject({ removed: [detail.run.id] });
+    expect(existsSync(ws.path)).toBe(false);
+    expect(sh(sb.project, ["branch", "--list", "jarvis/*"]).trim()).toBe("");
   });
 
   it("refuses to apply onto a dirty main checkout and reports conflicts", async () => {
