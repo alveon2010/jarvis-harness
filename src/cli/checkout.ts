@@ -204,6 +204,17 @@ function onPath(command: string, env: NodeJS.ProcessEnv, extra: readonly string[
   return undefined;
 }
 
+/** The command-line launcher inside an installed macOS app of an editor with this label. */
+function macLauncher(home: string, label: string): string | undefined {
+  for (const [app, appLabel, launcher] of MAC_APPS) {
+    if (appLabel !== label) continue;
+    for (const bundle of [`/Applications/${app}.app`, join(home, "Applications", `${app}.app`)]) {
+      if (existsSync(join(bundle, launcher))) return join(bundle, launcher);
+    }
+  }
+  return undefined;
+}
+
 /**
  * The editor a checkout opens in: `JARVIS_EDITOR` (a command, may carry arguments: `idea`,
  * `code -n`), else the first known editor command on PATH (and JetBrains Toolbox scripts), else
@@ -214,17 +225,26 @@ export function editorFor(
   env: NodeJS.ProcessEnv,
   options: { platform?: NodeJS.Platform; home?: string } = {},
 ): Editor | undefined {
+  const platform = options.platform ?? process.platform;
+  const home = options.home ?? homedir();
+  const toolbox =
+    platform === "darwin" ? [join(home, "Library/Application Support/JetBrains/Toolbox/scripts")] : [];
   const own = env.JARVIS_EDITOR?.trim();
   if (own) {
     const command = own.split(/\s+/);
     const name = basename(command[0] as string).replace(/\.(sh|cmd|exe)$/, "");
     const known = EDITORS.find(([c]) => c === name);
-    return { command, label: known?.[1] ?? name, kind: known?.[2] ?? KINDS[name] ?? "paths" };
+    const label = known?.[1] ?? name;
+    // `code` / `idea` with no shell command installed (pilot: «spawn code ENOENT»): the launcher
+    // inside the app, as when nothing is set
+    const found = onPath(command[0] as string, env, toolbox);
+    const app = found || platform !== "darwin" ? undefined : macLauncher(home, label);
+    return {
+      command: [found ?? app ?? (command[0] as string), ...command.slice(1)],
+      label,
+      kind: known?.[2] ?? KINDS[name] ?? "paths",
+    };
   }
-  const platform = options.platform ?? process.platform;
-  const home = options.home ?? homedir();
-  const toolbox =
-    platform === "darwin" ? [join(home, "Library/Application Support/JetBrains/Toolbox/scripts")] : [];
   for (const [command, label, kind] of EDITORS) {
     const found = onPath(command, env, toolbox);
     if (found) return { command: [found], label, kind };
@@ -343,7 +363,16 @@ export function checkedOpener(ctx: CliContext, waitMs = 2500): OpenChecked {
           stdio: ["ignore", "ignore", fd],
           env: { ...process.env, ...env },
         });
-        child.on("error", (e) => finish({ label, command, error: e.message }));
+        child.on("error", (e: NodeJS.ErrnoException) =>
+          finish({
+            label,
+            command,
+            error:
+              e.code === "ENOENT"
+                ? `${command[0]} is not installed: set JARVIS_EDITOR to the editor's command or its full path (VS Code: "Shell Command: Install 'code' command in PATH")`
+                : e.message,
+          }),
+        );
         child.on("exit", (code, signal) => {
           const text = said();
           finish(

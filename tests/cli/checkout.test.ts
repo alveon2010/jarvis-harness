@@ -37,6 +37,21 @@ describe("the editor a checkout opens in", () => {
     expect(editorFor({ JARVIS_EDITOR: "nvim-qt" })?.kind).toBe("paths");
   });
 
+  it("JARVIS_EDITOR=code with no `code` command installed: the launcher inside the app (macOS)", () => {
+    const launcher = join(sb.home, "Applications/Visual Studio Code.app/Contents/Resources/app/bin/code");
+    mkdirSync(join(launcher, ".."), { recursive: true });
+    writeFileSync(launcher, "");
+    expect(editorFor({ JARVIS_EDITOR: "code", PATH: "" }, { platform: "darwin", home: sb.home })).toEqual({
+      command: [launcher],
+      label: "VS Code",
+      kind: "vscode",
+    });
+    // nothing installed: the name as given, and the page says why it did not open
+    expect(
+      editorFor({ JARVIS_EDITOR: "idea", PATH: "" }, { platform: "darwin", home: sb.home })?.command,
+    ).toEqual(["idea"]);
+  });
+
   it("then a known editor on PATH or in Toolbox scripts, then an app's launcher (macOS), then the file manager", () => {
     const bin = join(sb.root, "bin");
     mkdirSync(bin, { recursive: true });
@@ -186,6 +201,6 @@ describe("opening a file from a page", () => {
     const r = await checkedOpener(ctx(code) as never)(sb.project, [{ path: `${sb.project}/a.ts` }]);
     expect(r.error).toBe("VS Code exited with 1: Unable to connect to VS Code server");
     const missing = await checkedOpener(ctx(join(sb.root, "nope")) as never)(sb.project);
-    expect(missing.error).toContain("ENOENT");
+    expect(missing.error).toContain("is not installed: set JARVIS_EDITOR");
   });
 });
