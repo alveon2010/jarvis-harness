@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { request } from "node:http";
 import { PassThrough, Writable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -593,5 +594,50 @@ describe("the implementation gate says how to try it", () => {
     expect((await post(`/runs/${short}/open`, { t: ui.token, return: "https://elsewhere" })).location).toBe(
       `/runs/${short}?notice=opened&editor=VS%20Code`,
     );
+  });
+});
+
+describe("a file a page refers to", () => {
+  const getJson = async (path: string, referer?: string) => {
+    const res = await fetch(`http://127.0.0.1:${ui.port}${path}`, {
+      headers: {
+        cookie: `jarvis_ui_${ui.port}=${encodeURIComponent(ui.token)}`,
+        ...(referer ? { referer: `http://127.0.0.1:${ui.port}${referer}` } : {}),
+      },
+    });
+    return {
+      status: res.status,
+      body: (await res.json()) as { opened?: string; path?: string; error?: string },
+    };
+  };
+
+  it("opens in the editor at its line: in the run's checkout, a shortened path found by its end", async () => {
+    sb.write("project/src/orders/SlotService.java", "class SlotService {}\n");
+    execFileSync("git", ["init", "-q"], { cwd: sb.project });
+    execFileSync("git", ["add", "-A"], { cwd: sb.project });
+    const checkout = `${sb.root}/checkout`;
+    sb.write("checkout/src/orders/SlotService.java", "class SlotService { int changed; }\n");
+    const r = rt.runs.create({
+      task: "Delivery slots for ABC-42",
+      workflow: "gated",
+      owner: DEV,
+      workspace: { mode: "worktree", repoRoot: sb.project, path: checkout, baseRef: "HEAD" },
+      dataClass: "internal",
+    });
+    const short = r.id.slice(4, 12);
+
+    const inRun = await getJson("/open?path=src%2Forders%2FSlotService.java&line=12&js=1", `/runs/${short}`);
+    expect(inRun).toEqual({ status: 200, body: { opened: "VS Code", path: "src/orders/SlotService.java" } });
+    expect(opened[0]).toEqual({
+      dir: checkout,
+      files: [{ path: `${checkout}/src/orders/SlotService.java`, line: 12 }],
+    });
+
+    const shortened = await getJson("/open?path=SlotService.java&js=1");
+    expect(shortened.body.path).toBe("src/orders/SlotService.java");
+    expect(opened[1]?.dir).toBe(sb.project);
+
+    expect((await getJson("/open?path=..%2F..%2Fetc%2Fpasswd&js=1")).status).toBe(404);
+    expect((await getJson("/open?path=Missing.java&js=1")).body.error).toContain("is not a file of");
   });
 });

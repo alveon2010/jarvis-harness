@@ -287,6 +287,11 @@ h2.ask-sec{font-size:15px;margin:4px 0 -4px}
 .doc ul,.doc ol{margin:0 0 10px;padding-left:22px}
 .doc li{margin:2px 0}
 .doc code{background:var(--chip);padding:1px 5px;border-radius:4px;font-size:13px}
+code.sym>span,a.ref code>span{display:inline-block;max-width:100%;overflow-wrap:anywhere}
+code .cq{color:var(--muted)}
+.toast{position:fixed;right:16px;bottom:16px;z-index:50;max-width:min(520px,calc(100vw - 32px));padding:10px 14px;border-radius:10px;font-size:13px;overflow-wrap:anywhere;box-shadow:0 4px 16px rgba(0,0,0,.18)}.toast.ok{background:var(--ok-bg);color:var(--ok-ink)}.toast.bad{background:var(--bad-bg);color:var(--bad)}
+a.ref{text-decoration:none}a.ref code{color:var(--accent)}a.ref:hover code{text-decoration:underline}
+.dl .n a{color:inherit;text-decoration:none}.dl .n a:hover{color:var(--accent);text-decoration:underline}.fname a.open{text-decoration:none;font-size:12px}
 .doc pre{background:var(--sunken);border:1px solid var(--line);border-radius:8px;padding:12px;overflow-x:auto;font-size:13px;line-height:1.5}
 .doc pre code{background:none;padding:0}
 .doc blockquote{margin:0 0 10px;padding-left:12px;border-left:3px solid var(--line);color:var(--ink-2)}
@@ -378,8 +383,9 @@ form.clarify>.actions{margin:4px 0}
 .qs .q .said{font-size:14px;line-height:21px;color:var(--ink);white-space:pre-wrap}
 .qs .q .opt small{color:var(--muted);font-size:12px}
 .qs .q .src{display:flex;gap:6px;flex-wrap:wrap}
-.qs .q .src span,.qs .q .src a{font-family:var(--mono);font-size:11px;padding:1px 7px;border-radius:6px;border:1px solid var(--line);color:var(--ink-2)}
-.qs .q .src a{color:var(--accent);text-decoration:none}.qs .q .src a:hover{border-color:var(--accent)}
+.qs .q .src>span,.qs .q .src>a{font-family:var(--mono);font-size:11px;padding:1px 7px;border-radius:6px;border:1px solid var(--line);color:var(--ink-2)}
+.qs .q .src>a{color:var(--accent);text-decoration:none}.qs .q .src>a:hover{border-color:var(--accent)}
+.qs .q .src a.ref code{font-size:11px}
 .qs .q .own textarea{width:100%;min-height:40px;padding:8px 10px;border-radius:6px;resize:vertical;font-size:14px;line-height:20px}
 .qs .q .qrow{display:flex;gap:8px;flex-wrap:wrap}
 .qs .q .pick{display:inline-flex;gap:6px;align-items:center;font-size:13px;color:var(--ink-2);padding:5px 10px;border:1px solid var(--line);border-radius:999px;cursor:pointer}
@@ -1037,6 +1043,31 @@ export const SCRIPT = `
       return;
     }
     for (const x of indicators) if (x.pop && !x.pop.hidden && !e.target.closest('[data-pop-wrap]')) x.setOpen(false);
+  });
+
+  // a file a page refers to opens in the editor; the page stays where it is, a toast says what happened
+  document.addEventListener('click', async (e) => {
+    const ref = e.target.closest('a[href^="/open?"]');
+    if (!ref || e.metaKey || e.ctrlKey || e.shiftKey) return;
+    e.preventDefault();
+    let text = 'Could not reach jarvis ui';
+    let ok = false;
+    try {
+      const res = await fetch(ref.getAttribute('href') + '&js=1', { credentials: 'same-origin' });
+      const body = await res.json();
+      ok = res.ok;
+      text = ok ? '↗ ' + body.path + ' — opened in ' + body.opened : body.error;
+    } catch {}
+    let toast = document.querySelector('.toast');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.setAttribute('role', 'status');
+      document.body.append(toast);
+    }
+    toast.className = 'toast ' + (ok ? 'ok' : 'bad');
+    toast.textContent = text;
+    clearTimeout(toast.timer);
+    toast.timer = setTimeout(() => toast.remove(), ok ? 2500 : 6000);
   });
 
   // "New task" from the header: straight into the text box

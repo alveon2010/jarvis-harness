@@ -3,6 +3,8 @@
  * markup built here (`Html`). Agents write the documents and the diff is code from the run: nothing
  * of theirs reaches the page as markup — a `<script>` in a spec is shown as text.
  */
+import { codeSpanHtml, linkBareFiles } from "./refs.ts";
+
 export class Html {
   readonly value: string;
 
@@ -57,15 +59,18 @@ export function join(parts: readonly Part[], separator: Part = ""): Html {
 
 /* ---- markdown ---- */
 
-/** Inline markdown of an escaped line: `code`, **bold**, *italic*, http(s) links; nothing else. */
+/**
+ * Inline markdown of a line: `code`, **bold**, *italic*, http(s) links; nothing else. A code span that
+ * is a file or a symbol is a reference (refs.ts); a bare `File.java:12` too.
+ */
 function inline(text: string): string {
   const codes: string[] = [];
   // code spans first: their content is literal
-  let out = escapeHtml(text).replace(/`([^`]+)`/g, (_m, c: string) => {
-    codes.push(`<code>${c}</code>`);
+  let out = text.replace(/`([^`]+)`/g, (_m, c: string) => {
+    codes.push(codeSpanHtml(c));
     return `\u0000${codes.length - 1}\u0000`;
   });
-  out = out
+  out = linkBareFiles(escapeHtml(out))
     .replace(/\*\*\[check:([^\]]*)\]\*\*/g, (_m, c: string) => `<mark>check:${c}</mark>`)
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/(^|[\s(])\*([^*\s][^*]*)\*(?=[\s).,;:!?]|$)/g, "$1<em>$2</em>")

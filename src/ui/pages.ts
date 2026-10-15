@@ -15,7 +15,7 @@ import { incompleteOf } from "../cli/style.ts";
 import { isTerminal, type Run } from "../core/domain/run.ts";
 import type { EgressNotice } from "../security/policy/egress.ts";
 import { shortRunId } from "../storage/runStore.ts";
-import { type DiffFile, escapeHtml, type Html, html, join, markdownToHtml, type Part } from "./html.ts";
+import { type DiffFile, escapeHtml, type Html, html, join, markdownToHtml, type Part, raw } from "./html.ts";
 import type {
   ApprovalCard,
   ArtifactPage,
@@ -31,6 +31,7 @@ import type {
   WaitingRun,
 } from "./model.ts";
 import { RECENT_PAGE, RECENT_SIZES } from "./model.ts";
+import { fileRefHtml, fileRefOf, openHref } from "./refs.ts";
 
 /**
  * The pages of `jarvis ui` (ADR-0023 §3), server-rendered from the models in model.ts. Look: the
@@ -205,10 +206,13 @@ function statePill(run: Run, extra?: string): Html {
   return html`<span class="pill ${tone}">${glyph} ${label}${extra ? ` · ${extra}` : ""}</span>`;
 }
 
+/** A file of the run as a link to the editor (refs.ts). */
+const fileRef = (path: string, line?: number): Html => raw(fileRefHtml(path, line));
+
 function changeLine(c: Change): Html {
   const code = c.code === "??" ? "+" : c.code;
   const tone = code === "D" ? "bad" : code === "+" || code === "A" ? "ok" : "warn";
-  return html`<span><span class="${tone}">${code}</span> ${c.file}</span>`;
+  return html`<span><span class="${tone}">${code}</span> ${code === "D" ? c.file : fileRef(c.file)}</span>`;
 }
 
 function terminalHint(card: WaitCard, terminal: boolean, run: Run): Html {
@@ -481,7 +485,7 @@ export function startFromHtml(
 <label class="check"><input type="checkbox" name="from" value="${r.id}"${stale ? "" : " checked"}> <span><b>Start from the ${r.workflow} of ${whenShort(r.updatedAt, now)}</b> <span class="meta">— ${facts.join(" · ")}</span></span></label>
 ${
   stale
-    ? html`<p class="sub warn">⚠ code changed since: ${plural(point.since?.commits ?? 0, "commit")}, ${plural(touched.length, "file")} it read among them (${shown.map((f, i) => html`${i > 0 ? ", " : ""}<code>${f}</code>`)}${touched.length > shown.length ? ", …" : ""}) — a new research is safer</p>`
+    ? html`<p class="sub warn">⚠ code changed since: ${plural(point.since?.commits ?? 0, "commit")}, ${plural(touched.length, "file")} it read among them (${shown.map((f, i) => html`${i > 0 ? ", " : ""}${fileRef(f)}`)}${touched.length > shown.length ? ", …" : ""}) — a new research is safer</p>`
     : ""
 }
 <p class="sub hint">${stale ? `Unchecked: ${input.workflow} runs from the start, with a new research.` : `${input.workflow} begins at ${point.continuation.startAt} with it; the steps it did are not run again.`} <a href="/runs/${shortRunId(r.id)}" target="_blank" rel="noopener">Open the ${r.workflow}</a></p>
@@ -842,7 +846,7 @@ ${
         .slice(0, 8)
         .map(
           (x) =>
-            html`<span><span class="ok">+${x.added}</span> <span class="bad">−${x.removed}</span> ${x.path}</span>`,
+            html`<span><span class="ok">+${x.added}</span> <span class="bad">−${x.removed}</span> ${fileRef(x.path)}</span>`,
         )}${card.files.length > 8 ? html`<span class="muted">+${card.files.length - 8} more</span>` : ""}</div>`
     : ""
 }`;
@@ -1093,7 +1097,7 @@ function planWidget(p: PlanProgress, lastFile?: string): Html {
 <div class="segs" aria-label="${String(p.done)} of ${String(p.steps.length)} done">${p.steps.map((s) => html`<i class="${s.status === "done" ? "ok" : s.status === "on" ? "on" : ""}"></i>`)}</div>
 ${
   now
-    ? html`<div class="pmeta">${now.files.length > 0 ? html`<span><span class="k">files</span> ${now.files.map((f, i) => html`${i > 0 ? " · " : ""}<code>${f}</code>`)}</span>` : ""}${now.verification ? html`<span><span class="k">check</span> ${now.verification}</span>` : ""}${lastFile || now.files.length > 0 ? html`<span><span class="k">now</span> ${lastFile ? html`edit <code>${lastFile}</code>` : "reading"}${now.files.length > 0 ? ` · ${now.touched} of ${files(now.files.length)} touched` : ""}</span>` : ""}</div>`
+    ? html`<div class="pmeta">${now.files.length > 0 ? html`<span><span class="k">files</span> ${now.files.map((f, i) => html`${i > 0 ? " · " : ""}${fileRef(f)}`)}</span>` : ""}${now.verification ? html`<span><span class="k">check</span> ${now.verification}</span>` : ""}${lastFile || now.files.length > 0 ? html`<span><span class="k">now</span> ${lastFile ? html`edit ${fileRef(lastFile)}` : "reading"}${now.files.length > 0 ? ` · ${now.touched} of ${files(now.files.length)} touched` : ""}</span>` : ""}</div>`
     : ""
 }
 <ol class="plist">${p.steps.map(
@@ -1432,10 +1436,10 @@ export function diffFileHtml(f: DiffFile, index: number, comments: boolean): Htm
     const sign = l.kind === "add" ? "+" : l.kind === "del" ? "−" : "";
     const line = l.newLine ?? l.oldLine;
     const can = comments && l.newLine !== undefined;
-    return html`<div class="dl ${l.kind === "context" ? "ctx" : l.kind}"${can ? html` data-path="${f.path}" data-line="${line}"` : ""}>${comments ? html`<span class="cm">${can ? html`<button type="button" data-comment aria-label="Comment on ${f.path} line ${line}">+</button>` : ""}</span>` : ""}<span class="n">${l.oldLine ?? ""}</span><span class="n">${l.newLine ?? ""}</span><span class="s" aria-hidden="true">${sign}</span><span class="c">${l.text}</span></div>`;
+    return html`<div class="dl ${l.kind === "context" ? "ctx" : l.kind}"${can ? html` data-path="${f.path}" data-line="${line}"` : ""}>${comments ? html`<span class="cm">${can ? html`<button type="button" data-comment aria-label="Comment on ${f.path} line ${line}">+</button>` : ""}</span>` : ""}<span class="n">${l.oldLine ?? ""}</span><span class="n">${l.newLine !== undefined && f.status !== "deleted" ? html`<a href="${openHref(f.path, l.newLine)}" title="Open in the editor">${l.newLine}</a>` : ""}</span><span class="s" aria-hidden="true">${sign}</span><span class="c">${l.text}</span></div>`;
   });
   return html`<details class="panel file"${index < 12 ? html` open` : ""}>
-<summary><span class="fname">${f.path}</span><span class="fstat"><span class="ok">+${f.added}</span> <span class="bad">−${f.removed}</span>${status}</span></summary>
+<summary><span class="fname">${f.path}${f.status !== "deleted" ? html` <a class="open" href="${openHref(f.path)}" title="Open in the editor">↗</a>` : ""}</span><span class="fstat"><span class="ok">+${f.added}</span> <span class="bad">−${f.removed}</span>${status}</span></summary>
 <div class="scroll"><div class="diff" role="table" aria-label="Changes in ${f.path}">${rows}${f.lines.length > shown.length ? html`<div class="dl note"><span class="c">… ${f.lines.length - shown.length} more lines: jarvis diff</span></div>` : ""}</div></div>
 </details>`;
 }
@@ -1457,9 +1461,11 @@ export interface ArtifactExtras {
 /** A source chip; one that ends with a link (a Figma frame by its name) opens it. */
 const sourceChip = (x: string) => {
   const m = /^(.*\S)\s+(https:\/\/\S+)$/.exec(x);
-  return m
-    ? html`<a href="${m[2] as string}" target="_blank" rel="noopener">${cut(m[1] as string, 80)}</a>`
-    : html`<span>${cut(x, 80)}</span>`;
+  if (m)
+    return html`<a href="${m[2] as string}" target="_blank" rel="noopener">${cut(m[1] as string, 80)}</a>`;
+  // a file of the repository opens in the editor
+  const ref = fileRefOf(x);
+  return ref ? raw(ref) : html`<span>${cut(x, 80)}</span>`;
 };
 const sourceChips = (sources: readonly string[]) =>
   sources.length > 0 ? html`<span class="src">${sources.map(sourceChip)}</span>` : "";

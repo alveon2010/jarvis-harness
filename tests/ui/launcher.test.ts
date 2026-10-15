@@ -648,7 +648,7 @@ describe("New task on the page", () => {
     expect(body).toContain(
       '<span class="of">Plan 2 of 3</span><span class="d">Fetch the slots in the saga</span>',
     );
-    expect(body).toContain("<code>src/saga.ts</code>");
+    expect(body).toContain('href="/open?path=src%2Fsaga.ts"');
     expect(body).toContain("running now · plan 2 of 3");
     expect(await page("/")).toContain('<b class="planat">plan 2 of 3</b> Fetch the slots in the saga');
   });

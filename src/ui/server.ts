@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:f
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { join as joinPath } from "node:path";
+import { isAbsolute, join as joinPath, relative, resolve as resolvePath, sep } from "node:path";
 import { applyRun } from "../app/applyRun.ts";
 import { budgetGranted, budgetStopOf, grantBudget } from "../app/budgetStop.ts";
 import {
@@ -475,6 +475,60 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
     r.res.end();
   };
 
+  /**
+   * A file a page refers to (`src/…/OrderService.java:44`, refs.ts) in the person's editor: in the
+   * run's checkout when the page is a run's (by the referring address), else in the repository. A
+   * path the model shortened (`OrderService.java`) is found among the tracked files by its end.
+   */
+  const openRef = async (r: Request) => {
+    const want = (r.url.searchParams.get("path") ?? "").trim().replace(/^\.\//, "");
+    const line = Number(r.url.searchParams.get("line"));
+    const js = r.url.searchParams.get("js") === "1";
+    const answer = (status: number, body: { opened?: string; path?: string; error?: string }) =>
+      js
+        ? send(r, status, JSON.stringify(body), "application/json")
+        : status === 200
+          ? send(r, 204, "")
+          : notFound(r, body.error ?? "Nothing to open");
+    if (!want || want.includes("\0")) return answer(404, { error: "No file to open" });
+    let from = "";
+    try {
+      from = new URL(r.req.headers.referer ?? "").pathname;
+    } catch {
+      from = "";
+    }
+    const runRef = /^\/runs\/([^/]+)/.exec(from)?.[1];
+    const run = runRef && runRef !== "new" && runRef !== "from" ? resolveRun(runRef) : undefined;
+    const roots = [
+      ...(run ? [run.workspace.path, run.workspace.repoRoot] : []),
+      ...(options.projectRoot ? [options.projectRoot] : knownRepos().slice(0, 1)),
+    ].filter((x, i, all) => !!x && all.indexOf(x) === i && existsSync(x));
+    for (const root of roots) {
+      const rel = await locate(root, want);
+      if (!rel) continue;
+      const editor = options.open?.(root, [
+        { path: joinPath(root, rel), ...(Number.isInteger(line) && line > 0 ? { line } : {}) },
+      ]);
+      if (!editor)
+        return answer(404, {
+          error: "No editor found — set JARVIS_EDITOR (code, idea, webstorm…) where you start jarvis ui",
+        });
+      return answer(200, { opened: editor, path: rel });
+    }
+    return answer(404, { error: `${want} is not a file of ${roots[0] ?? "this repository"}` });
+  };
+  /** `want` relative to `root`: as is when it is there, else the one tracked file it ends (the shortest). */
+  const locate = async (root: string, want: string): Promise<string | undefined> => {
+    const abs = resolvePath(root, want);
+    if (abs.startsWith(root + sep) && existsSync(abs) && statSync(abs).isFile()) return relative(root, abs);
+    if (isAbsolute(want) || want.split("/").includes("..")) return undefined;
+    const listed = await git(["ls-files", "-co", "--exclude-standard"], root, { maxBytes: 32 * 1024 * 1024 });
+    return listed.stdout
+      .split("\n")
+      .filter((f) => f === want || f.endsWith(`/${want}`))
+      .sort((a, b) => a.length - b.length)[0];
+  };
+
   /** A form posted by the page: url-encoded, small. */
   const formOf = (req: IncomingMessage): Promise<URLSearchParams> =>
     new Promise((resolve, reject) => {
@@ -774,7 +828,7 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
           (await docsOf(roots())).some((d) => d.path === file) ||
           skillsOf(roots()).some((x) => x.path === file));
       if (!known || !existsSync(joinPath(root, file))) return redirect(r, backTo("no-file"));
-      const editor = options.open?.(root, [{ path: file }]);
+      const editor = options.open?.(root, [{ path: joinPath(root, file) }]);
       return redirect(
         r,
         editor ? backTo("opened", `&editor=${encodeURIComponent(editor)}`) : backTo("no-editor"),
@@ -1617,6 +1671,7 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
     if (path === "/knowledge/modules") return modulesPageOf(r);
     if (path === "/knowledge" || path.startsWith("/knowledge/")) return knowledgeGet(r);
     if (path === "/runs/from") return startFrom(r);
+    if (path === "/open") return openRef(r);
     const runMatch = /^\/runs\/([^/]+)$/.exec(path);
     if (runMatch) {
       const run = resolveRun(runMatch[1] as string);
