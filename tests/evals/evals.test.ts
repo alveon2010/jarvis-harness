@@ -242,6 +242,8 @@ describe("jarvis evals", () => {
     expect(work.code).toBe(0);
     const runId = (JSON.parse(work.out) as { run: { id: string } }).run.id;
 
+    // knowledge the run had and the base commit does not: the overlay carries it, and only it
+    sb.write("project/.jarvis/knowledge/glossary.md", "# Glossary\n");
     const made = await jarvis(["--json", "evals", "run-to-case", runId, "--suite", "derived"]);
     expect(made.code).toBe(0);
     const r = JSON.parse(made.out) as {
@@ -258,7 +260,9 @@ describe("jarvis evals", () => {
     expect(readFileSync(join(r.caseDir, "case.yaml"), "utf8")).toMatch(
       /fixture:\n\s+commit: [0-9a-f]{40}\n\s+overlay: overlay/,
     );
-    expect(existsSync(join(r.caseDir, "overlay", ".jarvis", "project.yaml"))).toBe(true);
+    expect(existsSync(join(r.caseDir, "overlay", ".jarvis", "knowledge", "glossary.md"))).toBe(true);
+    // committed and unchanged: no copy
+    expect(existsSync(join(r.caseDir, "overlay", ".jarvis", "project.yaml"))).toBe(false);
     expect(r.caseDir).toMatch(/\/evals\/derived\/abc-81-[0-9a-f]{8}$/);
     expect(existsSync(join(r.caseDir, "case.yaml"))).toBe(true);
     const again = await jarvis(["evals", "run-to-case", runId, "--suite", "derived"]);

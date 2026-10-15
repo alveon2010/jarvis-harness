@@ -1,5 +1,5 @@
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { isAbsolute, join, relative } from "node:path";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative } from "node:path";
 import { stringify } from "yaml";
 import type { Runtime } from "../app/runtime.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
@@ -152,10 +152,12 @@ export async function runToCase(
 
   let fixture = false;
   if (inRepo) {
-    // the project's configuration and knowledge as the run had them, also when they are not committed
-    for (const part of ["project.yaml", "knowledge"]) {
-      const from = join(ws.repoRoot, ".jarvis", part);
-      if (existsSync(from)) cpSync(from, join(caseDir, "overlay", ".jarvis", part), { recursive: true });
+    // the project's configuration and knowledge as the run had them: only what the base commit does not
+    // already hold as it is (not committed, or changed since) — committed, the overlay stays empty
+    for (const rel of await overlayFiles(ws.repoRoot, base)) {
+      const to = join(caseDir, "overlay", rel);
+      mkdirSync(dirname(to), { recursive: true });
+      cpSync(join(ws.repoRoot, rel), to);
     }
     fixture = true;
   } else if (options.fixture !== false) {
@@ -175,4 +177,23 @@ export async function runToCase(
     fixture = true;
   }
   return { caseDir, files, acceptance, requiredSources, humanVersions, answers: answers.length, fixture };
+}
+
+/** `.jarvis/project.yaml` and `.jarvis/knowledge/**` of the working copy that differ from `base` or are not in it. */
+async function overlayFiles(repoRoot: string, base: string): Promise<string[]> {
+  const files: string[] = [];
+  const walk = (rel: string) => {
+    const abs = join(repoRoot, rel);
+    if (!existsSync(abs)) return;
+    if (statSync(abs).isDirectory()) for (const name of readdirSync(abs).sort()) walk(`${rel}/${name}`);
+    else files.push(rel);
+  };
+  walk(".jarvis/project.yaml");
+  walk(".jarvis/knowledge");
+  const out: string[] = [];
+  for (const rel of files) {
+    const atBase = await git(["show", `${base}:${rel}`], repoRoot, { maxBytes: 16 * 1024 * 1024 });
+    if (atBase.code !== 0 || atBase.stdout !== readFileSync(join(repoRoot, rel), "utf8")) out.push(rel);
+  }
+  return out;
 }
