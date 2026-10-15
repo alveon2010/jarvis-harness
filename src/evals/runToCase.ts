@@ -6,6 +6,7 @@ import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import { givenFor } from "../interaction/answers.ts";
 import { readableIdFor } from "../orchestration/worktree.ts";
 import { git, runShell } from "../tools/local/exec.ts";
+import { overlayFiles, recordedInputs } from "./inputs.ts";
 
 /**
  * ADR-0012 §3: a finished run becomes an eval case — the task, the repository at the base commit as
@@ -28,6 +29,11 @@ export interface RunToCaseResult {
   readonly humanVersions: string[];
   /** The open questions a person answered at the gates (src/interaction/answers.ts). */
   readonly answers: number;
+  /**
+   * Configuration and knowledge left out of the overlay: changed after the run began (a run from
+   * before its inputs were recorded) or no longer in the object store — the case runs without them.
+   */
+  readonly skipped?: string[];
   readonly fixture: boolean;
 }
 
@@ -151,13 +157,35 @@ export async function runToCase(
   );
 
   let fixture = false;
+  const skipped: string[] = [];
   if (inRepo) {
     // the project's configuration and knowledge as the run had them: only what the base commit does not
-    // already hold as it is (not committed, or changed since) — committed, the overlay stays empty
-    for (const rel of await overlayFiles(ws.repoRoot, base)) {
-      const to = join(caseDir, "overlay", rel);
-      mkdirSync(dirname(to), { recursive: true });
-      cpSync(join(ws.repoRoot, rel), to);
+    // already hold as it is — committed, the overlay stays empty. A run records them at its start
+    // (src/evals/inputs.ts); for an older one the working copy's, but not what changed after it began.
+    const created = runtime.events.list({ runId: run.id, kind: "run.created", limit: 1 })[0];
+    const recorded = recordedInputs(created?.payload);
+    if (recorded) {
+      for (const [rel, blob] of Object.entries(recorded)) {
+        const content = await git(["cat-file", "blob", blob], ws.repoRoot, { maxBytes: 16 * 1024 * 1024 });
+        if (content.code !== 0) {
+          skipped.push(rel);
+          continue;
+        }
+        const to = join(caseDir, "overlay", rel);
+        mkdirSync(dirname(to), { recursive: true });
+        writeFileSync(to, content.stdout);
+      }
+    } else {
+      const began = Date.parse(run.createdAt);
+      for (const rel of await overlayFiles(ws.repoRoot, base)) {
+        if (statSync(join(ws.repoRoot, rel)).mtimeMs > began) {
+          skipped.push(rel);
+          continue;
+        }
+        const to = join(caseDir, "overlay", rel);
+        mkdirSync(dirname(to), { recursive: true });
+        cpSync(join(ws.repoRoot, rel), to);
+      }
     }
     fixture = true;
   } else if (options.fixture !== false) {
@@ -176,24 +204,14 @@ export async function runToCase(
     }
     fixture = true;
   }
-  return { caseDir, files, acceptance, requiredSources, humanVersions, answers: answers.length, fixture };
-}
-
-/** `.jarvis/project.yaml` and `.jarvis/knowledge/**` of the working copy that differ from `base` or are not in it. */
-async function overlayFiles(repoRoot: string, base: string): Promise<string[]> {
-  const files: string[] = [];
-  const walk = (rel: string) => {
-    const abs = join(repoRoot, rel);
-    if (!existsSync(abs)) return;
-    if (statSync(abs).isDirectory()) for (const name of readdirSync(abs).sort()) walk(`${rel}/${name}`);
-    else files.push(rel);
+  return {
+    caseDir,
+    files,
+    acceptance,
+    requiredSources,
+    humanVersions,
+    answers: answers.length,
+    fixture,
+    ...(skipped.length > 0 ? { skipped } : {}),
   };
-  walk(".jarvis/project.yaml");
-  walk(".jarvis/knowledge");
-  const out: string[] = [];
-  for (const rel of files) {
-    const atBase = await git(["show", `${base}:${rel}`], repoRoot, { maxBytes: 16 * 1024 * 1024 });
-    if (atBase.code !== 0 || atBase.stdout !== readFileSync(join(repoRoot, rel), "utf8")) out.push(rel);
-  }
-  return out;
 }

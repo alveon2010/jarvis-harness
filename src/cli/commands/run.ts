@@ -16,6 +16,7 @@ import { resolveActor } from "../../core/actor/resolve.ts";
 import type { Actor } from "../../core/domain/actor.ts";
 import type { ApprovalDecision } from "../../core/domain/artifact.ts";
 import type { FreshSource, Run, WorkspaceRef } from "../../core/domain/run.ts";
+import { recordInputs } from "../../evals/inputs.ts";
 import { daemonTick } from "../../orchestration/daemon.ts";
 import { interruption } from "../../orchestration/interrupt.ts";
 import { leaseOwner } from "../../orchestration/lease.ts";
@@ -507,6 +508,7 @@ async function startContinuation(
       continuedFrom: from.id,
       startAt,
       carried: carried.length,
+      inputs: await recordInputs(workspace.repoRoot, workspace.baseCommit),
     },
   });
   const st = ctx.out.style;
@@ -577,7 +579,13 @@ export async function runWork(
       kind: "run.created",
       runId: run.id,
       actor: `${actor.kind}:${actor.id}`,
-      payload: { task, workflow: workflowName, ...(run.options ? { options: run.options } : {}) },
+      payload: {
+        task,
+        workflow: workflowName,
+        ...(run.options ? { options: run.options } : {}),
+        // the configuration and knowledge it starts with, for an eval case made later (src/evals/inputs.ts)
+        inputs: await recordInputs(workspace.repoRoot, workspace.baseCommit),
+      },
     });
     if (options.noRun) {
       ctx.out.result({ id: run.id, state: run.state }, () =>

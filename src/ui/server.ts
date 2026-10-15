@@ -460,7 +460,11 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       "no-task": html`<div class="banner bad">Say what to do and pick a workflow</div>`,
       noted: html`<div class="banner ok">The note goes to the agent with its next model call — binding, and for every step after it</div>`,
       "no-note": html`<div class="banner bad">Write the note first</div>`,
-      "eval-made": html`<div class="banner ok">The eval case is written: review its case.yaml, then record it once</div>`,
+      "eval-made": html`<div class="banner ok">The eval case is written: review its case.yaml, then record it once${
+        r.url.searchParams.get("skipped")
+          ? ` · ${r.url.searchParams.get("skipped")} knowledge file(s) changed after the run began are not in its overlay`
+          : ""
+      }</div>`,
       "eval-failed": html`<div class="banner bad">No eval case written — see the log of <code>jarvis ui</code> (a run that ended, a repository git can archive)</div>`,
       "eval-suite": html`<div class="banner bad">A suite is a short name: lowercase letters, digits and dashes</div>`,
       "no-answer": html`<div class="banner bad">Write the answer first</div>`,
@@ -1341,8 +1345,12 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       if (!/^[a-z0-9][a-z0-9-]{0,40}$/.test(suite)) return redirect(r, `/runs/${short}?notice=eval-suite`);
       if (run.state !== "COMPLETED") return redirect(r, `/runs/${short}?notice=eval-failed`);
       if (caseOfRun(run.workspace.repoRoot, run.id)) return redirect(r, `/runs/${short}?notice=eval-made`);
+      let skipped = 0;
       try {
-        await runToCase(runtime, run.id, { suiteDir: joinPath(run.workspace.repoRoot, "evals", suite) });
+        const made = await runToCase(runtime, run.id, {
+          suiteDir: joinPath(run.workspace.repoRoot, "evals", suite),
+        });
+        skipped = made.skipped?.length ?? 0;
       } catch (error) {
         runtime.log.error("ui.eval", {
           runId: run.id,
@@ -1350,7 +1358,7 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
         });
         return redirect(r, `/runs/${short}?notice=eval-failed`);
       }
-      return redirect(r, `/runs/${short}?notice=eval-made`);
+      return redirect(r, `/runs/${short}?notice=eval-made${skipped > 0 ? `&skipped=${skipped}` : ""}`);
     }
     if (m[2] === "clarify") {
       // the clarification thread answered here (ADR-0019 §4), the moves of `jarvis attach`

@@ -168,7 +168,9 @@ export async function runEvalsRunToCase(
       ctx.out.line(
         `  acceptance: ${result.acceptance.length}; required sources: ${result.requiredSources.length}${result.humanVersions.length > 0 ? ` (from human versions ${result.humanVersions.join(", ")})` : " (no human-edited artifacts: review the gold by hand)"}`,
       );
-      ctx.out.line("  next: review case.yaml, then `jarvis evals run --suite <suite> --mode record`");
+      if (result.skipped)
+        ctx.out.line(`  not in the overlay (changed after the run began): ${result.skipped.join(", ")}`);
+      ctx.out.line("  next: review case.yaml, then `jarvis evals run --mode record`");
     });
   } finally {
     await runtime.close();
