@@ -289,7 +289,7 @@ h2.ask-sec{font-size:15px;margin:4px 0 -4px}
 .doc code{background:var(--chip);padding:1px 5px;border-radius:4px;font-size:13px}
 code.sym>span,a.ref code>span{display:inline-block;max-width:100%;overflow-wrap:anywhere}
 code .cq{color:var(--muted)}
-.toast{position:fixed;right:16px;bottom:16px;z-index:50;max-width:min(520px,calc(100vw - 32px));padding:10px 14px;border-radius:10px;font-size:13px;overflow-wrap:anywhere;box-shadow:0 4px 16px rgba(0,0,0,.18)}.toast.ok{background:var(--ok-bg);color:var(--ok-ink)}.toast.bad{background:var(--bad-bg);color:var(--bad)}
+.toast{white-space:pre-line;position:fixed;right:16px;bottom:16px;z-index:50;max-width:min(520px,calc(100vw - 32px));padding:10px 14px;border-radius:10px;font-size:13px;overflow-wrap:anywhere;box-shadow:0 4px 16px rgba(0,0,0,.18)}.toast.ok{background:var(--ok-bg);color:var(--ok-ink)}.toast.bad{background:var(--bad-bg);color:var(--bad)}
 a.ref{text-decoration:none}a.ref code{color:var(--accent)}a.ref:hover code{text-decoration:underline}
 .dl .n a{color:inherit;text-decoration:none}.dl .n a:hover{color:var(--accent);text-decoration:underline}.fname a.open{text-decoration:none;font-size:12px}
 .doc pre{background:var(--sunken);border:1px solid var(--line);border-radius:8px;padding:12px;overflow-x:auto;font-size:13px;line-height:1.5}
@@ -1056,7 +1056,7 @@ export const SCRIPT = `
       const res = await fetch(ref.getAttribute('href') + '&js=1', { credentials: 'same-origin' });
       const body = await res.json();
       ok = res.ok;
-      text = ok ? '↗ ' + body.path + ' — opened in ' + body.opened : body.error;
+      text = (ok ? '↗ ' + body.path + ' — opened in ' + body.opened : body.error) + (body.command ? '\\n$ ' + body.command : '');
     } catch {}
     let toast = document.querySelector('.toast');
     if (!toast) {

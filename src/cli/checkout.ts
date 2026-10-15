@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, delimiter, join } from "node:path";
 import type { Run } from "../core/domain/run.ts";
@@ -284,6 +284,80 @@ export function systemOpener(ctx: CliContext): OpenIn {
     }
     return editor.label;
   };
+}
+
+export interface OpenResult {
+  readonly label?: string;
+  readonly command?: readonly string[];
+  /** Why nothing opened: no editor, the launcher missing, or what it said when it exited with an error. */
+  readonly error?: string;
+}
+
+/** As `OpenIn`, but says whether the editor took the files (a page has no terminal to show it). */
+export type OpenChecked = (dir: string, files?: readonly FileToOpen[]) => Promise<OpenResult>;
+
+/**
+ * `systemOpener` that waits a moment for the launcher: a CLI such as `code` hands the files to the
+ * editor and exits, so its exit code and stderr say whether it worked (a stale `VSCODE_IPC_HOOK_CLI`
+ * of a closed window, a launcher that is not there). One still running after `waitMs` — an IDE
+ * started by its own binary — counts as opened. stderr goes to a file, not a pipe: an IDE that keeps
+ * running must not die writing to a closed pipe.
+ */
+export function checkedOpener(ctx: CliContext, waitMs = 2500): OpenChecked {
+  return (dir, files = []) =>
+    new Promise((resolve) => {
+      const env = ctx.env ?? {};
+      const editor = editorFor(env, { home: ctx.homeDir });
+      if (!editor) {
+        resolve({
+          error: "No editor found — set JARVIS_EDITOR (code, idea, webstorm…) where you start jarvis ui",
+        });
+        return;
+      }
+      const command = openCommand(editor, dir, files);
+      const label = editor.label;
+      const logDir = mkdtempSync(join(tmpdir(), "jarvis-open-"));
+      const log = join(logDir, "stderr");
+      let fd: number | undefined;
+      let settled = false;
+      let timer: NodeJS.Timeout | undefined;
+      const said = () => {
+        try {
+          return readFileSync(log, "utf8").trim().slice(-600);
+        } catch {
+          return "";
+        }
+      };
+      const finish = (result: OpenResult) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        if (fd !== undefined) closeSync(fd);
+        resolve(result);
+        rmSync(logDir, { recursive: true, force: true });
+      };
+      try {
+        fd = openSync(log, "w");
+        const child = spawn(command[0] as string, command.slice(1), {
+          detached: true,
+          stdio: ["ignore", "ignore", fd],
+          env: { ...process.env, ...env },
+        });
+        child.on("error", (e) => finish({ label, command, error: e.message }));
+        child.on("exit", (code, signal) => {
+          const text = said();
+          finish(
+            code === 0
+              ? { label, command }
+              : { label, command, error: `${label} exited with ${code ?? signal}${text ? `: ${text}` : ""}` },
+          );
+        });
+        child.unref();
+        timer = setTimeout(() => finish({ label, command }), waitMs);
+      } catch (e) {
+        finish({ label, command, error: e instanceof Error ? e.message : String(e) });
+      }
+    });
 }
 
 /**

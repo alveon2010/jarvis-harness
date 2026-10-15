@@ -1,9 +1,10 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   type Change,
+  checkedOpener,
   describeFiles,
   type EditorKind,
   editorFor,
@@ -159,5 +160,32 @@ describe("the files to review", () => {
       { path: join(dir, "src/form/Toggle.tsx"), line: 3 },
     ]);
     expect(reviewFiles(dir, undefined)).toEqual([]);
+  });
+});
+
+describe("opening a file from a page", () => {
+  const script = (name: string, body: string) => {
+    const file = join(sb.root, name);
+    writeFileSync(file, `#!/bin/sh\n${body}\n`);
+    chmodSync(file, 0o755);
+    return file;
+  };
+  const ctx = (editor: string) => ({
+    env: { PATH: process.env.PATH ?? "", JARVIS_EDITOR: editor },
+    homeDir: sb.home,
+  });
+
+  it("says the editor opened when its launcher exits cleanly", async () => {
+    const code = script("code", "exit 0");
+    const r = await checkedOpener(ctx(code) as never)(sb.project, [{ path: `${sb.project}/a.ts`, line: 3 }]);
+    expect(r).toEqual({ label: "VS Code", command: [code, sb.project, "-g", `${sb.project}/a.ts:3`] });
+  });
+
+  it("says why not when the launcher fails, with what it printed", async () => {
+    const code = script("code", "echo 'Unable to connect to VS Code server' >&2; exit 1");
+    const r = await checkedOpener(ctx(code) as never)(sb.project, [{ path: `${sb.project}/a.ts` }]);
+    expect(r.error).toBe("VS Code exited with 1: Unable to connect to VS Code server");
+    const missing = await checkedOpener(ctx(join(sb.root, "nope")) as never)(sb.project);
+    expect(missing.error).toContain("ENOENT");
   });
 });

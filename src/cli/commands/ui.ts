@@ -6,7 +6,7 @@ import { createRuntime } from "../../app/runtime.ts";
 import { resolveActor } from "../../core/actor/resolve.ts";
 import { createLauncher } from "../../ui/launcher.ts";
 import { startUiServer, type UiServer } from "../../ui/server.ts";
-import { systemOpener } from "../checkout.ts";
+import { checkedOpener, systemOpener } from "../checkout.ts";
 import type { CliContext } from "../context.ts";
 import { CliExit, EXIT } from "../output.ts";
 import { loadForCli } from "./config.ts";
@@ -78,6 +78,7 @@ export async function runUi(ctx: CliContext, options: UiOptions = {}): Promise<v
       // decisions on the page are the CLI's, with its actor (ADR-0006); `channel: ui` tells them apart
       actor: async () => (await resolveActor(loaded.config, ctx.env, loaded.project?.root)).actor,
       open: systemOpener(ctx),
+      openChecked: checkedOpener(ctx),
       // "New task": the same CLI, started in the background and driven by the page
       launcher: createLauncher({
         runtime,

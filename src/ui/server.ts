@@ -45,7 +45,7 @@ import { pauseRequested, requestPause } from "../app/pause.ts";
 import { resumableOf } from "../app/resumable.ts";
 import type { Runtime } from "../app/runtime.ts";
 import { tryOutOf } from "../app/tryOut.ts";
-import { type OpenIn, reviewFiles } from "../cli/checkout.ts";
+import { type OpenChecked, type OpenIn, type OpenResult, reviewFiles } from "../cli/checkout.ts";
 import { humanMove } from "../cli/commands/human.ts";
 import type { Actor } from "../core/domain/actor.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
@@ -144,6 +144,8 @@ export interface UiServerOptions {
   readonly pollMs?: number;
   /** "Open in editor": the run's checkout in the person's editor (the card's `o`). */
   readonly open?: OpenIn;
+  /** A file a page refers to in the editor, saying whether it opened (`/open`); else `open`. */
+  readonly openChecked?: OpenChecked;
   /** Pages only: no forms, no POST. */
   readonly readOnly?: boolean;
   /** Starts runs from the page and drives them (src/ui/launcher.ts); none — no "New task". */
@@ -484,7 +486,10 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
     const want = (r.url.searchParams.get("path") ?? "").trim().replace(/^\.\//, "");
     const line = Number(r.url.searchParams.get("line"));
     const js = r.url.searchParams.get("js") === "1";
-    const answer = (status: number, body: { opened?: string; path?: string; error?: string }) =>
+    const answer = (
+      status: number,
+      body: { opened?: string; path?: string; error?: string; command?: string },
+    ) =>
       js
         ? send(r, status, JSON.stringify(body), "application/json")
         : status === 200
@@ -506,14 +511,24 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
     for (const root of roots) {
       const rel = await locate(root, want);
       if (!rel) continue;
-      const editor = options.open?.(root, [
-        { path: joinPath(root, rel), ...(Number.isInteger(line) && line > 0 ? { line } : {}) },
-      ]);
-      if (!editor)
+      const files = [{ path: joinPath(root, rel), ...(Number.isInteger(line) && line > 0 ? { line } : {}) }];
+      const label = options.openChecked ? undefined : options.open?.(root, files);
+      const checked: OpenResult = options.openChecked
+        ? await options.openChecked(root, files)
+        : label
+          ? { label }
+          : {};
+      const command = checked.command?.join(" ");
+      if (checked.error || !checked.label) {
+        if (command) process.stderr.write(`jarvis ui: open failed: ${command}\n${checked.error ?? ""}\n`);
         return answer(404, {
-          error: "No editor found — set JARVIS_EDITOR (code, idea, webstorm…) where you start jarvis ui",
+          error:
+            checked.error ??
+            "No editor found — set JARVIS_EDITOR (code, idea, webstorm…) where you start jarvis ui",
+          ...(command ? { command } : {}),
         });
-      return answer(200, { opened: editor, path: rel });
+      }
+      return answer(200, { opened: checked.label, path: rel, ...(command ? { command } : {}) });
     }
     return answer(404, { error: `${want} is not a file of ${roots[0] ?? "this repository"}` });
   };
