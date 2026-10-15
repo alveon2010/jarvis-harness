@@ -560,7 +560,7 @@ export function buildProgram(options: RunOptions = {}): Command {
     .description("workflow evals on fixture repositories with cassettes (ADR-0012)");
   evals
     .command("run")
-    .requiredOption("--suite <name|dir>", "suite under evals/ or a directory")
+    .option("--suite <name|dir>", "suite under evals/ or a directory", "default")
     .option("--mode <mode>", "live | record | replay", "replay")
     .option("--variant <key=value...>", "configuration overrides applied to every case")
     .option("--out <file>", "result file (default: evals/results/<date>-<suite>.json)")
@@ -572,7 +572,7 @@ export function buildProgram(options: RunOptions = {}): Command {
     .description(
       "turn a finished run into an eval case: fixture at the base commit, gold from what the human accepted",
     )
-    .requiredOption("--suite <name|dir>", "suite to add the case to")
+    .option("--suite <name|dir>", "suite to add the case to", "default")
     .option("--id <id>", "case id (default: from the task key)")
     .option("--no-fixture", "write case.yaml only")
     .action(async (ref: string, opts: { suite: string; id?: string; fixture: boolean }) => {
@@ -583,19 +583,19 @@ export function buildProgram(options: RunOptions = {}): Command {
       });
     });
   evals
-    .command("baseline <suite>")
+    .command("baseline [suite]")
     .description("pin the latest result of the suite as its baseline")
     .option("--from <file>", "use this result file instead of the latest")
-    .action(async (suite: string, opts: { from?: string }) => {
-      await runEvalsBaseline(ctxFor(), suite, opts);
+    .action(async (suite: string | undefined, opts: { from?: string }) => {
+      await runEvalsBaseline(ctxFor(), suite ?? "default", opts);
     });
   evals
-    .command("diff <suite>")
+    .command("diff [suite]")
     .description("compare the latest result with the baseline; non-zero on regression beyond tolerance")
     .option("--tolerance <ratio>", "allowed relative drop", Number.parseFloat, 0.05)
     .option("--from <file>", "compare this result file instead of the latest")
-    .action(async (suite: string, opts: { tolerance: number; from?: string }) => {
-      await runEvalsDiff(ctxFor(), suite, opts);
+    .action(async (suite: string | undefined, opts: { tolerance: number; from?: string }) => {
+      await runEvalsDiff(ctxFor(), suite ?? "default", opts);
     });
 
   const auth = program.command("auth").description("credentials in the OS keychain (ADR-0017 §5)");

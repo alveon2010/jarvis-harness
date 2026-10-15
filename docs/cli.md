@@ -1047,20 +1047,20 @@ resolved, классом (CODE, SPEC_CORRECTION, …) и историей.
 
 ## Evals
 
-### `jarvis evals run --suite <s> [--mode live|record|replay] [--variant k=v …] [--out <file>]`
+### `jarvis evals run [--suite <s>] [--mode live|record|replay] [--variant k=v …] [--out <file>]`
 
 Прогон кейсов `evals/<suite>/<case>/case.yaml` на fixture-репозитории с кассетой; гейты утверждаются
 автоматически; метрики: тесты, file recall, покрытие acceptance, обязательные источники, циклы, токены,
-`successes per 10k output tokens`. Результат в `evals/results/`.
+`successes per 10k output tokens`. Результат в `evals/results/`. Набор по умолчанию — `default`.
 
-### `jarvis evals run-to-case <run> --suite <s> [--id <id>] [--no-fixture]`
+### `jarvis evals run-to-case <run> [--suite <s>] [--id <id>] [--no-fixture]`
 
 Из завершённого run — кейс: fixture на базовом коммите, gold из того, что человек принял
 (spec/impact/research предпочтённых версий), тестовая команда из `tools.local`. Набор внутри репозитория прогона
 получает fixture ссылкой (`fixture: { commit }` + `overlay/` с `.jarvis/` прогона), без копии репозитория; набор вне
 его — копию (`git archive`). Id по умолчанию — ключ задачи или первые слова и короткий id прогона.
 
-### `jarvis evals baseline <suite> [--from <file>]` / `jarvis evals diff <suite> [--tolerance r] [--from <file>]`
+### `jarvis evals baseline [suite] [--from <file>]` / `jarvis evals diff [suite] [--tolerance r] [--from <file>]`
 
 Зафиксировать последний результат как базовый; сравнить последний с базовым, ненулевой код при регрессии
 больше допуска (по умолчанию 5 %).

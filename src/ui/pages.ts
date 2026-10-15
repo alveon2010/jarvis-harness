@@ -1362,7 +1362,7 @@ function evalHtml(page: RunPage, actions?: Actions): Html {
 <div class="actions"><span class="hint"><code>${cmd}</code></span><button type="button" class="btn" data-copy="${cmd}">Copy command</button></div>
 </section>`;
   }
-  const cmd = `jarvis evals run-to-case ${short} --suite pilot`;
+  const cmd = `jarvis evals run-to-case ${short}`;
   return html`<section class="panel decision" aria-labelledby="decision" data-live="card">
 <span class="ok" style="font-size:13px;font-weight:500">Done and accepted</span>
 <h2 id="decision">Keep it as an eval case</h2>
@@ -1372,7 +1372,7 @@ ${
     ? form(
         actions,
         `/runs/${encodeURIComponent(short)}/eval`,
-        html`<div class="actions"><label class="field" style="max-width:220px">Suite<input type="text" name="suite" value="pilot" pattern="[a-z0-9][a-z0-9-]{0,40}" required></label><button type="submit" class="btn primary big">Make an eval case</button><span class="hint">same as <code>${cmd}</code>; it lands in <code>evals/&lt;suite&gt;/</code> of the repository</span></div>`,
+        html`<div class="actions"><label class="field" style="max-width:220px">Suite<input type="text" name="suite" value="default" pattern="[a-z0-9][a-z0-9-]{0,40}" required></label><button type="submit" class="btn primary big">Make an eval case</button><span class="hint">same as <code>${cmd}</code>; it lands in <code>evals/&lt;suite&gt;/</code> of the repository</span></div>`,
       )
     : html`<div class="actions"><span class="hint"><code>${cmd}</code></span><button type="button" class="btn" data-copy="${cmd}">Copy command</button></div>`
 }

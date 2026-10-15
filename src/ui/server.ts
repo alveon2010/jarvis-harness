@@ -1268,7 +1268,7 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
     }
     if (m[2] === "eval") {
       // «Make an eval case»: as `jarvis evals run-to-case <run> --suite <suite>`
-      const suite = (form.get("suite") ?? "pilot").trim();
+      const suite = (form.get("suite") ?? "default").trim();
       if (!/^[a-z0-9][a-z0-9-]{0,40}$/.test(suite)) return redirect(r, `/runs/${short}?notice=eval-suite`);
       if (run.state !== "COMPLETED") return redirect(r, `/runs/${short}?notice=eval-failed`);
       if (caseOfRun(run.workspace.repoRoot, run.id)) return redirect(r, `/runs/${short}?notice=eval-made`);

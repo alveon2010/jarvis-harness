@@ -55,11 +55,13 @@ jarvis evals baseline regressions && jarvis evals diff regressions
 ## Прогон
 
 ```sh
-jarvis evals run --suite pilot --mode record            # живые модели, ответы пишутся в кассету
-jarvis evals run --suite pilot                          # replay — детерминированно, без сети
-jarvis evals run --suite pilot --mode live --variant knowledge.maxSkills=3   # значение: строка, число, true/false
-jarvis evals run --suite pilot --mode replay --out evals/results/manual.json
+jarvis evals run --mode record            # набор default: живые модели, ответы пишутся в кассету
+jarvis evals run                          # replay — детерминированно, без сети
+jarvis evals run --mode live --variant knowledge.maxSkills=3   # значение: строка, число, true/false
+jarvis evals run --suite regressions --out evals/results/manual.json
 ```
+
+Без `--suite` берётся набор `default` (`evals/default/`); `--suite` — имя набора или путь к папке.
 
 `--variant k=v` накладывает переопределения конфигурации на каждый кейс (сравнение моделей,
 `knowledge.maxSkills`, порогов контекста). В `replay` без кассеты для запроса — ошибка кейса, а не
@@ -84,8 +86,8 @@ jarvis evals run --suite pilot --mode replay --out evals/results/manual.json
 ## Базовая линия и регрессии
 
 ```sh
-jarvis evals baseline pilot                   # зафиксировать последний результат
-jarvis evals diff pilot --tolerance 0.05      # ненулевой код при падении больше 5 %
+jarvis evals baseline                         # зафиксировать последний результат
+jarvis evals diff --tolerance 0.05            # ненулевой код при падении больше 5 %
 ```
 
 `diff` сравнивает `successRate`, `meanFileRecall`, `meanAcceptanceCoverage` и `successPer10k`; допуск —
@@ -95,7 +97,7 @@ jarvis evals diff pilot --tolerance 0.05      # ненулевой код при
 ## Кейс из реального run
 
 ```sh
-jarvis evals run-to-case <run> --suite pilot --id onboarding-restart
+jarvis evals run-to-case <run> --id onboarding-restart     # в evals/default/
 ```
 
 Fixture — базовый коммит run: в наборе внутри того же репозитория ссылкой (`fixture: { commit: <sha>, overlay: overlay }`,
@@ -112,5 +114,5 @@ Fixture — базовый коммит run: в наборе внутри тог
 неизменённый `.jarvis` — пустой overlay. (Набор вне репозитория — копия фикстуры с `.jarvis` рабочей копии.)
 
 **Из `jarvis ui`.** На странице завершённого прогона с принятой реализацией — карточка «Keep it as an eval case»:
-набор (по умолчанию `pilot`) и **Make an eval case** — то же, что `jarvis evals run-to-case <run> --suite <набор>`,
+набор (по умолчанию `default`) и **Make an eval case** — то же, что `jarvis evals run-to-case <run> --suite <набор>`,
 кейс ложится в `evals/<набор>/` репозитория. После — «✓ eval case» с путём и командой записи кассеты.
