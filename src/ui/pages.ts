@@ -1171,6 +1171,8 @@ export function runContent(
   notice?: Html,
   /** Above the run's card: a module research's candidate to decide (src/ui/modules.ts). */
   review?: Html,
+  /** Under the artifacts: an ended run's checkout and branch, and their removal. */
+  checkout?: Html,
 ): Html {
   const r = page.run;
   const t = page.tokens;
@@ -1231,6 +1233,7 @@ ${
     : html`<p class="muted">No artifacts yet.</p>`
 }
 </section>
+${checkout ?? ""}
 </div>
 </div>`;
 }

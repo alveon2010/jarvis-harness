@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -7,6 +7,7 @@ import { createEngine } from "../../src/app/engine.ts";
 import { createRuntime, type Runtime } from "../../src/app/runtime.ts";
 import { loadConfig } from "../../src/core/config/load.ts";
 import { MODULE_MARKER } from "../../src/onboarding/render.ts";
+import { WorktreeWorkspace } from "../../src/orchestration/worktree.ts";
 import { shortRunId } from "../../src/storage/runStore.ts";
 import type { Launch, Launcher } from "../../src/ui/launcher.ts";
 import { startUiServer, type UiServer } from "../../src/ui/server.ts";
@@ -358,6 +359,53 @@ describe("Knowledge → Modules", () => {
     const r = await post(`/runs/${short}/resume`, [["back", "/knowledge/modules?path=src%2Forders"]]);
     expect(r.location).toBe("/knowledge/modules?path=src%2Forders&notice=resumed");
     expect(adopted).toEqual([run.id]);
+  });
+
+  it("an ended run's checkout and branch are removed from its page; a finished, unapplied one keeps its branch unless asked", async () => {
+    const make = async (task: string, state: "CANCELLED" | "COMPLETED") => {
+      const wt = await WorktreeWorkspace.create({
+        repoRoot: sb.project,
+        worktreesDir: join(sb.home, ".jarvis", "worktrees"),
+        runId: `r${Math.random().toString(16).slice(2, 10)}`,
+        task,
+      });
+      // a commit of its own: work the repository has not taken
+      writeFileSync(join(wt.ref.path, "fix.txt"), `${task}\n`);
+      await wt.checkpoint("jarvis: fix");
+      const run = rt.runs.create({
+        task,
+        workflow: "fix",
+        owner: DEV,
+        workspace: wt.ref,
+        dataClass: "internal",
+      });
+      rt.runs.transition(run.id, "RUNNING");
+      rt.runs.transition(run.id, state);
+      return { run, wt, short: shortRunId(run.id) };
+    };
+    const cancelled = await make("ABC-1 cancelled", "CANCELLED");
+    const body = await page(`/runs/${cancelled.short}`);
+    expect(body).toContain("Remove the checkout");
+    // cancelled: its branch goes too unless unticked
+    expect(body).toMatch(/name="branch" value="1" checked> also delete the branch/);
+    const done = await post(`/runs/${cancelled.short}/cleanup`, [["branch", "1"]]);
+    expect(done.location).toBe(`/runs/${cancelled.short}?notice=cleaned-all`);
+    expect(existsSync(cancelled.wt.ref.path)).toBe(false);
+    expect(git("branch", "--list", cancelled.wt.ref.branch as string).trim()).toBe("");
+    expect(await page(`/runs/${cancelled.short}`)).toContain(
+      "Removed: no folder and no branch of this run are left.",
+    );
+
+    const finished = await make("ABC-2 finished", "COMPLETED");
+    const fb = await page(`/runs/${finished.short}`);
+    expect(fb).toMatch(/name="branch" value="1"> also delete the branch/);
+    expect(fb).toContain("Its changes were not applied");
+    expect((await post(`/runs/${finished.short}/cleanup`, [])).location).toBe(
+      `/runs/${finished.short}?notice=cleaned`,
+    );
+    expect(existsSync(finished.wt.ref.path)).toBe(false);
+    expect(git("branch", "--list", finished.wt.ref.branch as string).trim()).not.toBe("");
+    expect(await page(`/runs/${finished.short}`)).toContain("Delete the branch");
   });
 
   it("Cancel on a run's page: at once when nothing runs it, at the next safe point when something does", async () => {

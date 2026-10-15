@@ -71,6 +71,7 @@ import { loadStandards } from "../knowledge/standards.ts";
 import { NOTE_MAX } from "../onboarding/deep.ts";
 import { findNode, type ModuleTree, moduleTree } from "../onboarding/tree.ts";
 import type { LocalWorkflowEngine } from "../orchestration/runtime.ts";
+import { WorktreeWorkspace } from "../orchestration/worktree.ts";
 import { egressNotices } from "../security/policy/egress.ts";
 import { shortRunId } from "../storage/runStore.ts";
 import { git } from "../tools/local/exec.ts";
@@ -442,6 +443,10 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       "not-running": html`<div class="banner info">Nothing runs it now — there is nothing to pause</div>`,
       "cancel-requested": html`<div class="banner ok">Cancel requested — the process running it stops at its next safe point (after the current model or tool call)</div>`,
       "already-ended": html`<div class="banner bad">The run has ended already: nothing to cancel</div>`,
+      cleaned: html`<div class="banner ok">Checkout removed — the files go in the background; the branch stays</div>`,
+      "cleaned-all": html`<div class="banner ok">Checkout and branch removed — the files go in the background</div>`,
+      "cleaned-branch-kept": html`<div class="banner bad">Checkout removed; the branch could not be deleted (checked out somewhere?) — <code>git branch -D</code> it by hand</div>`,
+      "not-ended": html`<div class="banner bad">The run has not ended: cancel it first, then clean up</div>`,
       resuming: html`<div class="banner ok">It is being resumed already</div>`,
       "no-launcher": html`<div class="banner bad">This page cannot start runs: resume it with <code>jarvis resume</code></div>`,
       started: html`<div class="banner ok">Started — it prepares its checkout and shows up under Running; where it needs you, it waits here</div>`,
@@ -568,6 +573,46 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  };
+  /**
+   * An ended run's checkout and branch, and a way to remove them (as `jarvis gc` for this one run): a
+   * cancelled, failed or finished run leaves a folder and a branch behind until someone cleans up.
+   */
+  const checkoutOn = async (run: Run): Promise<Html | undefined> => {
+    const ws = run.workspace;
+    if (ws.mode !== "worktree" || !isTerminal(run.state)) return undefined;
+    const exists = existsSync(ws.path);
+    const branch = ws.branch;
+    const branchExists =
+      !!branch &&
+      (await git(["rev-parse", "--verify", "-q", `refs/heads/${branch}`], ws.repoRoot)).code === 0;
+    if (!exists && !branchExists) {
+      const cleaned = runtime.events.list({ runId: run.id, kind: "run.gc", limit: 1 }).length > 0;
+      return cleaned
+        ? html`<section class="panel" aria-labelledby="checkout"><h2 id="checkout">Checkout</h2><p class="muted">Removed: no folder and no branch of this run are left.</p></section>`
+        : undefined;
+    }
+    // its work taken (applied, or the branch merged into what is checked out): the branch can go
+    const taken =
+      runtime.events.list({ runId: run.id, kind: "run.applied", limit: 1 }).length > 0 ||
+      (branchExists &&
+        (await git(["merge-base", "--is-ancestor", branch as string, "HEAD"], ws.repoRoot)).code === 0);
+    const keepWork = run.state === "COMPLETED" && !taken;
+    const what = [
+      exists ? html`folder <code>${ws.path}</code>` : "",
+      branchExists ? html`branch <code>${branch}</code>` : "",
+    ].filter(Boolean);
+    return html`<section class="panel" aria-labelledby="checkout"><h2 id="checkout">Checkout</h2>
+<p class="muted">The run has ended; its ${what.map((w, i) => html`${i > 0 ? " and " : ""}${w}`)} ${what.length > 1 ? "are" : "is"} still there.</p>
+${
+  actions
+    ? html`<form method="post" action="/runs/${encodeURIComponent(shortRunId(run.id))}/cleanup"><input type="hidden" name="t" value="${actions.token}">
+${branchExists ? html`<label class="row"><input type="checkbox" name="branch" value="1"${keepWork ? "" : " checked"}> also delete the branch <code>${branch}</code></label>${keepWork ? html`<p class="hint">Its changes were not applied: the branch is the only copy of them. <code>jarvis apply ${shortRunId(run.id)}</code> first, or keep the branch.</p>` : ""}` : ""}
+<div class="row"><button type="submit" class="btn">${exists ? "Remove the checkout" : "Delete the branch"}</button><span class="hint">as <code>jarvis gc</code> for this run</span></div>
+</form>`
+    : ""
+}
+</section>`;
   };
   /** The candidate of a module research, to decide on its run page; what became of it once decided. */
   const candidateOnRun = async (run: Run): Promise<Html | undefined> => {
@@ -1180,7 +1225,7 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       });
     }
     const m =
-      /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|clarify|eval|note|pause)$/.exec(
+      /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|clarify|eval|note|pause|cleanup)$/.exec(
         r.url.pathname,
       );
     const run = m ? resolveRun(m[1] as string) : undefined;
@@ -1308,6 +1353,36 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       return redirect(
         r,
         editor ? `${where}?notice=opened&editor=${encodeURIComponent(editor)}` : `${where}?notice=no-editor`,
+      );
+    }
+    if (m[2] === "cleanup") {
+      // an ended run's own checkout, and on request its branch: as `jarvis gc` for one run
+      if (!isTerminal(run.state)) return redirect(r, `/runs/${short}?notice=not-ended`);
+      const ws = run.workspace;
+      if (ws.mode !== "worktree") return redirect(r, `/runs/${short}?notice=no-checkout`);
+      const who = await actor();
+      if (!who) return redirect(r, `/runs/${short}?notice=actor`);
+      const pruneBranch = form.get("branch") === "1" && !!ws.branch;
+      const hadCheckout = existsSync(ws.path);
+      if (hadCheckout) await new WorktreeWorkspace(ws, process.env).remove({ pruneBranch });
+      else if (pruneBranch) await git(["branch", "-D", ws.branch as string], ws.repoRoot);
+      const branchLeft =
+        pruneBranch &&
+        (await git(["rev-parse", "--verify", "-q", `refs/heads/${ws.branch}`], ws.repoRoot)).code === 0;
+      runtime.events.emit({
+        kind: "run.gc",
+        runId: run.id,
+        actor: `${who.kind}:${who.id}`,
+        payload: {
+          path: ws.path,
+          checkout: hadCheckout,
+          branchPruned: pruneBranch && !branchLeft,
+          via: "ui",
+        },
+      });
+      return redirect(
+        r,
+        `/runs/${short}?notice=${branchLeft ? "cleaned-branch-kept" : pruneBranch ? "cleaned-all" : "cleaned"}`,
       );
     }
     if (m[2] === "pause") {
@@ -1506,6 +1581,7 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       };
       // a module research: its candidate is decided right here, not only on the Modules page
       const review = await candidateOnRun(run);
+      const checkout = await checkoutOn(run);
       const ticking =
         run.state === "RUNNING" ||
         model.card?.kind === "loop" ||
@@ -1520,7 +1596,7 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
           back: { href: "/", label: "Runs" },
           ...(ticking ? { tick: 3000 } : {}),
         },
-        runContent(model, now, actions, noticeOf(r) ?? knowledgeNotice(r), review),
+        runContent(model, now, actions, noticeOf(r) ?? knowledgeNotice(r), review, checkout),
       );
     }
     const artMatch = /^\/runs\/([^/]+)\/artifacts\/([^/]+)\/([^/]+)$/.exec(path);
