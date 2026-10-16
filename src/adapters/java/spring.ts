@@ -93,6 +93,8 @@ export function springFacts(
   let prefix = "";
   let route: string | undefined;
   let client: string | undefined;
+  // the client's base address: through a balancer `http://${SERVICE_HOST}/<service>` (ADR-0025 §4)
+  let clientUrl: string | undefined;
   const nodes: GraphNode[] = [];
   // the endpoints of an abstract class are served by its subclasses, under their routes
   const abstract =
@@ -111,6 +113,7 @@ export function springFacts(
     const classLevel = first !== undefined && at < first.at;
     if (name === "FeignClient") {
       client = attr(args?.text, ["name", "value"], true)[0] ?? "";
+      clientUrl = attr(args?.text, ["url"], false)[0];
       prefix = attr(args?.text, ["path"], false)[0] ?? prefix;
       continue;
     }
@@ -157,6 +160,7 @@ export function springFacts(
             ...(handler ? { handler: `${typeAt(at)}.${handler}` } : {}),
             direction: client !== undefined || asClient ? "out" : "in",
             ...(client ? { client } : {}),
+            ...(clientUrl ? { url: clientUrl } : {}),
             ...(abstract ? { inherited: true } : {}),
             line: lineAt(at),
           },

@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { KnowledgeConfig } from "../core/config/schema.ts";
 import { layoutOf } from "../core/paths.ts";
 import { capabilityMatches } from "../tools/registry.ts";
+import { catalogOf, neighboursDoc } from "./catalog.ts";
 import { globMatches, parseFrontMatter } from "./frontmatter.ts";
 import { loadSkills, type Skill, skillRef } from "./skills.ts";
 import { loadSourceDocuments } from "./sources.ts";
@@ -59,6 +60,18 @@ export function loadKnowledgeDocs(roots: KnowledgeRoots): KnowledgeDoc[] {
         tags: meta.tags,
       });
     }
+  }
+  // a service's neighbours, from the knowledge repository's contract catalog (ADR-0025 §4)
+  if (layout?.meta?.service) {
+    const text = neighboursDoc(catalogOf(layout.meta.root), layout.meta.service);
+    if (text)
+      out.push({
+        name: `${SHARED_KNOWLEDGE_PREFIX}neighbours.md`,
+        text,
+        sha: createHash("sha256").update(text).digest("hex").slice(0, 12),
+        scope: { stacks: [], paths: [], agents: [] },
+        tags: ["neighbours", "contracts"],
+      });
   }
   // knowledge.sources: the team's documentation in place; its skills are loaded as skills instead
   for (const d of loadSourceDocuments(roots)) {

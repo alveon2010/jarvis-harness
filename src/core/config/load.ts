@@ -251,7 +251,10 @@ export async function loadConfig(options: LoadOptions = {}): Promise<LoadedConfi
   if (projectSource && meta?.service && isPlainObject(projectValue) && isPlainObject(projectValue.services)) {
     const own = projectValue.services[meta.service];
     if (isPlainObject(own))
-      layers.push({ name: `${projectSource}#services.${meta.service}`, value: withoutKeys(own, ["repo"]) });
+      layers.push({
+        name: `${projectSource}#services.${meta.service}`,
+        value: withoutKeys(own, ["repo", "path"]),
+      });
   }
 
   const fileMerge = mergeLayers(layers);

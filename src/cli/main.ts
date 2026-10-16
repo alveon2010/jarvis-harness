@@ -29,6 +29,7 @@ import {
   runKnowledgeStatus,
   runKnowledgeUpdate,
 } from "./commands/knowledgeGraph.ts";
+import { runKnowledgeLinks } from "./commands/links.ts";
 import { runLogs } from "./commands/logs.ts";
 import { runMcpCall, runMcpList, runMcpServe } from "./commands/mcp.ts";
 import { runModelsList, runModelsProbe, runModelsStats } from "./commands/models.ts";
@@ -747,6 +748,15 @@ export function buildProgram(options: RunOptions = {}): Command {
     .option("--limit <n>", "max hits", (v: string) => Number.parseInt(v, 10), 10)
     .action(async (query: string, opts: { limit: number }) => {
       await runKnowledgeSearch(ctxFor(), query, opts);
+    });
+  knowledge
+    .command("links")
+    .description(
+      "links between services the contract catalog of a knowledge repository finds, as a checklist (ADR-0025 §4)",
+    )
+    .option("--service <name>", "only the links of this service")
+    .action(async (opts: { service?: string }) => {
+      await runKnowledgeLinks(ctxFor(), opts);
     });
   knowledge
     .command("status")

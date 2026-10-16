@@ -608,6 +608,8 @@ const ProjectFieldsSchema = z.strictObject({
 export const ServiceConfigSchema = ProjectFieldsSchema.omit({ version: true }).extend({
   /** Its repository: a folder under `repos`, or a path (relative to `repos`); default — the name. */
   repo: z.string().min(1).optional(),
+  /** The path segment the balancer routes to it (`http://${SERVICE_HOST}/<path>`), when not its name. */
+  path: z.string().min(1).optional(),
 });
 export type ServiceConfig = z.infer<typeof ServiceConfigSchema>;
 

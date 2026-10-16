@@ -400,6 +400,8 @@ describe("Spring contracts in the graph", () => {
       handler: "SlotsClient.slots",
       direction: "out",
       client: "slots",
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the client's address as the code names it
+      url: "${slots.url}",
       line: 4,
     });
   });

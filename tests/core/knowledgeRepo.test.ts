@@ -169,6 +169,27 @@ describe("a service of a knowledge repository", () => {
     expect((await glossaryOf(orders, false)).rows.map((r) => r.term)).toEqual(["слот"]);
   });
 
+  it("its agents get its neighbours from the catalog, as a shared document", async () => {
+    const orders = join(repos, "orders-api");
+    const loaded = await load(orders);
+    const contracts = (service: string, extra: object) =>
+      JSON.stringify({ version: 1, service, serves: [], calls: [], produces: [], consumes: [], ...extra });
+    sb.write(
+      "repos/jarvis-knowledge/knowledge/services/orders-api/contracts.json",
+      contracts("orders-api", {
+        produces: [{ topic: "orders.created", senders: ["Publisher"], file: "P.java" }],
+      }),
+    );
+    sb.write(
+      "repos/jarvis-knowledge/knowledge/services/notify-api/contracts.json",
+      contracts("notify-api", { consumes: [{ topic: "orders.created", file: "L.kt" }] }),
+    );
+    const doc = loadKnowledgeDocs(knowledgeRootsOf(loaded, orders)).find(
+      (d) => d.name === "common/neighbours.md",
+    );
+    expect(doc?.text).toContain("- topic `orders.created` — notify-api");
+  });
+
   it("an accepted module goes to the service's folder of the knowledge repository", async () => {
     const orders = join(repos, "orders-api");
     await load(orders);

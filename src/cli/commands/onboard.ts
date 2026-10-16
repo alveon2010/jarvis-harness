@@ -4,6 +4,7 @@ import { createRuntime } from "../../app/runtime.ts";
 import type { GraphEdge, GraphNode } from "../../core/capabilities/contracts.ts";
 import { layoutOf, rootRelative } from "../../core/paths.ts";
 import { codeContractsOf } from "../../design/codeContracts.ts";
+import { CONTRACTS_FILE, serviceContractsOf, springConfigOf } from "../../knowledge/catalog.ts";
 import { repoIdOf, updateGraph } from "../../knowledge/graph/update.ts";
 import { mapModule, taskFor } from "../../onboarding/deep.ts";
 import {
@@ -13,7 +14,7 @@ import {
   renderContracts,
   renderConventions,
 } from "../../onboarding/render.ts";
-import { type ScanReport, scanProject, scopeFacts } from "../../onboarding/scan.ts";
+import { type ScanReport, scanProject, scopeFacts, trackedFiles } from "../../onboarding/scan.ts";
 import { git } from "../../tools/local/exec.ts";
 import type { CliContext } from "../context.ts";
 import { CliExit, EXIT } from "../output.ts";
@@ -107,12 +108,32 @@ export async function runOnboard(ctx: CliContext, options: OnboardOptions): Prom
   write("conventions.md", renderConventions(report));
   const contractsDoc = contracts ? renderContracts(contracts) : undefined;
   if (contractsDoc) write("contracts.md", contractsDoc);
+  // a service of a knowledge repository: the machine part the catalog links services by (ADR-0025 §4) —
+  // always the code's, a person does not edit it
+  const service = loaded.meta?.service;
+  if (contracts && service) {
+    const tracked = await trackedFiles(root);
+    const head = (await git(["rev-parse", "HEAD"], root)).stdout.trim();
+    const doc = serviceContractsOf(service, contracts, springConfigOf(root, tracked), head || undefined);
+    const path = join(knowledgeDir, CONTRACTS_FILE);
+    const action: FileAction = existsSync(path)
+      ? options.dryRun
+        ? "would refresh"
+        : "refreshed"
+      : options.dryRun
+        ? "would create"
+        : "created";
+    if (!options.dryRun) {
+      mkdirSync(knowledgeDir, { recursive: true });
+      writeFileSync(path, `${JSON.stringify(doc, null, 2)}\n`, "utf8");
+    }
+    files.push({ path: rootRelative(root, path), action });
+  }
 
   let configApplied = false;
   const configPath = loaded.project?.configFile;
   // a service's commands are its own, under services.<name> of the knowledge repository: said, not
   // written over the shared tools.local of every service
-  const service = loaded.meta?.service;
   if (options.applyConfig && configPath && existsSync(configPath) && !service) {
     const current = readFileSync(configPath, "utf8");
     const next = applyCommands(current, report.commands);

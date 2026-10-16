@@ -98,6 +98,7 @@ export function codeContractsOf(nodes: readonly GraphNode[]): CodeContracts {
         ? { direction: "out" as const }
         : { direction: "in" as const }),
       ...opt("client", m.client),
+      ...opt("url", m.url),
     });
     const handler = str(m.handler);
     if (m.inherited !== true) {
