@@ -35,6 +35,11 @@ export interface LoadOptions {
   readonly cliOverrides?: PlainObject;
   /** Profile to apply; defaults to `JARVIS_PROFILE`. */
   readonly profile?: string;
+  /**
+   * The personal `knowledgeRepo` and `repos` are not read: an eval's sandbox lays the knowledge
+   * repository and the service out itself and must not reach this machine's repositories.
+   */
+  readonly ignoreUserRepos?: boolean;
 }
 
 export interface ConfigFileInfo {
@@ -179,7 +184,11 @@ export async function loadConfig(options: LoadOptions = {}): Promise<LoadedConfi
     issues.push(...checkVersion(user.value, userSource));
     if (issues.length === 0) issues.push(...validateFile(UserConfigSchema, user.value, userSource));
   }
-  const userValue = isPlainObject(user.value) ? user.value : {};
+  const userValue: PlainObject = isPlainObject(user.value)
+    ? options.ignoreUserRepos
+      ? (withoutKeys(user.value, ["knowledgeRepo", "repos"]) as PlainObject)
+      : user.value
+    : {};
 
   // ADR-0025 §3: a repository without .jarvis may be a service of a knowledge repository next to it
   let meta: LoadedMeta | undefined;

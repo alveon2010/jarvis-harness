@@ -1,14 +1,16 @@
 # ADR-0025: Мета-репа знаний и задача по нескольким сервисам
 
-- Статус: принято; этап 1 сделан (2026-10-16)
+- Статус: принято; этапы 1–5 сделаны (2026-10-16), без проверки полей DTO и PR
 - Дата: 2026-10-15
 - Основание: [ADR-0017](0017-models-and-mcp-configuration.md) (конфигурация: машина и проект),
   [ADR-0020](0020-skills-and-standards.md) (знание, стандарты, навыки), [ADR-0021](0021-stack-agnostic-core.md)
   (скан и граф), [ADR-0023](0023-editor-and-web-ui.md) и [ADR-0024](0024-knowledge-in-web-ui.md) (`jarvis ui`),
   [ADR-0012](0012-evals-and-record-replay.md) (evals); пилот на бэкенде из многих микросервисов
-- Код (этап 1): `src/core/config/meta.ts` (поиск репы знаний, карта, сервис), `src/core/config/load.ts` (слои
-  общее → сервис), `src/core/paths.ts` (`layoutOf`: где файлы Jarvis у проекта и его копий), `src/evals/inputs.ts`
-  (`recordKnowledgeRepoInputs`)
+- Код: `src/core/config/meta.ts` (поиск репы знаний, карта, сервис), `src/core/config/load.ts` (слои общее →
+  сервис), `src/core/paths.ts` (`layoutOf`: где файлы Jarvis у проекта и его копий), `src/evals/inputs.ts`
+  (входы прогона), `src/knowledge/catalog.ts` (`contracts.json`, каталог, соседи), `src/app/subtasks.ts`,
+  `src/orchestration/tools/cross.ts`, `src/cli/commands/subtask.ts` (мастер и сабтаски), `src/app/crossScope.ts`,
+  `src/cli/commands/scope.ts` (шаг `scope`, продолжение research), `src/evals/runner.ts` (кейсы сервиса)
 - Мокап: страницы мастер-прогона и сабтасков (артефакт «Jarvis: задача по сервисам»)
 
 ## Контекст

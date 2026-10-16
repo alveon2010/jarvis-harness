@@ -21,7 +21,7 @@ import { changedFilesOf, type DocFacts, docFacts, reasonsOf } from "../cli/gate.
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import type { Run } from "../core/domain/run.ts";
 import type { WorkflowDefinition } from "../core/domain/workflow.ts";
-import { caseOfRun } from "../evals/runToCase.ts";
+import { caseOfRun, casesRootOf } from "../evals/runToCase.ts";
 import {
   type GivenAnswer,
   givenFor,
@@ -1221,7 +1221,7 @@ export function fixOf(
 /** A run that ended with an accepted implementation can become an eval case; or it did already. */
 function evalOf(runtime: Runtime, run: Run): Pick<RunPage, "evalReady" | "evalCase"> {
   if (run.state !== "COMPLETED") return {};
-  const made = caseOfRun(run.workspace.repoRoot, run.id);
+  const made = caseOfRun(casesRootOf(run.workspace.repoRoot), run.id);
   if (made) return { evalCase: made };
   const impl = runtime.artifacts.listLatest(run.id, "implementation")[0];
   return impl && runtime.artifacts.isApproved(impl.artifactId).approved ? { evalReady: true } : {};

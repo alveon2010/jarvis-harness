@@ -1,10 +1,12 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { Writable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type Candidate, targetOf } from "../../src/app/candidates.ts";
 import { docsOf, glossaryOf } from "../../src/app/knowledgeView.ts";
 import { runInit } from "../../src/cli/commands/init.ts";
+import { run } from "../../src/cli/main.ts";
 import { loadConfig } from "../../src/core/config/load.ts";
 import { forgetLayouts, layoutOf } from "../../src/core/paths.ts";
 import { recordKnowledgeRepoInputs } from "../../src/evals/inputs.ts";
@@ -211,6 +213,59 @@ describe("a service of a knowledge repository", () => {
     expect(report.service).toEqual({ name: "orders-api", knowledgeRepo: meta });
     expect(report.created).toEqual([]);
     expect(existsSync(join(orders, ".jarvis"))).toBe(false);
+  });
+
+  it("an eval case of a service lives in the knowledge repository and runs in a sandbox of both", async () => {
+    const orders = join(repos, "orders-api");
+    git(orders, ["commit", "-q", "--allow-empty", "-m", "init"]);
+    sb.write(
+      "repos/jarvis-knowledge/.jarvis/project.yaml",
+      META.replace("tools: { local: { test: ./gradlew test } }\n", "workspace: { mode: cwd }\n").replace(
+        '    tools: { local: { test: "TZ=Europe/Moscow ./gradlew test" } }\n',
+        "",
+      ),
+    );
+    git(meta, ["add", "-A"]);
+    git(meta, ["commit", "-q", "-m", "cwd"]);
+    // a document the run had, not committed: it must reach the case's overlay
+    sb.write("repos/jarvis-knowledge/knowledge/services/orders-api/module-orders.md", "# orders\n");
+    const cli = async (cwd: string, args: string[]) => {
+      let out = "";
+      const sink = new Writable({
+        write(c, _e, cb) {
+          out += String(c);
+          cb();
+        },
+      });
+      const code = await run(["node", "jarvis", ...args], {
+        streams: { out: sink, err: new Writable({ write: (_c, _e, cb) => cb() }) },
+        context: { cwd, homeDir: sb.home, env: { PATH: process.env.PATH ?? "", JARVIS_INTERACTIVE: "off" } },
+      });
+      return { code, out };
+    };
+    const work = await cli(orders, ["--json", "work", "ABC-42", "--workflow", "smoke"]);
+    expect(work.code).toBe(0);
+    const runId = (JSON.parse(work.out) as { run: { id: string } }).run.id;
+    const made = await cli(orders, ["--json", "evals", "run-to-case", runId]);
+    expect(made.code).toBe(0);
+    const caseDir = (JSON.parse(made.out) as { caseDir: string }).caseDir;
+    expect(caseDir.startsWith(join(meta, "evals", "default"))).toBe(true);
+    expect(existsSync(join(repos, "orders-api", "evals"))).toBe(false);
+    const doc = readFileSync(join(caseDir, "case.yaml"), "utf8");
+    expect(doc).toMatch(
+      /fixture:\n\s+service: orders-api\n\s+commit: [0-9a-f]{40}\n\s+knowledge:\n\s+commit: [0-9a-f]{40}/,
+    );
+    expect(
+      readFileSync(
+        join(caseDir, "overlay", "knowledge", "services", "orders-api", "module-orders.md"),
+        "utf8",
+      ),
+    ).toBe("# orders\n");
+    const ran = await cli(meta, ["--json", "evals", "run", "--mode", "live"]);
+    const result = JSON.parse(ran.out) as {
+      cases: Array<{ state: string; success: boolean; error?: string }>;
+    };
+    expect(result.cases[0]).toMatchObject({ state: "COMPLETED", success: true });
   });
 
   it("a run records the knowledge repository's commit and its files changed since", async () => {

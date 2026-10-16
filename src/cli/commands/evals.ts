@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { basename, join, resolve } from "node:path";
 import { createRuntime } from "../../app/runtime.ts";
 import { diffResults, runSuite, type SuiteResult } from "../../evals/runner.ts";
-import { runToCase } from "../../evals/runToCase.ts";
+import { casesRootOf, runToCase } from "../../evals/runToCase.ts";
 import type { CassetteMode } from "../../models/cassette.ts";
 import type { CliContext } from "../context.ts";
 import { CliExit, EXIT, padEnd } from "../output.ts";
@@ -62,10 +62,9 @@ export async function runEvalsRun(ctx: CliContext, options: EvalsRunOptions): Pr
   const mode = (options.mode ?? "replay") as CassetteMode;
   if (!["live", "record", "replay"].includes(mode))
     throw new CliExit(EXIT.error, `--mode must be live, record or replay`);
-  const suiteDir = resolve(
-    ctx.cwd,
-    options.suite.includes("/") ? options.suite : join("evals", options.suite),
-  );
+  // a suite by name in a service: the knowledge repository's evals/ (ADR-0025 §5)
+  const base = options.suite.includes("/") ? ctx.cwd : ((await loadForCli(ctx)).meta?.root ?? ctx.cwd);
+  const suiteDir = resolve(base, options.suite.includes("/") ? options.suite : join("evals", options.suite));
   const result = await runSuite(suiteDir, {
     homeDir: ctx.homeDir,
     env: ctx.env,
@@ -154,7 +153,7 @@ export async function runEvalsRunToCase(
     const run = runtime.runs.resolve(ref);
     if (!run) throw new CliExit(EXIT.error, `run "${ref}" not found`);
     const suiteDir = resolve(
-      ctx.cwd,
+      options.suite.includes("/") ? ctx.cwd : casesRootOf(run.workspace.repoRoot),
       options.suite.includes("/") ? options.suite : join("evals", options.suite),
     );
     const result = await runToCase(runtime, run.id, {

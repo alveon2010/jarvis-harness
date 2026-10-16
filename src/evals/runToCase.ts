@@ -2,6 +2,7 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, wri
 import { dirname, isAbsolute, join, relative } from "node:path";
 import { stringify } from "yaml";
 import type { Runtime } from "../app/runtime.ts";
+import { loadConfig } from "../core/config/load.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import { layoutOf } from "../core/paths.ts";
 import { givenFor } from "../interaction/answers.ts";
@@ -65,6 +66,12 @@ function preferred(runtime: Runtime, runId: string, type: string): ArtifactVersi
   return [...versions].reverse().find((v) => v.provenance.kind === "human") ?? latest;
 }
 
+/** Where a run's eval cases live: its repository's `evals/`, or for a service the knowledge repository's (ADR-0025 §5). */
+export function casesRootOf(repoRoot: string): string {
+  const meta = layoutOf(repoRoot).meta;
+  return meta?.service ? meta.root : repoRoot;
+}
+
 export async function runToCase(
   runtime: Runtime,
   runId: string,
@@ -74,18 +81,27 @@ export async function runToCase(
   // short and readable: the ticket key or the task's first words, and the run (pilot: a 230-character
   // directory name made of every Latin word of a Russian task)
   const id = options.id ?? readableIdFor(run.task, run.id);
+  // a service of a knowledge repository: its cases live in the knowledge repository (ADR-0025 §5)
+  const knowledgeRepo = layoutOf(run.workspace.repoRoot).meta;
+  const service = knowledgeRepo?.service;
+  if (knowledgeRepo && service) {
+    const at = relative(knowledgeRepo.root, options.suiteDir);
+    if (at.startsWith("..") || isAbsolute(at))
+      throw new Error(
+        `the cases of a service go to the knowledge repository's evals/ (${knowledgeRepo.root}): nothing is written into the service's repository`,
+      );
+  }
   const caseDir = join(options.suiteDir, id);
   if (existsSync(join(caseDir, "case.yaml"))) throw new Error(`case ${caseDir} already exists`);
   mkdirSync(caseDir, { recursive: true });
 
   const ws = run.workspace;
-  // a service of a knowledge repository: its cases belong to the knowledge repository, not the
-  // service's repository (ADR-0025 §5) — they come with the evals stage, not written here meanwhile
-  if (layoutOf(ws.repoRoot).meta)
-    throw new Error(
-      "eval cases of a service of a knowledge repository are not made yet (ADR-0025 §5): nothing is written into the service's repository",
-    );
-  const base = ws.baseCommit ?? ws.baseRef;
+  // a commit, not a name that moves (`HEAD` of a run in the working copy): the case starts from it later
+  const named = ws.baseCommit ?? ws.baseRef;
+  const resolved = /^[0-9a-f]{40}$/.test(named)
+    ? named
+    : (await git(["rev-parse", named], ws.repoRoot)).stdout.trim();
+  const base = resolved || named;
   // the run's own work: its checkout, or — removed — its branch in the repository (not what is checked out there)
   const inCheckout = existsSync(ws.path);
   const diffFrom = inCheckout ? ws.path : ws.repoRoot;
@@ -124,10 +140,16 @@ export async function runToCase(
     .filter((s) => !/^(standard|skill|knowledge):/.test(s))
     .sort();
 
-  const tests =
-    runtime.loaded.config.tools.local.test ??
-    runtime.loaded.config.tools.local.tests ??
-    runtime.loaded.config.tools.local.check;
+  // the service's own commands, when the case is made from the knowledge repository (services.<name>)
+  const local = service
+    ? (
+        await loadConfig({
+          cwd: ws.repoRoot,
+          env: { ...process.env, JARVIS_HOME: runtime.loaded.home.root },
+        })
+      ).config.tools.local
+    : runtime.loaded.config.tools.local;
+  const tests = local.test ?? local.tests ?? local.check;
   // what a person answered to the documents' open questions: the decisions the next run must reach too
   const answers = [spec, impact, research]
     .filter((a): a is ArtifactVersion => a !== undefined)
@@ -140,12 +162,27 @@ export async function runToCase(
     );
   // a suite inside the run's repository takes the repository at the base commit by reference: no copy
   const rel = relative(ws.repoRoot, options.suiteDir);
-  const inRepo = options.fixture !== false && !rel.startsWith("..") && !isAbsolute(rel);
+  const inRepo = !service && options.fixture !== false && !rel.startsWith("..") && !isAbsolute(rel);
+  // the knowledge repository as the run started with it: its commit, and its changed files kept then
+  const created = runtime.events.list({ runId: run.id, kind: "run.created", limit: 1 })[0];
+  const kept = (created?.payload as { knowledgeRepo?: { commit?: unknown; files?: unknown } } | undefined)
+    ?.knowledgeRepo;
+  const knowledgeCommit =
+    service && knowledgeRepo
+      ? typeof kept?.commit === "string"
+        ? kept.commit
+        : (await git(["rev-parse", "HEAD"], knowledgeRepo.root)).stdout.trim()
+      : undefined;
   const caseDoc = {
     id,
     task: run.task,
     workflow: run.workflow,
-    fixture: inRepo ? { commit: base, overlay: "overlay" } : "fixture",
+    fixture:
+      service && knowledgeCommit
+        ? { service, commit: base, knowledge: { commit: knowledgeCommit, overlay: "overlay" } }
+        : inRepo
+          ? { commit: base, overlay: "overlay" }
+          : "fixture",
     gold: {
       files,
       ...(tests ? { tests } : {}),
@@ -165,7 +202,29 @@ export async function runToCase(
 
   let fixture = false;
   const skipped: string[] = [];
-  if (inRepo) {
+  if (service && knowledgeRepo) {
+    // the knowledge repository's files the run had and its commit does not hold as they are
+    const files =
+      kept && typeof kept.files === "object" && kept.files !== null
+        ? (kept.files as Record<string, unknown>)
+        : undefined;
+    if (files) {
+      for (const [rel, blob] of Object.entries(files)) {
+        const content =
+          typeof blob === "string"
+            ? await git(["cat-file", "blob", blob], knowledgeRepo.root, { maxBytes: 16 * 1024 * 1024 })
+            : undefined;
+        if (content?.code !== 0) {
+          skipped.push(rel);
+          continue;
+        }
+        const to = join(caseDir, "overlay", rel);
+        mkdirSync(dirname(to), { recursive: true });
+        writeFileSync(to, content.stdout);
+      }
+    }
+    fixture = true;
+  } else if (inRepo) {
     // the project's configuration and knowledge as the run had them: only what the base commit does not
     // already hold as it is — committed, the overlay stays empty. A run records them at its start
     // (src/evals/inputs.ts); for an older one the working copy's, but not what changed after it began.

@@ -52,7 +52,7 @@ import type { Actor } from "../core/domain/actor.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import { isTerminal, type Run } from "../core/domain/run.ts";
 import { layoutOf, rootRelative } from "../core/paths.ts";
-import { caseOfRun, runToCase } from "../evals/runToCase.ts";
+import { caseOfRun, casesRootOf, runToCase } from "../evals/runToCase.ts";
 import {
   answersText,
   givenFromForm,
@@ -1426,11 +1426,12 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       const suite = (form.get("suite") ?? "default").trim();
       if (!/^[a-z0-9][a-z0-9-]{0,40}$/.test(suite)) return redirect(r, `/runs/${short}?notice=eval-suite`);
       if (run.state !== "COMPLETED") return redirect(r, `/runs/${short}?notice=eval-failed`);
-      if (caseOfRun(run.workspace.repoRoot, run.id)) return redirect(r, `/runs/${short}?notice=eval-made`);
+      if (caseOfRun(casesRootOf(run.workspace.repoRoot), run.id))
+        return redirect(r, `/runs/${short}?notice=eval-made`);
       let skipped = 0;
       try {
         const made = await runToCase(runtime, run.id, {
-          suiteDir: joinPath(run.workspace.repoRoot, "evals", suite),
+          suiteDir: joinPath(casesRootOf(run.workspace.repoRoot), "evals", suite),
         });
         skipped = made.skipped?.length ?? 0;
       } catch (error) {

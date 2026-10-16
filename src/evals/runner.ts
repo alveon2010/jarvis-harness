@@ -15,6 +15,7 @@ import { z } from "zod";
 import { createEngine } from "../app/engine.ts";
 import { createRuntime, type Runtime } from "../app/runtime.ts";
 import { loadConfig } from "../core/config/load.ts";
+import { serviceRepos } from "../core/config/meta.ts";
 import type { Actor } from "../core/domain/actor.ts";
 import type { CassetteMode } from "../models/cassette.ts";
 import { leaseOwner } from "../orchestration/lease.ts";
@@ -38,6 +39,19 @@ export const CaseSchema = z.strictObject({
   fixture: z
     .union([
       z.string().min(1),
+      /**
+       * A service of a knowledge repository (ADR-0025 §5): its repository at `commit` (where this
+       * machine's map has it), and the knowledge repository the case lives in at `knowledge.commit`
+       * with the run's changed files in `knowledge.overlay/` — laid out side by side as the map says.
+       */
+      z.strictObject({
+        service: z.string().min(1),
+        commit: z.string().min(1),
+        knowledge: z.strictObject({
+          commit: z.string().min(1),
+          overlay: z.string().min(1).default("overlay"),
+        }),
+      }),
       z.strictObject({ commit: z.string().min(1), overlay: z.string().min(1).default("overlay") }),
     ])
     .default("fixture"),
@@ -147,6 +161,88 @@ function setDeep(target: Record<string, unknown>, path: string, value: string): 
 }
 
 /** Copies the fixture into a throwaway git repository with the case's project config. */
+/** `git archive <commit>` of the repository at `from` into `to`. */
+async function archive(c: EvalCase, from: string, commit: string, to: string): Promise<void> {
+  mkdirSync(to, { recursive: true });
+  const r = await runShell(`git archive --format=tar ${commit} | tar -x -C "${to}"`, {
+    cwd: from,
+    timeoutMs: 300_000,
+  });
+  if (r.code !== 0)
+    throw new Error(`case ${c.id}: git archive ${commit} in ${from} failed: ${r.stderr.trim()}`);
+}
+
+async function commitAll(dir: string, env: NodeJS.ProcessEnv): Promise<void> {
+  const gitEnv = {
+    ...env,
+    GIT_AUTHOR_NAME: "evals",
+    GIT_AUTHOR_EMAIL: "evals@jarvis",
+    GIT_COMMITTER_NAME: "evals",
+    GIT_COMMITTER_EMAIL: "evals@jarvis",
+  };
+  if (existsSync(join(dir, ".git"))) return;
+  await git(["init", "-q", "-b", "main"], dir, { env: gitEnv });
+  await git(["add", "-A"], dir, { env: gitEnv });
+  await git(["commit", "-q", "-m", "fixture"], dir, { env: gitEnv });
+}
+
+/**
+ * A service's case (ADR-0025 §5): the knowledge repository (where the case lives) at its commit with
+ * the overlay, the service's repository at its commit next to it, the map pointing at that folder; the
+ * case's `project` and the variant go to the service's entry. Returns the service's folder.
+ */
+async function prepareServiceWorkspace(
+  c: EvalCase & {
+    fixture: { service: string; commit: string; knowledge: { commit: string; overlay: string } };
+  },
+  variant: Record<string, string>,
+  env: NodeJS.ProcessEnv,
+  homeDir: string,
+): Promise<{ root: string; sandbox: string; knowledgeRepo: string }> {
+  const f = c.fixture;
+  const top = await git(["rev-parse", "--show-toplevel"], c.dir);
+  if (top.code !== 0)
+    throw new Error(`case ${c.id}: ${c.dir} is in no git repository (the knowledge repository)`);
+  const metaTop = top.stdout.trim();
+  const metaConfig =
+    (parse(readFileSync(join(metaTop, ".jarvis", "project.yaml"), "utf8")) as Record<string, unknown>) ?? {};
+  // where this machine has the service's repository: the personal map, then the knowledge repository's
+  let userRepos: Record<string, string> | undefined;
+  try {
+    const user = parse(readFileSync(join(homeDir, ".jarvis", "config.yaml"), "utf8")) as {
+      repos?: Record<string, string>;
+    };
+    userRepos = user?.repos;
+  } catch {
+    userRepos = undefined;
+  }
+  const from = serviceRepos(metaTop, metaConfig, userRepos, homeDir)[f.service];
+  if (!from || !existsSync(from))
+    throw new Error(`case ${c.id}: no repository of ${f.service} on this machine`);
+  const sandbox = mkdtempSync(join(tmpdir(), `jarvis-eval-${c.id.slice(0, 40)}-`));
+  const knowledgeRepo = join(sandbox, basename(metaTop));
+  await archive(c, metaTop, f.knowledge.commit, knowledgeRepo);
+  const overlay = join(c.dir, f.knowledge.overlay);
+  if (existsSync(overlay)) cpSync(overlay, knowledgeRepo, { recursive: true });
+  const file = join(knowledgeRepo, ".jarvis", "project.yaml");
+  const project = (parse(readFileSync(file, "utf8")) as Record<string, unknown>) ?? { version: 1 };
+  const services = { ...((project.services as Record<string, Record<string, unknown>>) ?? {}) };
+  const entry: Record<string, unknown> = {
+    ...(services[f.service] ?? {}),
+    ...(c.project ?? {}),
+    repo: f.service,
+  };
+  for (const [k, v] of Object.entries(variant)) setDeep(entry, k, v);
+  services[f.service] = entry;
+  const { stringify } = await import("yaml");
+  writeFileSync(file, stringify({ ...project, repos: "..", services }));
+  const root = join(sandbox, f.service);
+  await archive(c, from, f.commit, root);
+  await commitAll(knowledgeRepo, env);
+  await commitAll(root, env);
+  return { root, sandbox, knowledgeRepo };
+}
+
 async function prepareWorkspace(
   c: EvalCase,
   variant: Record<string, string>,
@@ -154,6 +250,8 @@ async function prepareWorkspace(
 ): Promise<string> {
   const root = mkdtempSync(join(tmpdir(), `jarvis-eval-${c.id.slice(0, 40)}-`));
   if (typeof c.fixture === "string") cpSync(join(c.dir, c.fixture), root, { recursive: true });
+  else if ("service" in c.fixture)
+    throw new Error(`case ${c.id}: a service's fixture is prepared on its own`);
   else {
     // the repository the case lives in, at the commit, and the run's .jarvis/ over it
     const top = await git(["rev-parse", "--show-toplevel"], c.dir);
@@ -196,10 +294,28 @@ export async function runCase(c: EvalCase, options: RunCaseOptions): Promise<Cas
   const started = Date.now();
   const variant = options.variant ?? {};
   const env = { ...options.env, JARVIS_ACTOR: EVAL_ACTOR.id };
-  const root = await prepareWorkspace(c, variant, env);
+  // a service of a knowledge repository: both repositories side by side in a sandbox (ADR-0025 §5)
+  const service =
+    typeof c.fixture === "object" && "service" in c.fixture
+      ? await prepareServiceWorkspace(
+          c as Parameters<typeof prepareServiceWorkspace>[0],
+          variant,
+          env,
+          options.homeDir,
+        )
+      : undefined;
+  const root = service ? service.root : await prepareWorkspace(c, variant, env);
+  const loadEnv = service ? { ...env, JARVIS_KNOWLEDGE: service.knowledgeRepo } : env;
   let runtime: Runtime | undefined;
   try {
-    const loaded = await loadConfig({ cwd: root, homeDir: options.homeDir, env });
+    const loaded = await loadConfig({
+      cwd: root,
+      homeDir: options.homeDir,
+      env: loadEnv,
+      ...(service ? { ignoreUserRepos: true } : {}),
+    });
+    if (service && loaded.meta?.service !== (c.fixture as { service: string }).service)
+      throw new Error(`case ${c.id}: the sandbox's knowledge repository does not map ${root} to its service`);
     runtime = createRuntime(loaded, { env, cassette: { mode: options.mode, dir: join(c.dir, c.cassette) } });
     const engine = createEngine(runtime);
     engine.workflow(c.workflow);
@@ -322,7 +438,7 @@ export async function runCase(c: EvalCase, options: RunCaseOptions): Promise<Cas
     };
   } finally {
     await runtime?.close();
-    rmSync(root, { recursive: true, force: true });
+    rmSync(service ? service.sandbox : root, { recursive: true, force: true });
   }
 }
 
