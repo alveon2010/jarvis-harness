@@ -272,7 +272,7 @@ export async function loadConfig(options: LoadOptions = {}): Promise<LoadedConfi
     if (isPlainObject(own))
       layers.push({
         name: `${projectSource}#services.${meta.service}`,
-        value: withoutKeys(own, ["repo", "path"]),
+        value: withoutKeys(own, ["repo", "path", "kind"]),
       });
   }
 

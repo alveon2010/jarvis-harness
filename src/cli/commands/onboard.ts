@@ -15,6 +15,7 @@ import {
   renderConventions,
 } from "../../onboarding/render.ts";
 import { type ScanReport, scanProject, scopeFacts, trackedFiles } from "../../onboarding/scan.ts";
+import { type FilledEntry, fillServiceEntry, kindOf } from "../../onboarding/serviceEntry.ts";
 import { git } from "../../tools/local/exec.ts";
 import type { CliContext } from "../context.ts";
 import { CliExit, EXIT } from "../output.ts";
@@ -36,12 +37,22 @@ export interface OnboardOptions {
   readonly module?: string;
   /** With `module`: what matters to the person who asked, added to the agent's task. */
   readonly note?: string;
+  /** In a knowledge repository: only this service of the map (ADR-0025). */
+  readonly service?: string;
 }
 
 type FileAction = "created" | "refreshed" | "kept (edited by a human)" | "would create" | "would refresh";
 
 export async function runOnboard(ctx: CliContext, options: OnboardOptions): Promise<void> {
   const loaded = await loadForCli(ctx);
+  // the knowledge repository itself: its services, each in its repository (ADR-0025 §1)
+  if (loaded.meta && !loaded.meta.service) return runOnboardServices(ctx, loaded.meta, options);
+  if (options.service && loaded.meta?.service && options.service !== loaded.meta.service) {
+    ctx.out.error(
+      `this repository is the service ${loaded.meta.service}, not ${options.service}: run it in the knowledge repository, or in ${options.service}'s`,
+    );
+    throw new CliExit(EXIT.error);
+  }
   const root = loaded.project?.root ?? ctx.cwd;
   const inRepo = await git(["rev-parse", "--is-inside-work-tree"], root);
   if (inRepo.code !== 0) {
@@ -132,59 +143,151 @@ export async function runOnboard(ctx: CliContext, options: OnboardOptions): Prom
 
   let configApplied = false;
   const configPath = loaded.project?.configFile;
-  // a service's commands are its own, under services.<name> of the knowledge repository: said, not
-  // written over the shared tools.local of every service
   if (options.applyConfig && configPath && existsSync(configPath) && !service) {
     const current = readFileSync(configPath, "utf8");
     const next = applyCommands(current, report.commands);
     configApplied = next.applied;
     if (next.applied && !options.dryRun) writeFileSync(configPath, next.text, "utf8");
   }
+  // a service: its kind and commands into its entry of the map, where nothing is set (ADR-0025 §2)
+  let entry: FilledEntry | undefined;
+  if (service && configPath && existsSync(configPath)) {
+    const kind = kindOf(report.stacks);
+    entry = fillServiceEntry(readFileSync(configPath, "utf8"), service, {
+      ...(kind ? { kind } : {}),
+      commands: report.commands,
+    });
+    if (entry.added.length > 0 && !options.dryRun) writeFileSync(configPath, entry.text, "utf8");
+  }
 
-  ctx.out.result({ ...report, files, configApplied }, () => {
-    ctx.out.line(
-      `${report.files} files, ~${report.lines} lines; stacks: ${report.stacks.join(", ") || "none detected"}${report.packageManager ? `; ${report.packageManager}` : ""}`,
-    );
-    const source = report.modules.filter((m) => m.role === "source");
-    ctx.out.line(
-      `modules: ${source
-        .slice(0, 8)
-        .map((m) => `${m.path} (${m.lines})`)
-        .join(", ")}${source.length > 8 ? ` … +${source.length - 8}` : ""}`,
-    );
-    ctx.out.line(
-      report.graph.available
-        ? `graph: ${report.graph.nodes} nodes, ${report.graph.edges} edges`
-        : `graph: unavailable — ${report.graph.reason ?? "no adapter"}`,
-    );
-    ctx.out.line(
-      `tests: ${report.tests.files} files (${report.tests.layout}); frameworks: ${report.tooling.testFrameworks.join(", ") || "none detected"}`,
-    );
-    ctx.out.line(`docs found: ${report.docs.length}; CI: ${report.tooling.ci.join(", ") || "none"}`);
-    ctx.out.line();
-    if (report.commands.length > 0) {
+  ctx.out.result(
+    { ...report, files, configApplied, ...(entry ? { map: { added: entry.added, kept: entry.kept } } : {}) },
+    () => {
       ctx.out.line(
-        configApplied
-          ? "tools.local written to .jarvis/project.yaml:"
-          : service
-            ? `suggested services.${service}.tools.local for ${configPath} (set by hand: the shared tools.local is every service's):`
-            : "suggested tools.local for .jarvis/project.yaml (--apply-config fills an empty one):",
+        `${report.files} files, ~${report.lines} lines; stacks: ${report.stacks.join(", ") || "none detected"}${report.packageManager ? `; ${report.packageManager}` : ""}`,
       );
-      for (const c of report.commands)
-        ctx.out.line(`  ${c.name}: ${JSON.stringify(c.command)}   # ${c.source}`);
-    } else ctx.out.line("no project commands detected: set tools.local by hand (tests, typecheck, lint)");
-    if (report.sensitivePaths.length > 0) {
+      const source = report.modules.filter((m) => m.role === "source");
+      ctx.out.line(
+        `modules: ${source
+          .slice(0, 8)
+          .map((m) => `${m.path} (${m.lines})`)
+          .join(", ")}${source.length > 8 ? ` … +${source.length - 8}` : ""}`,
+      );
+      ctx.out.line(
+        report.graph.available
+          ? `graph: ${report.graph.nodes} nodes, ${report.graph.edges} edges`
+          : `graph: unavailable — ${report.graph.reason ?? "no adapter"}`,
+      );
+      ctx.out.line(
+        `tests: ${report.tests.files} files (${report.tests.layout}); frameworks: ${report.tooling.testFrameworks.join(", ") || "none detected"}`,
+      );
+      ctx.out.line(`docs found: ${report.docs.length}; CI: ${report.tooling.ci.join(", ") || "none"}`);
       ctx.out.line();
-      ctx.out.line("sensitive-looking paths — consider security.deniedPaths:");
-      ctx.out.line(`  deniedPaths: [${report.sensitivePaths.map((p) => JSON.stringify(p)).join(", ")}]`);
-    }
-    ctx.out.line();
-    for (const f of files) ctx.out.line(`${f.action.padEnd(24)} ${f.path}`);
-    ctx.out.line();
-    ctx.out.line(
-      "next: describe in architecture.md what each module is for, add glossary.md and standards (see .jarvis/*/README.md)",
+      if (service && entry) {
+        const where = `services.${service} in ${rootRelative(ctx.cwd, configPath as string)}`;
+        if (entry.added.length > 0)
+          ctx.out.line(`${options.dryRun ? "would add to" : "added to"} ${where}: ${entry.added.join(", ")}`);
+        else ctx.out.line(`${where}: nothing new`);
+        for (const c of report.commands)
+          ctx.out.line(`  ${c.name}: ${JSON.stringify(c.command)}   # ${c.source}`);
+        if (entry.kept.length > 0) ctx.out.line(`  kept as set: ${entry.kept.join(", ")}`);
+        if (report.commands.length === 0)
+          ctx.out.line(
+            `  no commands found: set services.${service}.tools.local by hand (tests, typecheck, lint)`,
+          );
+      } else if (report.commands.length > 0) {
+        ctx.out.line(
+          configApplied
+            ? "tools.local written to .jarvis/project.yaml:"
+            : "suggested tools.local for .jarvis/project.yaml (--apply-config fills an empty one):",
+        );
+        for (const c of report.commands)
+          ctx.out.line(`  ${c.name}: ${JSON.stringify(c.command)}   # ${c.source}`);
+      } else ctx.out.line("no project commands detected: set tools.local by hand (tests, typecheck, lint)");
+      if (report.sensitivePaths.length > 0) {
+        ctx.out.line();
+        ctx.out.line("sensitive-looking paths — consider security.deniedPaths:");
+        ctx.out.line(`  deniedPaths: [${report.sensitivePaths.map((p) => JSON.stringify(p)).join(", ")}]`);
+      }
+      ctx.out.line();
+      for (const f of files) ctx.out.line(`${f.action.padEnd(24)} ${f.path}`);
+      ctx.out.line();
+      ctx.out.line(
+        service
+          ? `next: describe in ${rootRelative(root, join(knowledgeDir, "architecture.md"))} what each module is for; commit in the knowledge repository`
+          : "next: describe in architecture.md what each module is for, add glossary.md and standards (see .jarvis/*/README.md)",
+      );
+    },
+  );
+}
+
+/**
+ * `jarvis onboard` in a knowledge repository: the quick scan in each service's repository of the map
+ * (or `--service`), as if run there; the knowledge repository's own files are not scanned. A
+ * repository missing on this machine, or with a `.jarvis/` of its own, is skipped and said.
+ */
+async function runOnboardServices(
+  ctx: CliContext,
+  meta: {
+    readonly root: string;
+    readonly configFile: string;
+    readonly repos: Readonly<Record<string, string>>;
+  },
+  options: OnboardOptions,
+): Promise<void> {
+  if (options.module !== undefined) {
+    ctx.out.error("--module maps a module of a service: run it in the service's repository");
+    throw new CliExit(EXIT.error);
+  }
+  const names = Object.keys(meta.repos).sort();
+  if (options.service && !meta.repos[options.service]) {
+    ctx.out.error(
+      `${options.service} is not a service of the map (${names.join(", ") || "none"}) — add it under services in ${meta.configFile}`,
     );
-  });
+    throw new CliExit(EXIT.error);
+  }
+  if (names.length === 0) {
+    ctx.out.error(
+      `no services in ${meta.configFile}: add them under services (jarvis init --knowledge drafts the map)`,
+    );
+    throw new CliExit(EXIT.error);
+  }
+  const done: string[] = [];
+  const skipped: string[] = [];
+  for (const name of options.service ? [options.service] : names) {
+    const path = meta.repos[name] as string;
+    const at = rootRelative(meta.root, path);
+    if (!existsSync(path)) {
+      skipped.push(
+        `${name}: no repository at ${at} — repos.${name} in the personal config when it lies elsewhere`,
+      );
+      continue;
+    }
+    if (existsSync(join(path, ".jarvis", "project.yaml"))) {
+      skipped.push(`${name}: ${at} has a .jarvis/ of its own — it works on its own until that is removed`);
+      continue;
+    }
+    if (!ctx.out.json) {
+      ctx.out.line(`== ${name} (${at})`);
+    }
+    try {
+      await runOnboard({ ...ctx, cwd: path }, { ...options, service: name });
+      done.push(name);
+    } catch (error) {
+      skipped.push(
+        `${name}: ${error instanceof CliExit ? "failed (see above)" : error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    if (!ctx.out.json) ctx.out.line();
+  }
+  if (ctx.out.json) return;
+  ctx.out.line(
+    `onboarded ${done.length} of ${options.service ? 1 : names.length}: ${done.join(", ") || "none"}`,
+  );
+  for (const s of skipped) ctx.out.line(`  skipped ${s}`);
+  if (done.length > 0)
+    ctx.out.line("next: jarvis knowledge links shows how they are linked; commit knowledge/ here");
+  if (done.length === 0) throw new CliExit(EXIT.error);
 }
 
 /** `jarvis onboard --module <path>`: the agent maps one module; the result waits as a knowledge candidate. */

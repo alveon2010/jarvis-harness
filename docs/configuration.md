@@ -515,6 +515,22 @@ jarvis init --knowledge            # --repos <dir>, если репы серви
 Карту дальше правите руками: лишнее удалить, переименованным дописать `repo:`. Репы со своей `.jarvis/`
 помечены — они работают отдельно, пока её не убрать; `init` печатает для них команды переноса знания.
 Повторный запуск ничего не перезаписывает и показывает репы, которых ещё нет в карте.
+Дальше `jarvis onboard` прямо в репе знаний проходит по всем сервисам карты (`--service <имя>` — по одному) и
+дописывает каждому `kind` и команды `tools.local`:
+
+```yaml
+services:
+  orders-api:
+    kind: backend
+    tools:
+      local:
+        tests: ./gradlew test
+        typecheck: ./gradlew classes testClasses -q
+  web-app:
+    kind: frontend
+    tools:
+      local: { tests: pnpm test, typecheck: pnpm typecheck, lint: pnpm lint }
+```
 
 ```
 repos/
@@ -564,8 +580,13 @@ services:
   документы верхнего уровня `knowledge/*.md` агенты видят как `common/<имя>`, глоссарий — общий;
 - workflow, стандарты, навыки, инструкции агентов, утверждения (`--commit`) — из репы знаний (из корня или её
   `.jarvis/`);
-- `jarvis init` в сервисе ничего в нём не создаёт; `onboard --apply-config` не пишет общий `tools.local`, а
-  печатает блок для `services.<сервис>`;
+- `jarvis init` в сервисе ничего в нём не создаёт;
+- `onboard` (в сервисе или в репе знаний по всей карте) сам дописывает в `services.<сервис>` то, что нашёл скан:
+  `kind` (`frontend` — react, vue, angular, svelte, next; `backend` — java, kotlin, go, dotnet, python, node без
+  фронтового фреймворка) и команды `tools.local` (`tests`, `typecheck`, `lint`, `build` — из `package.json`,
+  gradle, maven…). Пишет только пустое: ключ, уже заданный у сервиса или в общем `tools.local`, не трогает и
+  показывает, если найденное от него отличается («kept as set»). `kind` — справочный, на поведение пока не влияет.
+  `--dry-run` только показывает;
 - черновики знания на страницах `jarvis ui` коммитятся в репе знаний; дальше — ветка и PR;
 - прогон записывает коммит репы знаний и её изменённые файлы (`run.created` → `knowledgeRepo`);
 - eval-кейсы сервиса лежат в репе знаний (docs/evals.md).

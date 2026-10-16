@@ -27,6 +27,8 @@ export function detectStacks(root: string): string[] {
       if (deps.react) stacks.add("react");
       if (deps.next) stacks.add("nextjs");
       if (deps.vue) stacks.add("vue");
+      if (deps["@angular/core"]) stacks.add("angular");
+      if (deps.svelte) stacks.add("svelte");
     } catch {
       // unreadable package.json — node only
     }

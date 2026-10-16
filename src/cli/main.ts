@@ -258,6 +258,10 @@ export function buildProgram(options: RunOptions = {}): Command {
     )
     .option("--note <text>", "with --module: what matters, added to the agent's task")
     .option("--no-graph", "skip the project graph (module dependencies)")
+    .option(
+      "--service <name>",
+      "in a knowledge repository: only this service (without it: every service of the map, each in its repository)",
+    )
     .action(
       async (opts: {
         dryRun: boolean;
@@ -266,6 +270,7 @@ export function buildProgram(options: RunOptions = {}): Command {
         graph: boolean;
         module?: string;
         note?: string;
+        service?: string;
       }) => {
         await runOnboard(ctxFor(), opts);
       },

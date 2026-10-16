@@ -221,7 +221,7 @@ export function renderInitKnowledge(ctx: CliContext, report: InitKnowledgeReport
     }
   }
   out.line(
-    `  ${own.length > 0 ? 3 : 2}. in each service: jarvis onboard — its knowledge and contracts.json come here`,
+    `  ${own.length > 0 ? 3 : 2}. jarvis onboard here: every service of the map, its knowledge and contracts.json come here`,
   );
   out.line(
     `  ${own.length > 0 ? 4 : 3}. commit here; jarvis doctor in a service names the knowledge repository it uses`,

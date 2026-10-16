@@ -132,3 +132,44 @@ describe("a knowledge repository with its files at the top", () => {
     expect(loaded.project?.configFile).toBe(join(other, ".jarvis", "project.yaml"));
   });
 });
+
+describe("jarvis onboard in a knowledge repository", () => {
+  const commit = (dir: string) =>
+    execFileSync(
+      "git",
+      ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "init", "--allow-empty"],
+      {
+        cwd: dir,
+      },
+    );
+
+  it("goes over the services of the map, each in its repository; not the knowledge repository's own files", async () => {
+    await jarvis(meta, ["init", "--knowledge", "--project-only"]);
+    execFileSync("git", ["add", "-A"], { cwd: join(repos, "orders-api") });
+    commit(join(repos, "orders-api"));
+    const r = await jarvis(meta, ["onboard", "--no-graph"]);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("== orders-api");
+    expect(r.out).toMatch(/onboarded 1 of 2: orders-api/);
+    expect(r.out).toMatch(/skipped web-app: .* has a \.jarvis\/ of its own/);
+    expect(existsSync(join(meta, "knowledge", "services", "orders-api", "architecture.md"))).toBe(true);
+    expect(existsSync(join(meta, "knowledge", "architecture.md"))).toBe(false);
+    // the map gets what the scan found: the kind and the commands
+    const map = readFileSync(join(meta, "project.yaml"), "utf8");
+    expect(map).toMatch(
+      /orders-api:\n {4}kind: backend\n {4}tools:\n {6}local:\n {8}tests: \.\/gradlew test/,
+    );
+    expect(r.out).toContain("added to services.orders-api");
+  });
+
+  it("--service: one of the map; a name not in it is said", async () => {
+    await jarvis(meta, ["init", "--knowledge", "--project-only"]);
+    commit(join(repos, "orders-api"));
+    const one = await jarvis(meta, ["onboard", "--no-graph", "--service", "orders-api"]);
+    expect(one.code).toBe(0);
+    expect(one.out).toMatch(/onboarded 1 of 1: orders-api/);
+    const unknown = await jarvis(meta, ["onboard", "--service", "billing-api"]);
+    expect(unknown.code).not.toBe(0);
+    expect(unknown.out).toContain("billing-api is not a service of the map");
+  });
+});
