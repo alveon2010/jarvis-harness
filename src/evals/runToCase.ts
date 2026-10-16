@@ -3,6 +3,7 @@ import { dirname, isAbsolute, join, relative } from "node:path";
 import { stringify } from "yaml";
 import type { Runtime } from "../app/runtime.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
+import { layoutOf } from "../core/paths.ts";
 import { givenFor } from "../interaction/answers.ts";
 import { readableIdFor } from "../orchestration/worktree.ts";
 import { git, runShell } from "../tools/local/exec.ts";
@@ -78,6 +79,12 @@ export async function runToCase(
   mkdirSync(caseDir, { recursive: true });
 
   const ws = run.workspace;
+  // a service of a knowledge repository: its cases belong to the knowledge repository, not the
+  // service's repository (ADR-0025 §5) — they come with the evals stage, not written here meanwhile
+  if (layoutOf(ws.repoRoot).meta)
+    throw new Error(
+      "eval cases of a service of a knowledge repository are not made yet (ADR-0025 §5): nothing is written into the service's repository",
+    );
   const base = ws.baseCommit ?? ws.baseRef;
   // the run's own work: its checkout, or — removed — its branch in the repository (not what is checked out there)
   const inCheckout = existsSync(ws.path);

@@ -20,6 +20,8 @@ export const RESERVED_ENV = new Set([
   "JARVIS_ACTOR",
   "JARVIS_CONFIG",
   "JARVIS_KEYCHAIN_BACKEND",
+  // the knowledge repository of services without .jarvis (src/core/config/meta.ts, ADR-0025 §3)
+  "JARVIS_KNOWLEDGE",
   // technical log (src/telemetry/log.ts)
   "JARVIS_LOG",
   "JARVIS_LOG_DIR",

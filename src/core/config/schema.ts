@@ -538,6 +538,11 @@ export const CONFIG_VERSION = 1 as const;
  */
 export const LanguageSchema = z.string().min(2).max(40);
 
+/** A service's name in a knowledge repository: its folder by default (ADR-0025 §2). */
+export const ServiceNameSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, "a service name: letters, digits, `.`, `_`, `-`");
+
 /** `~/.jarvis/config.yaml` — the machine and the person (ADR-0017 §1). */
 export const UserConfigSchema = z.strictObject({
   version: z.literal(CONFIG_VERSION),
@@ -551,6 +556,10 @@ export const UserConfigSchema = z.strictObject({
   agents: z.record(z.string(), AgentConfigSchema).optional(),
   modelWait: ModelWaitSchema.optional(),
   language: LanguageSchema.optional(),
+  /** The knowledge repository (ADR-0025 §3) when it is not next to the repositories; `~` allowed. */
+  knowledgeRepo: z.string().min(1).optional(),
+  /** This machine's repositories laid out differently: service → path (over the knowledge repository's map). */
+  repos: z.record(ServiceNameSchema, z.string().min(1)).optional(),
 });
 export type UserConfig = z.infer<typeof UserConfigSchema>;
 
@@ -564,7 +573,7 @@ export const ContractMapSchema = z.strictObject({
 });
 
 /** `.jarvis/project.yaml` — the project and the team (ADR-0017 §1). */
-export const ProjectConfigSchema = z.strictObject({
+const ProjectFieldsSchema = z.strictObject({
   version: z.literal(CONFIG_VERSION),
   dataClass: DataClassSchema.optional(),
   roles: z.record(z.string(), RoleConfigSchema).optional(),
@@ -590,6 +599,23 @@ export const ProjectConfigSchema = z.strictObject({
   language: LanguageSchema.optional(),
   /** Contract maps the task's API methods are checked against before the agents (design step). */
   contracts: z.array(ContractMapSchema).optional(),
+});
+
+/**
+ * `services.<name>` of a knowledge repository's project.yaml: the same keys as the project's, over
+ * the shared ones, and where its repository is when the folder is named differently.
+ */
+export const ServiceConfigSchema = ProjectFieldsSchema.omit({ version: true }).extend({
+  /** Its repository: a folder under `repos`, or a path (relative to `repos`); default — the name. */
+  repo: z.string().min(1).optional(),
+});
+export type ServiceConfig = z.infer<typeof ServiceConfigSchema>;
+
+export const ProjectConfigSchema = ProjectFieldsSchema.extend({
+  /** A knowledge repository (ADR-0025): where the services' repositories are, relative to it. Default `..`. */
+  repos: z.string().min(1).optional(),
+  /** A knowledge repository: its services, each over the shared configuration above. */
+  services: z.record(ServiceNameSchema, ServiceConfigSchema).optional(),
 });
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;
 

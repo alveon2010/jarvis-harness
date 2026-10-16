@@ -147,7 +147,7 @@ function sourcesHtml(view: AskView): Html {
 /** A knowledge document's page; standards and skills by their tab. */
 function docLink(ref: string): string {
   const m = /^knowledge:(.+?)(?:#.*)?$/.exec(ref);
-  if (m) return `/knowledge/docs?doc=${encodeURIComponent(`.jarvis/knowledge/${m[1]}`)}`;
+  if (m) return `/knowledge/docs?doc=${encodeURIComponent(m[1] as string)}`;
   const st = /^standard:([^@]+)/.exec(ref);
   if (st) return `/knowledge/standards?id=${encodeURIComponent(st[1] as string)}`;
   return "/knowledge";

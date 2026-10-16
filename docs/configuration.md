@@ -5,7 +5,7 @@
 | Слой | Где | Что |
 |---|---|---|
 | user | `~/.jarvis/config.yaml` | машина и человек: модели и endpoint'ы, credentials-ссылки, пулы квот, actor |
-| project | `<project>/.jarvis/project.yaml` | проект и команда: роли, политика, инструменты, workspace, знание; версионируется |
+| project | `<project>/.jarvis/project.yaml` | проект и команда: роли, политика, инструменты, workspace, знание; версионируется. У сервиса без `.jarvis` — файл репы знаний и его `services.<имя>` ([ниже](#репа-знаний-для-многих-сервисов-adr-0025)) |
 | env | `JARVIS_*` | точечные переопределения |
 | cli | `--profile`, `--cwd`, опции команд | |
 
@@ -495,10 +495,68 @@ agents:
 | `skip-if-approved` | если `.jarvis/approvals/<task>/<type>.json` утверждает тот же хеш содержимого — гейт пройден (`approval.committed`); иначе как `artifact` |
 | `fail` | run `FAILED` с причиной `policy: human_gate_in_ci`, выход 12 |
 
+## Репа знаний для многих сервисов (ADR-0025)
+
+Если у сервисов свои репы и в них не должно быть ничего от Jarvis, вся `.jarvis` живёт в отдельной репе знаний,
+рядом с остальными. Проще всего назвать её `jarvis-knowledge`.
+
+```
+repos/
+  jarvis-knowledge/
+    .jarvis/project.yaml        # общая конфигурация + карта сервисов
+    .jarvis/workflows/ standards/ skills/ agents/
+    knowledge/
+      landscape.md glossary.md  # общее: границы, глоссарий
+      services/<сервис>/        # знание сервиса: architecture, conventions, contracts, module-*.md
+  orders-api/                   # без .jarvis
+  slots-service/
+```
+
+```yaml
+# jarvis-knowledge/.jarvis/project.yaml
+version: 1
+stack: [java, spring, kafka, gradle]   # ключи верхнего уровня — общее для всех сервисов
+tools: { local: { test: ./gradlew test } }
+repos: ..                              # где лежат репы; по умолчанию папка над репой знаний
+services:
+  orders-api: {}                       # репа ../orders-api
+  delivery-slots-api:
+    repo: slots-service                # папка называется иначе
+    tools: { local: { test: "TZ=Europe/Moscow ./gradlew test" } }
+```
+
+`services.<имя>` принимает те же ключи, что `project.yaml`. Слои: user → общее репы знаний → сервис
+(`jarvis config show --sources` подписывает их `project:…#services.<имя>`).
+
+Как Jarvis находит своё, если запущен в репе без `.jarvis`:
+1. репа знаний: `JARVIS_KNOWLEDGE`, иначе `knowledgeRepo` в `~/.jarvis/config.yaml`, иначе соседняя папка, чей
+   `project.yaml` содержит `services:` (сначала `jarvis-knowledge`);
+2. сервис: тот, чья репа по карте — эта. Если у вас репы лежат иначе, своя раскладка задаётся в личном конфиге:
+   ```yaml
+   # ~/.jarvis/config.yaml
+   knowledgeRepo: ~/work/jarvis-knowledge
+   repos: { delivery-slots-api: ~/work/slots }
+   ```
+   Порядок: `repos.<имя>` личного конфига, `services.<имя>.repo`, имя папки.
+3. Репы нет в карте — предупреждение с подсказкой, что добавить; `jarvis doctor` показывает его и проверяет карту
+   целиком (каждая ли репа на месте, нет ли двух сервисов на одной папке).
+
+Репа со своей `.jarvis/project.yaml` работает как раньше: репа знаний для неё не ищется.
+
+Что меняется для сервиса:
+- знание, принятые модули, результаты `onboard` пишутся в `knowledge/services/<сервис>/` репы знаний; общие
+  документы верхнего уровня `knowledge/*.md` агенты видят как `common/<имя>`, глоссарий — общий;
+- workflow, стандарты, навыки, инструкции агентов, утверждения (`--commit`) — из `.jarvis/` репы знаний;
+- `jarvis init` в сервисе ничего в нём не создаёт; `onboard --apply-config` не пишет общий `tools.local`, а
+  печатает блок для `services.<сервис>`;
+- черновики знания на страницах `jarvis ui` коммитятся в репе знаний; дальше — ветка и PR;
+- прогон записывает коммит репы знаний и её изменённые файлы (`run.created` → `knowledgeRepo`);
+- eval-кейсы для сервиса пока не создаются (ADR-0025 §5).
+
 ## Переменные окружения
 
 Зарезервированные: `JARVIS_HOME`, `JARVIS_CONFIG`, `JARVIS_PROFILE`, `JARVIS_ACTOR`,
-`JARVIS_KEYCHAIN_BACKEND` и переменные технического лога `JARVIS_LOG`, `JARVIS_LOG_DIR`,
+`JARVIS_KEYCHAIN_BACKEND`, `JARVIS_KNOWLEDGE` (репа знаний, см. выше) и переменные технического лога `JARVIS_LOG`, `JARVIS_LOG_DIR`,
 `JARVIS_LOG_KEEP_DAYS`, `JARVIS_LOG_MAX_FIELD` (см. [workflows.md](workflows.md#технический-лог)),
 `JARVIS_PROGRESS=off` — без живой строки прогресса в терминале, переменные терминала `JARVIS_INTERACTIVE`,
 `JARVIS_NOTIFY`, `JARVIS_NOTIFY_AFTER`, `JARVIS_TITLE`, `JARVIS_TAB_PROGRESS`, `JARVIS_MARKS`, `JARVIS_PAGER`,

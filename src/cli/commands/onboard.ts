@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createRuntime } from "../../app/runtime.ts";
 import type { GraphEdge, GraphNode } from "../../core/capabilities/contracts.ts";
+import { layoutOf, rootRelative } from "../../core/paths.ts";
 import { codeContractsOf } from "../../design/codeContracts.ts";
 import { repoIdOf, updateGraph } from "../../knowledge/graph/update.ts";
 import { mapModule, taskFor } from "../../onboarding/deep.ts";
@@ -85,7 +86,8 @@ export async function runOnboard(ctx: CliContext, options: OnboardOptions): Prom
     return;
   }
 
-  const knowledgeDir = join(root, ".jarvis", "knowledge");
+  // a service of a knowledge repository: its folder there (ADR-0025 §1)
+  const knowledgeDir = layoutOf(root).knowledgeDir;
   const files: Array<{ path: string; action: FileAction }> = [];
   const write = (name: string, content: string) => {
     const path = join(knowledgeDir, name);
@@ -98,7 +100,7 @@ export async function runOnboard(ctx: CliContext, options: OnboardOptions): Prom
       mkdirSync(knowledgeDir, { recursive: true });
       writeFileSync(path, content, "utf8");
     }
-    files.push({ path: `.jarvis/knowledge/${name}`, action });
+    files.push({ path: rootRelative(root, path), action });
   };
   const contracts = graph ? codeContractsOf(graph.all) : undefined;
   write("architecture.md", renderArchitecture(report, contracts));
@@ -108,7 +110,10 @@ export async function runOnboard(ctx: CliContext, options: OnboardOptions): Prom
 
   let configApplied = false;
   const configPath = loaded.project?.configFile;
-  if (options.applyConfig && configPath && existsSync(configPath)) {
+  // a service's commands are its own, under services.<name> of the knowledge repository: said, not
+  // written over the shared tools.local of every service
+  const service = loaded.meta?.service;
+  if (options.applyConfig && configPath && existsSync(configPath) && !service) {
     const current = readFileSync(configPath, "utf8");
     const next = applyCommands(current, report.commands);
     configApplied = next.applied;
@@ -140,7 +145,9 @@ export async function runOnboard(ctx: CliContext, options: OnboardOptions): Prom
       ctx.out.line(
         configApplied
           ? "tools.local written to .jarvis/project.yaml:"
-          : "suggested tools.local for .jarvis/project.yaml (--apply-config fills an empty one):",
+          : service
+            ? `suggested services.${service}.tools.local for ${configPath} (set by hand: the shared tools.local is every service's):`
+            : "suggested tools.local for .jarvis/project.yaml (--apply-config fills an empty one):",
       );
       for (const c of report.commands)
         ctx.out.line(`  ${c.name}: ${JSON.stringify(c.command)}   # ${c.source}`);

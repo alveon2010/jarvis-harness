@@ -4,6 +4,7 @@ import { stringify } from "yaml";
 import type { Actor } from "../core/domain/actor.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import type { Run } from "../core/domain/run.ts";
+import { layoutOf } from "../core/paths.ts";
 import { MODULE_MARKER, markSweeping, ONBOARD_MARKER } from "../onboarding/render.ts";
 import type { Dropped } from "../onboarding/verify.ts";
 import { shortRunId } from "../storage/runStore.ts";
@@ -149,9 +150,11 @@ export function targetOf(root: string, c: Candidate, id: string | undefined): st
     (c.doc.module || /^module\s/.test(c.doc.title)
       ? `module-${slug(c.name.replace(/@.*$/, ""))}`
       : slug(c.doc.title));
-  if (c.doc.kind === "standard") return join(root, ".jarvis", "standards", `${fileId}.md`);
-  if (c.doc.kind === "knowledge") return join(root, ".jarvis", "knowledge", `${fileId}.md`);
-  return join(root, ".jarvis", "skills", fileId, "IMPROVEMENT.md");
+  const layout = layoutOf(root);
+  if (c.doc.kind === "standard") return join(layout.jarvisDir, "standards", `${fileId}.md`);
+  // a service's knowledge goes to its folder of the knowledge repository (ADR-0025 §1)
+  if (c.doc.kind === "knowledge") return join(layout.knowledgeDir, `${fileId}.md`);
+  return join(layout.jarvisDir, "skills", fileId, "IMPROVEMENT.md");
 }
 
 /** A file `promote` may replace without asking: one jarvis wrote and nobody took over (the marker is there). */

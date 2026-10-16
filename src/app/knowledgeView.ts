@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
+import { layoutOf, rootRelative, versionedAt } from "../core/paths.ts";
 import { parseFrontMatter } from "../knowledge/frontmatter.ts";
+import { SHARED_KNOWLEDGE_PREFIX } from "../knowledge/resolver.ts";
 import { type GlossaryEntry, parseGlossary } from "../knowledge/retrieval/glossary.ts";
 import { splitSections } from "../knowledge/retrieval/index.ts";
 import { BUILTIN_SKILLS, loadSkills, type Skill } from "../knowledge/skills.ts";
@@ -122,14 +124,13 @@ async function lastCommit(root: string, file: string): Promise<{ hash: string; d
 
 async function commitsSince(
   root: string,
-  hash: string,
+  since: { readonly hash: string } | { readonly date: string },
   paths: readonly string[],
 ): Promise<number | undefined> {
   if (paths.length === 0) return undefined;
-  const r = await git(
-    ["rev-list", "--count", `${hash}..HEAD`, "--", ...paths.map((p) => `:(glob)${p}`)],
-    root,
-  );
+  // a document of a knowledge repository: its commits are not the code's, so by date
+  const range = "hash" in since ? [`${since.hash}..HEAD`] : [`--since=${since.date}`, "HEAD"];
+  const r = await git(["rev-list", "--count", ...range, "--", ...paths.map((p) => `:(glob)${p}`)], root);
   const n = Number(r.stdout.trim());
   return r.code === 0 && Number.isFinite(n) ? n : undefined;
 }
@@ -143,16 +144,25 @@ export async function docsOf(roots: KnowledgeRoots, usage?: ReadonlyMap<string, 
   const root = roots.projectRoot;
   if (!root) return [];
   const out: Array<Omit<DocView, "edited" | "staleCommits">> = [];
-  const dir = join(root, ".jarvis", "knowledge");
-  const names = existsSync(dir)
-    ? readdirSync(dir).filter((f) => f.endsWith(".md") && f !== "README.md" && f !== "glossary.md")
-    : [];
-  for (const f of names.sort()) {
-    const raw = readFileSync(join(dir, f), "utf8");
+  const layout = layoutOf(root);
+  // a service's documents and, in a knowledge repository, the shared ones (ADR-0025 §4)
+  const dirs: Array<readonly [string, string]> = [[layout.knowledgeDir, ""]];
+  if (layout.meta?.service) dirs.push([layout.meta.knowledgeRoot, SHARED_KNOWLEDGE_PREFIX]);
+  const files = dirs.flatMap(([dir, prefix]) =>
+    existsSync(dir)
+      ? readdirSync(dir)
+          .filter((f) => f.endsWith(".md") && f !== "README.md" && f !== "glossary.md")
+          .sort()
+          .map((f) => ({ file: join(dir, f), name: `${prefix}${f}` }))
+      : [],
+  );
+  for (const { file, name } of files) {
+    const raw = readFileSync(file, "utf8");
     const { data, body } = parseFrontMatter(raw);
+    const f = name;
     const u = usage?.get(`knowledge:${f}`);
     out.push({
-      path: `.jarvis/knowledge/${f}`,
+      path: rootRelative(root, file),
       name: f,
       title: /^#\s+(.+)$/m.exec(body)?.[1]?.trim() ?? f,
       tags: strings(data.tags),
@@ -184,9 +194,11 @@ export async function docsOf(roots: KnowledgeRoots, usage?: ReadonlyMap<string, 
   }
   return Promise.all(
     out.map(async (d) => {
-      const last = await lastCommit(root, d.path);
+      const at = versionedAt(layout, d.path);
+      const last = await lastCommit(at.cwd, at.path);
       if (!last) return d;
-      const stale = d.source ? undefined : await commitsSince(root, last.hash, d.paths);
+      const since = at.cwd === root ? { hash: last.hash } : { date: last.date };
+      const stale = d.source ? undefined : await commitsSince(root, since, d.paths);
       return { ...d, edited: last.date, ...(stale ? { staleCommits: stale } : {}) };
     }),
   );
@@ -436,7 +448,7 @@ function updatedOf(markdown: string): Map<string, string> {
 }
 
 export async function glossaryOf(root: string, check = true): Promise<GlossaryView> {
-  const file = join(root, GLOSSARY);
+  const file = layoutOf(root).glossaryFile;
   if (!existsSync(file)) return { exists: false, rows: [], checked: false };
   const text = readFileSync(file, "utf8");
   const entries = parseGlossary(text);
@@ -500,7 +512,7 @@ export class GlossaryTermTaken extends Error {
  * The file stays a draft in the working copy until committed.
  */
 export function addGlossaryTerm(root: string, t: NewTerm, today = new Date()): { readonly line: number } {
-  const file = join(root, GLOSSARY);
+  const file = layoutOf(root).glossaryFile;
   const text = existsSync(file) ? readFileSync(file, "utf8") : HEADER;
   if (parseGlossary(text).some((e) => e.term.toLowerCase() === t.term.trim().toLowerCase()))
     throw new GlossaryTermTaken(t.term.trim());
@@ -512,7 +524,7 @@ export function addGlossaryTerm(root: string, t: NewTerm, today = new Date()): {
     while (last + 1 < lines.length && (lines[last + 1] as string).trim().startsWith("|")) last += 1;
   const columns = head >= 0 ? (lines[head] as string).split("|").slice(1, -1).length : 6;
   const date = today.toISOString().slice(0, 10);
-  mkdirSync(join(root, ".jarvis", "knowledge"), { recursive: true });
+  mkdirSync(dirname(file), { recursive: true });
   const cells = [
     cell(t.term),
     t.synonyms.map(cell).join(", "),

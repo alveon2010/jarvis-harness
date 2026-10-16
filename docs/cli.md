@@ -36,6 +36,8 @@
 
 Создаёт `~/.jarvis` (config.yaml с шаблоном, базу, каталоги) и `.jarvis/` в проекте (project.yaml,
 knowledge/, standards/, skills/ с README, записи в `.gitignore`). Существующие файлы не перезаписывает.
+В репе сервиса из карты репы знаний (ADR-0025) проектную часть не создаёт: его конфигурация и знание там,
+`init` пишет «service <имя> of <репа знаний>».
 
 ### `jarvis onboard [--dry-run] [--refresh] [--apply-config] [--no-graph] [--module <path> [--note <текст>]]`
 

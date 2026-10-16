@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { dirname, join } from "node:path";
 import { clock } from "../../app/activity.ts";
 import { applyRun } from "../../app/applyRun.ts";
 import { nextWorkflowOf } from "../../app/continuation.ts";
@@ -16,7 +16,8 @@ import { resolveActor } from "../../core/actor/resolve.ts";
 import type { Actor } from "../../core/domain/actor.ts";
 import type { ApprovalDecision } from "../../core/domain/artifact.ts";
 import type { FreshSource, Run, WorkspaceRef } from "../../core/domain/run.ts";
-import { recordInputs } from "../../evals/inputs.ts";
+import { layoutOf, rootRelative, versionedAt } from "../../core/paths.ts";
+import { recordInputs, recordKnowledgeRepoInputs } from "../../evals/inputs.ts";
 import { daemonTick } from "../../orchestration/daemon.ts";
 import { interruption } from "../../orchestration/interrupt.ts";
 import { leaseOwner } from "../../orchestration/lease.ts";
@@ -509,6 +510,7 @@ async function startContinuation(
       startAt,
       carried: carried.length,
       inputs: await recordInputs(workspace.repoRoot, workspace.baseCommit),
+      ...(await knowledgeRepoInputsOf(workspace.repoRoot)),
     },
   });
   const st = ctx.out.style;
@@ -585,6 +587,7 @@ export async function runWork(
         ...(run.options ? { options: run.options } : {}),
         // the configuration and knowledge it starts with, for an eval case made later (src/evals/inputs.ts)
         inputs: await recordInputs(workspace.repoRoot, workspace.baseCommit),
+        ...(await knowledgeRepoInputsOf(workspace.repoRoot)),
       },
     });
     if (options.noRun) {
@@ -669,7 +672,9 @@ export async function runApprove(ctx: CliContext, ref: string, options: ApproveO
     let committed: string | undefined;
     if (options.commit) {
       const root = loaded.project?.root ?? ctx.cwd;
-      const file = join(root, ".jarvis", "approvals", run.task, `${type}.json`);
+      // a service's approvals are the knowledge repository's, committed there (ADR-0025 §1)
+      const layout = layoutOf(root);
+      const file = join(layout.approvalsDir, run.task, `${type}.json`);
       mkdirSync(dirname(file), { recursive: true });
       writeFileSync(
         file,
@@ -686,8 +691,9 @@ export async function runApprove(ctx: CliContext, ref: string, options: ApproveO
           2,
         )}\n`,
       );
-      const rel = relative(root, file);
-      const add = await git(["add", rel], root);
+      const at = versionedAt(layout, rootRelative(root, file));
+      const rel = at.path;
+      const add = await git(["add", rel], at.cwd);
       const commit =
         add.code === 0
           ? await git(
@@ -698,7 +704,7 @@ export async function runApprove(ctx: CliContext, ref: string, options: ApproveO
                 "-m",
                 `jarvis: ${decision} ${type} for ${run.task}\n\nJarvis-Run: ${run.id}\nJarvis-Kind: approval`,
               ],
-              root,
+              at.cwd,
               { env: gitIdentityEnv(ctx.env, { name: actor.display ?? actor.id, email: actor.id }) },
             )
           : add;
@@ -1274,4 +1280,10 @@ export async function runForget(
     prompt?.close();
     await runtime.close();
   }
+}
+
+/** A service's knowledge repository as the run starts with it, for `run.created` (ADR-0025 §5). */
+async function knowledgeRepoInputsOf(repoRoot: string) {
+  const knowledgeRepo = await recordKnowledgeRepoInputs(repoRoot);
+  return knowledgeRepo ? { knowledgeRepo } : {};
 }

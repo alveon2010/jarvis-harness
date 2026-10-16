@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative, sep } from "node:path";
+import { layoutOf } from "../core/paths.ts";
 import { git } from "../tools/local/exec.ts";
 
 /**
@@ -56,4 +57,55 @@ export function recordedInputs(payload: Record<string, unknown> | undefined): Ru
       (e): e is [string, string] => typeof e[1] === "string" && /^[0-9a-f]{40,64}$/.test(e[1]),
     ),
   );
+}
+
+/** A knowledge repository's part of a run's inputs (ADR-0025 §5): its commit and what differs from it. */
+export interface KnowledgeRepoInputs {
+  readonly root: string;
+  readonly commit: string;
+  readonly service?: string;
+  /** Path in the knowledge repository → blob id, for its files the commit does not hold as they are. */
+  readonly files: RunInputs;
+}
+
+/**
+ * For a service of a knowledge repository: the knowledge repository's commit, and its configuration
+ * and knowledge files that differ from it, kept in its object store. Undefined for a repository with
+ * its own `.jarvis` or when git fails.
+ */
+export async function recordKnowledgeRepoInputs(repoRoot: string): Promise<KnowledgeRepoInputs | undefined> {
+  const layout = layoutOf(repoRoot);
+  const meta = layout.meta;
+  if (!meta) return undefined;
+  try {
+    const commit = (await git(["rev-parse", "HEAD"], meta.root)).stdout.trim();
+    if (!commit) return undefined;
+    const rel = (abs: string) => relative(meta.root, abs).split(sep).join("/");
+    const paths = [".jarvis", rel(layout.knowledgeDir), ...(meta.service ? [rel(layout.glossaryFile)] : [])];
+    const status = await git(["status", "--porcelain", "--untracked-files=all", "--", ...paths], meta.root);
+    const files: Record<string, string> = {};
+    for (const line of status.stdout.split("\n").filter((l) => l.length > 3)) {
+      const path = line.slice(3).replace(/^"|"$/g, "");
+      // shared documents at the top of knowledge/ too; other services' folders are not this run's
+      if (!existsSync(join(meta.root, path)) || statSync(join(meta.root, path)).isDirectory()) continue;
+      const r = await git(["hash-object", "-w", "--", path], meta.root);
+      if (r.code === 0 && r.stdout.trim()) files[path] = r.stdout.trim();
+    }
+    // the shared documents next to the services' folders
+    if (meta.service) {
+      const top = await git(
+        ["status", "--porcelain", "--untracked-files=all", "--", ":(glob)knowledge/*.md"],
+        meta.root,
+      );
+      for (const line of top.stdout.split("\n").filter((l) => l.length > 3)) {
+        const path = line.slice(3).replace(/^"|"$/g, "");
+        if (files[path] || !existsSync(join(meta.root, path))) continue;
+        const r = await git(["hash-object", "-w", "--", path], meta.root);
+        if (r.code === 0 && r.stdout.trim()) files[path] = r.stdout.trim();
+      }
+    }
+    return { root: meta.root, commit, ...(meta.service ? { service: meta.service } : {}), files };
+  } catch {
+    return undefined;
+  }
 }

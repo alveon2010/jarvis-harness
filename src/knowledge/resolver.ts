@@ -3,6 +3,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import type { KnowledgeConfig } from "../core/config/schema.ts";
+import { layoutOf } from "../core/paths.ts";
 import { capabilityMatches } from "../tools/registry.ts";
 import { globMatches, parseFrontMatter } from "./frontmatter.ts";
 import { loadSkills, type Skill, skillRef } from "./skills.ts";
@@ -31,11 +32,17 @@ export interface KnowledgeDoc {
   readonly tags: string[];
 }
 
+/** Name prefix of a knowledge repository's shared documents (`landscape.md` → `common/landscape.md`). */
+export const SHARED_KNOWLEDGE_PREFIX = "common/";
+
 export function loadKnowledgeDocs(roots: KnowledgeRoots): KnowledgeDoc[] {
-  const dirs = [roots.projectRoot ? join(roots.projectRoot, ".jarvis", "knowledge") : undefined];
+  const layout = roots.projectRoot ? layoutOf(roots.projectRoot) : undefined;
+  // the project's documents, and a knowledge repository's shared ones beside its services' (ADR-0025 §4)
+  const dirs: Array<readonly [string, string]> = layout ? [[layout.knowledgeDir, ""]] : [];
+  if (layout?.meta?.service) dirs.push([layout.meta.knowledgeRoot, SHARED_KNOWLEDGE_PREFIX]);
   const out: KnowledgeDoc[] = [];
-  for (const dir of dirs) {
-    if (!dir || !existsSync(dir)) continue;
+  for (const [dir, prefix] of dirs) {
+    if (!existsSync(dir)) continue;
     // glossary.md is a lookup table for query expansion (ADR-0015 §3), not a document for agents
     for (const f of readdirSync(dir)
       .filter((x) => x.endsWith(".md") && x !== "README.md" && x !== "glossary.md")
@@ -45,7 +52,7 @@ export function loadKnowledgeDocs(roots: KnowledgeRoots): KnowledgeDoc[] {
       const fm = KnowledgeFrontMatter.safeParse(data);
       const meta = fm.success ? fm.data : { tags: [], paths: [], stacks: [], agents: [] };
       out.push({
-        name: f,
+        name: `${prefix}${f}`,
         text: body.trim(),
         sha: createHash("sha256").update(raw).digest("hex").slice(0, 12),
         scope: { stacks: meta.stacks, paths: meta.paths, agents: meta.agents },

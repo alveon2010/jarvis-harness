@@ -2,10 +2,18 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import YAML from "yaml";
 import type { z } from "zod";
-import { discoverProject, type JarvisHome, jarvisHome, type ProjectPaths } from "../paths.ts";
+import {
+  discoverProject,
+  type JarvisHome,
+  jarvisHome,
+  metaProjectPaths,
+  type ProjectPaths,
+  rememberLayout,
+} from "../paths.ts";
 import { envLayers, envOverrides } from "./env.ts";
 import { ConfigError, type ConfigIssue, zodIssues } from "./errors.ts";
 import { type ConfigLayer, isPlainObject, mergeLayers, type PlainObject } from "./merge.ts";
+import { findKnowledgeRepo, folderOf, isKnowledgeRepoConfig, serviceOf, serviceRepos } from "./meta.ts";
 import { applyProfile } from "./profiles.ts";
 import {
   CONFIG_VERSION,
@@ -41,7 +49,19 @@ export interface LoadedConfig {
   readonly files: { readonly user: ConfigFileInfo; readonly project?: ConfigFileInfo };
   readonly home: JarvisHome;
   readonly project?: ProjectPaths;
+  /** Set when the project's Jarvis files are a knowledge repository's (ADR-0025). */
+  readonly meta?: LoadedMeta;
   readonly warnings: readonly string[];
+}
+
+/** The knowledge repository a configuration came from (ADR-0025 §2, §3). */
+export interface LoadedMeta {
+  readonly root: string;
+  readonly configFile: string;
+  /** The service this repository is; none when the knowledge repository itself is the project. */
+  readonly service?: string;
+  /** Every service's repository on this machine. */
+  readonly repos: Readonly<Record<string, string>>;
 }
 
 export const SOURCE_DEFAULT = "default";
@@ -148,15 +168,46 @@ export async function loadConfig(options: LoadOptions = {}): Promise<LoadedConfi
   const env = options.env ?? process.env;
   const cwd = options.cwd ?? process.cwd();
   const home = jarvisHome(env, options.homeDir ?? homedir());
-  const project = discoverProject(cwd);
+  let project = discoverProject(cwd);
   const warnings: string[] = [];
   const issues: ConfigIssue[] = [];
+  const homeDir = options.homeDir ?? homedir();
 
   const userSource = `user:${home.configFile}`;
   const user = await readYamlFile(home.configFile);
   if (user.exists) {
     issues.push(...checkVersion(user.value, userSource));
     if (issues.length === 0) issues.push(...validateFile(UserConfigSchema, user.value, userSource));
+  }
+  const userValue = isPlainObject(user.value) ? user.value : {};
+
+  // ADR-0025 §3: a repository without .jarvis may be a service of a knowledge repository next to it
+  let meta: LoadedMeta | undefined;
+  if (project && !project.hasConfig && issues.length === 0) {
+    const metaRoot = findKnowledgeRepo(
+      project.root,
+      env,
+      typeof userValue.knowledgeRepo === "string" ? userValue.knowledgeRepo : undefined,
+      homeDir,
+    );
+    if (metaRoot) {
+      const configFile = metaProjectPaths(project.root, metaRoot, undefined).configFile;
+      const read = await readYamlFile(configFile);
+      const repos = serviceRepos(
+        metaRoot,
+        isPlainObject(read.value) ? read.value : {},
+        isPlainObject(userValue.repos) ? (userValue.repos as Record<string, string>) : undefined,
+        homeDir,
+      );
+      const service = serviceOf(project.root, repos);
+      if (service) {
+        project = metaProjectPaths(project.root, metaRoot, service);
+        meta = { root: metaRoot, configFile, service, repos };
+      } else
+        warnings.push(
+          `${project.root} is not a service of the knowledge repository ${metaRoot}: add services.${folderOf(project.root)} to ${configFile} (or repos.<service> to ${home.configFile} when it lies elsewhere)`,
+        );
+    }
   }
 
   let projectFile: ConfigFileInfo | undefined;
@@ -173,14 +224,35 @@ export async function loadConfig(options: LoadOptions = {}): Promise<LoadedConfi
       if (versionIssues.length === 0)
         issues.push(...validateFile(ProjectConfigSchema, read.value, projectSource));
     }
+    // the knowledge repository itself: its shared configuration is the project's
+    if (!meta && read.exists && isKnowledgeRepoConfig(read.value)) {
+      const repos = serviceRepos(
+        project.root,
+        read.value as PlainObject,
+        isPlainObject(userValue.repos) ? (userValue.repos as Record<string, string>) : undefined,
+        homeDir,
+      );
+      project = metaProjectPaths(project.root, project.root, undefined);
+      meta = { root: project.root, configFile: project.configFile, repos };
+    }
   }
   if (issues.length > 0) throw new ConfigError("invalid configuration", issues);
 
   const layers: ConfigLayer[] = [
     { name: SOURCE_DEFAULT, value: { version: CONFIG_VERSION } },
-    { name: userSource, value: stripVersion(user.value) },
+    { name: userSource, value: withoutKeys(stripVersion(user.value), ["knowledgeRepo", "repos"]) },
   ];
-  if (projectSource) layers.push({ name: projectSource, value: stripVersion(projectValue) });
+  if (projectSource)
+    layers.push({
+      name: projectSource,
+      value: withoutKeys(stripVersion(projectValue), ["repos", "services"]),
+    });
+  // the service's own keys over the shared ones
+  if (projectSource && meta?.service && isPlainObject(projectValue) && isPlainObject(projectValue.services)) {
+    const own = projectValue.services[meta.service];
+    if (isPlainObject(own))
+      layers.push({ name: `${projectSource}#services.${meta.service}`, value: withoutKeys(own, ["repo"]) });
+  }
 
   const fileMerge = mergeLayers(layers);
   layers.push(...envLayers(envOverrides(env, fileMerge.value)));
@@ -238,8 +310,13 @@ export async function loadConfig(options: LoadOptions = {}): Promise<LoadedConfi
     ? { user: { path: home.configFile, exists: user.exists }, project: projectFile }
     : { user: { path: home.configFile, exists: user.exists } };
 
+  // every service of the knowledge repository: a page or a run of another one finds its files too
+  if (meta)
+    for (const [name, path] of Object.entries(meta.repos))
+      rememberLayout(metaProjectPaths(path, meta.root, name));
+  if (project) rememberLayout(project);
   return project
-    ? { config, sources, files, home, project, warnings }
+    ? { config, sources, files, home, project, ...(meta ? { meta } : {}), warnings }
     : { config, sources, files, home, warnings };
 }
 
@@ -265,6 +342,11 @@ export function stripNulls(value: unknown): unknown {
     out[key] = stripNulls(child);
   }
   return out;
+}
+
+function withoutKeys(value: unknown, keys: readonly string[]): unknown {
+  if (!isPlainObject(value)) return value;
+  return Object.fromEntries(Object.entries(value).filter(([k]) => !keys.includes(k)));
 }
 
 function stripVersion(value: unknown): unknown {

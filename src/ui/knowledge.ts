@@ -35,7 +35,8 @@ export type KnowledgeTab =
   | "skills"
   | "glossary";
 
-export const ARCHITECTURE = ".jarvis/knowledge/architecture.md";
+/** The architecture document, by name: `.jarvis/knowledge/`, or a service's folder of the knowledge repository. */
+export const ARCHITECTURE = "architecture.md";
 
 export function knowledgeTabs(current: KnowledgeTab, counts?: KnowledgeCounts): Html {
   const tab = (id: KnowledgeTab, href: string, label: string, count?: number) =>

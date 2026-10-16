@@ -1,5 +1,6 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
+import { serviceOfRepo } from "../../core/config/meta.ts";
 import { discoverProject, jarvisHome, projectPaths } from "../../core/paths.ts";
 import { openDatabase } from "../../storage/index.ts";
 import type { CliContext } from "../context.ts";
@@ -24,6 +25,8 @@ export interface InitReport {
   readonly skipped: string[];
   readonly home: string;
   readonly project?: string;
+  /** The project is a service of a knowledge repository: nothing is created in it. */
+  readonly service?: { readonly name: string; readonly knowledgeRepo: string };
   readonly schemaVersion?: number;
 }
 
@@ -66,8 +69,17 @@ export async function runInit(ctx: CliContext, options: InitOptions = {}): Promi
   }
 
   let projectRoot: string | undefined;
-  if (!options.userOnly) {
-    const discovered = discoverProject(ctx.cwd);
+  let service: InitReport["service"];
+  const discovered = options.userOnly ? undefined : discoverProject(ctx.cwd);
+  // a service of a knowledge repository keeps no Jarvis files of its own (ADR-0025 §1)
+  const ofMeta =
+    discovered && !discovered.hasConfig
+      ? serviceOfRepo(discovered.root, ctx.env, ctx.homeDir, home.configFile)
+      : undefined;
+  if (ofMeta && discovered) {
+    projectRoot = discovered.root;
+    service = { name: ofMeta.service, knowledgeRepo: ofMeta.metaRoot };
+  } else if (!options.userOnly) {
     const project = discovered ?? projectPaths(ctx.cwd);
     projectRoot = project.root;
     ensureDir(project.jarvisDir, report);
@@ -102,7 +114,7 @@ export async function runInit(ctx: CliContext, options: InitOptions = {}): Promi
     }
   }
 
-  const base = { created, skipped, home: home.root };
+  const base = { created, skipped, home: home.root, ...(service ? { service } : {}) };
   const withProject = projectRoot ? { ...base, project: projectRoot } : base;
   return schemaVersion === undefined ? withProject : { ...withProject, schemaVersion };
 }
@@ -112,6 +124,10 @@ export function renderInit(ctx: CliContext, report: InitReport): void {
   const show = (p: string) => (p.startsWith(ctx.cwd) ? relative(ctx.cwd, p) || "." : p);
   out.line(`jarvis home: ${report.home}`);
   if (report.project) out.line(`project:     ${report.project}`);
+  if (report.service)
+    out.line(
+      `service:     ${report.service.name} of ${report.service.knowledgeRepo} — its configuration and knowledge are there, nothing is created here`,
+    );
   if (report.schemaVersion !== undefined) out.line(`database:    schema v${report.schemaVersion}`);
   if (report.created.length > 0) {
     out.line();

@@ -127,14 +127,57 @@ export async function runDoctor(ctx: CliContext): Promise<DoctorReport> {
         ),
       );
     } else if (!loaded.files.project?.exists) {
+      // next to a knowledge repository that does not map this one (ADR-0025 §3)
+      const unmapped = loaded.warnings.find((w) =>
+        w.includes("is not a service of the knowledge repository"),
+      );
+      checks.push(
+        unmapped
+          ? check("project", "warn", "project", unmapped, "map it, or `jarvis init` for a .jarvis of its own")
+          : check(
+              "project",
+              "warn",
+              "project",
+              `${loaded.project.root} has no .jarvis/project.yaml`,
+              "run `jarvis init`",
+            ),
+      );
+    } else if (loaded.meta) {
+      const meta = loaded.meta;
       checks.push(
         check(
           "project",
-          "warn",
+          "ok",
           "project",
-          `${loaded.project.root} has no .jarvis/project.yaml`,
-          "run `jarvis init`",
+          meta.service
+            ? `${loaded.project.root} — service ${meta.service} of the knowledge repository ${meta.root}`
+            : `knowledge repository ${meta.root}: ${Object.keys(meta.repos).length} services`,
         ),
+      );
+      // the map as this machine has it: every repository there, no two services on one folder
+      const missing = Object.entries(meta.repos).filter(([, path]) => !existsSync(path));
+      const byPath = new Map<string, string[]>();
+      for (const [name, path] of Object.entries(meta.repos))
+        byPath.set(path, [...(byPath.get(path) ?? []), name]);
+      const shared = [...byPath.values()].filter((names) => names.length > 1);
+      checks.push(
+        missing.length === 0 && shared.length === 0
+          ? check(
+              "knowledge.repos",
+              "ok",
+              "service map",
+              `${Object.keys(meta.repos).length} repositories found`,
+            )
+          : check(
+              "knowledge.repos",
+              "warn",
+              "service map",
+              [
+                ...missing.map(([name, path]) => `${name}: no repository at ${path}`),
+                ...shared.map((names) => `${names.join(", ")} map to one folder`),
+              ].join("; "),
+              `services.<name>.repo in ${meta.configFile}, or repos.<name> in ${home.configFile} for this machine`,
+            ),
       );
     } else {
       checks.push(check("project", "ok", "project", loaded.project.root));

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { dirname, join, posix } from "node:path";
 import type {
   FileFacts,
@@ -7,6 +7,7 @@ import type {
   GraphNode,
   ProjectGraphExtractor,
 } from "../../core/capabilities/contracts.ts";
+import { mainCheckoutOf } from "../../core/paths.ts";
 import { git } from "../../tools/local/exec.ts";
 import { contentHashOf, FactsCache, type GraphStore, type Snapshot } from "./store.ts";
 
@@ -33,28 +34,6 @@ export interface UpdateResult {
   readonly extracted: number;
   readonly cacheHits: number;
   readonly skipped: number;
-}
-
-/**
- * The main checkout of a repository: a linked worktree (`.git` is a file pointing into
- * `<main>/.git/worktrees/<name>`) maps to its main checkout, so the graph built for the project is
- * the one agents find from a run's worktree.
- */
-export function mainCheckoutOf(path: string): string {
-  try {
-    const dotGit = join(path, ".git");
-    // a run's clone (workspace.checkout: clone) names the repository it came from
-    const named = join(dotGit, "jarvis-main");
-    if (existsSync(named)) return readFileSync(named, "utf8").trim() || path;
-    if (statSync(dotGit).isFile()) {
-      const pointer = /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGit, "utf8"))?.[1]?.trim();
-      const m = pointer ? /^(.*)[\\/]\.git[\\/]worktrees[\\/][^\\/]+$/.exec(pointer) : undefined;
-      if (m?.[1]) return m[1];
-    }
-  } catch {
-    // not a git checkout: the path itself identifies the repository
-  }
-  return path;
 }
 
 export function repoIdOf(repoRoot: string): string {
@@ -414,3 +393,5 @@ export function symbolOf(snapshot: Snapshot, name: string): SymbolFacts[] {
     };
   });
 }
+
+export { mainCheckoutOf };

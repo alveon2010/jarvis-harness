@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { z } from "zod";
+import { layoutOf } from "../core/paths.ts";
 import type { AgentRequirements } from "../models/router.ts";
 
 /**
@@ -65,7 +66,7 @@ export class AgentRegistry {
     const base = this.agents.get(id);
     if (!base) return undefined;
     if (!this.projectRoot) return base;
-    const override = join(this.projectRoot, ".jarvis", "agents", `${id}.md`);
+    const override = join(layoutOf(this.projectRoot).jarvisDir, "agents", `${id}.md`);
     if (!existsSync(override)) return base;
     return { ...base, instructions: readFileSync(override, "utf8").trim() };
   }

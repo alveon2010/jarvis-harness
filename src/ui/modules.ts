@@ -2,6 +2,7 @@ import { type BudgetWait, budgetWaitOf, whenText } from "../app/budgetWait.ts";
 import { type Candidate, candidatesOf, existingAt, targetOf } from "../app/candidates.ts";
 import type { Runtime } from "../app/runtime.ts";
 import type { Run } from "../core/domain/run.ts";
+import { rootRelative } from "../core/paths.ts";
 import { moduleCheckOf, moduleOfRun } from "../onboarding/moduleRun.ts";
 import { findNode, isAuxFolder, type ModuleTree, TOO_BIG, type TreeNode } from "../onboarding/tree.ts";
 import { shortRunId } from "../storage/runStore.ts";
@@ -85,7 +86,7 @@ export function researchOf(
         candidate,
         file:
           str(runtime.events.list({ runId: run.id, kind: "knowledge.promoted" }).at(-1)?.payload?.file) ??
-          targetOf(root, candidate, undefined).slice(root.length + 1),
+          rootRelative(root, targetOf(root, candidate, undefined)),
       });
     else if (candidate?.decision === "reject") out.set(module, { kind: "rejected", run, candidate });
     else if (candidate) out.set(module, { kind: "candidate", run, candidate });

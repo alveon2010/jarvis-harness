@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { layoutOf } from "../../core/paths.ts";
 
 /**
  * Glossary (ADR-0015 §3): `.jarvis/knowledge/glossary.md`, a markdown table
@@ -43,7 +43,7 @@ export function parseGlossary(markdown: string): GlossaryEntry[] {
 
 export function loadGlossary(projectRoot: string | undefined): GlossaryEntry[] {
   if (!projectRoot) return [];
-  const file = join(projectRoot, ".jarvis", "knowledge", "glossary.md");
+  const file = layoutOf(projectRoot).glossaryFile;
   return existsSync(file) ? parseGlossary(readFileSync(file, "utf8")) : [];
 }
 

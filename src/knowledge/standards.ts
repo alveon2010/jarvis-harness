@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { z } from "zod";
 import type { KnowledgeSource } from "../core/config/schema.ts";
+import { layoutOf } from "../core/paths.ts";
 import { parseFrontMatter } from "./frontmatter.ts";
 
 /**
@@ -125,7 +126,7 @@ export interface KnowledgeRoots {
 /** Project standards first; user-level ones only when the id is not taken by the project. */
 export function loadStandards(roots: KnowledgeRoots): Standard[] {
   const project = roots.projectRoot
-    ? readDir(join(roots.projectRoot, ".jarvis", "standards"), "project")
+    ? readDir(join(layoutOf(roots.projectRoot).jarvisDir, "standards"), "project")
     : [];
   const ids = new Set(project.map((s) => s.id));
   const user = roots.userRoot

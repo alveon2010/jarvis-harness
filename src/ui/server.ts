@@ -31,7 +31,6 @@ import {
   addGlossaryTerm,
   checkSymbols,
   docsOf,
-  GLOSSARY,
   GlossaryTermTaken,
   type GlossaryView,
   glossaryOf,
@@ -50,6 +49,7 @@ import { humanMove } from "../cli/commands/human.ts";
 import type { Actor } from "../core/domain/actor.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import { isTerminal, type Run } from "../core/domain/run.ts";
+import { layoutOf, rootRelative } from "../core/paths.ts";
 import { caseOfRun, runToCase } from "../evals/runToCase.ts";
 import {
   answersText,
@@ -585,6 +585,8 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
   const knownRepos = (): string[] => [
     ...new Set([
       ...(options.projectRoot ? [options.projectRoot] : []),
+      // a knowledge repository's services on this machine (ADR-0025 §2)
+      ...Object.values(runtime.loaded.meta?.repos ?? {}).filter((path) => existsSync(path)),
       ...runtime.runs.list({ includeTerminal: true, limit: 500 }).map((x) => x.workspace.repoRoot),
     ]),
   ];
@@ -594,10 +596,28 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
   const roots = () => knowledgeRootsOf(runtime.loaded, root);
   let treeCache: { key: string; tree: Promise<ModuleTree> } | undefined;
   /** The tree for HEAD and the knowledge as it is now (an accepted draft changes the coverage). */
+  /**
+   * Where the knowledge drafts are versioned: the repository's `.jarvis/`, or for a service its
+   * folders in the knowledge repository (ADR-0025 §1), committed there and brought in by a PR.
+   */
+  const draftsAt = (): { readonly cwd: string; readonly paths: string[] } => {
+    const layout = layoutOf(root as string);
+    if (!layout.meta)
+      return { cwd: root as string, paths: [".jarvis/knowledge", ".jarvis/standards", ".jarvis/skills"] };
+    const rel = (abs: string) =>
+      relative(layout.meta?.root as string, abs)
+        .split(sep)
+        .join("/");
+    return {
+      cwd: layout.meta.root,
+      paths: [rel(layout.knowledgeDir), rel(layout.glossaryFile), ".jarvis/standards", ".jarvis/skills"],
+    };
+  };
   const treeOf = async (): Promise<ModuleTree> => {
     const dir = root as string;
     const head = (await git(["rev-parse", "HEAD"], dir)).stdout.trim();
-    const knowledge = await git(["status", "--porcelain", "--", ".jarvis/knowledge"], dir);
+    const at = draftsAt();
+    const knowledge = await git(["status", "--porcelain", "--", ...at.paths.slice(0, 2)], at.cwd);
     const key = `${head}|${knowledge.stdout}`;
     if (treeCache?.key !== key) {
       const tree = moduleTree(roots());
@@ -609,18 +629,8 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
     return treeCache.tree;
   };
   const draftsOf = async (): Promise<Draft[]> => {
-    const r = await git(
-      [
-        "status",
-        "--porcelain",
-        "--untracked-files=all",
-        "--",
-        ".jarvis/knowledge",
-        ".jarvis/standards",
-        ".jarvis/skills",
-      ],
-      root as string,
-    );
+    const at = draftsAt();
+    const r = await git(["status", "--porcelain", "--untracked-files=all", "--", ...at.paths], at.cwd);
     if (r.code !== 0) return [];
     return r.stdout
       .split("\n")
@@ -646,7 +656,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       const d = await git(["diff", "--no-index", "--no-color", "--no-ext-diff", "--", file, next], dir, {
         maxBytes: 2 * 1024 * 1024,
       });
-      const rel = file.slice(root.length + 1);
+      const rel = rootRelative(root, file);
       return { file: rel, diff: parseDiff(d.stdout).map((f) => ({ ...f, path: rel })) };
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -829,9 +839,11 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       const files = drafts.map((d) => d.path);
       const names = files.map((f) => f.replace(/^.*\//, "").replace(/\.md$/, "")).slice(0, 4);
       const message = `knowledge: ${names.join(", ")}${files.length > names.length ? ` and ${files.length - names.length} more` : ""}`;
-      const add = await git(["add", "-A", "--", ...files], root);
+      const at = draftsAt();
+      const add = await git(["add", "-A", "--", ...files], at.cwd);
       // the author is the repository's git config, as for any commit made by hand
-      const commit = add.code === 0 ? await git(["commit", "-q", "-m", message, "--", ...files], root) : add;
+      const commit =
+        add.code === 0 ? await git(["commit", "-q", "-m", message, "--", ...files], at.cwd) : add;
       if (commit.code !== 0) {
         runtime.log.error("ui.commit", { message: commit.stderr.slice(0, 2000) });
         return redirect(r, backTo("commit-failed"));
@@ -840,12 +852,16 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
     }
     if (at === "/knowledge/open") {
       const file = (form.get("file") ?? "").replace(/^\/+/, "");
-      // a knowledge file: under .jarvis/, or a document or skill of knowledge.sources
+      // a knowledge file: under .jarvis/ (the knowledge repository's for a service), or a document or
+      // skill of knowledge.sources
+      const abs = resolvePath(root, file);
+      const layout = layoutOf(root);
+      const inside = (dir: string) => abs.startsWith(resolvePath(dir) + sep);
       const known =
-        !file.includes("..") &&
-        (file.startsWith(".jarvis/") ||
-          (await docsOf(roots())).some((d) => d.path === file) ||
-          skillsOf(roots()).some((x) => x.path === file));
+        inside(layout.jarvisDir) ||
+        (layout.meta ? inside(layout.meta.knowledgeRoot) : false) ||
+        (await docsOf(roots())).some((d) => d.path === file) ||
+        skillsOf(roots()).some((x) => x.path === file);
       if (!known || !existsSync(joinPath(root, file))) return redirect(r, backTo("no-file"));
       const editor = options.open?.(root, [{ path: joinPath(root, file) }]);
       return redirect(
@@ -926,7 +942,7 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
   let glossaryCache: { key: string; view: Promise<GlossaryView> } | undefined;
   const glossaryView = async (): Promise<GlossaryView> => {
     const dir = root as string;
-    const file = joinPath(dir, GLOSSARY);
+    const file = layoutOf(dir).glossaryFile;
     const head = (await git(["rev-parse", "HEAD"], dir)).stdout.trim();
     const st = existsSync(file) ? statSync(file) : undefined;
     const key = `${head}|${st?.mtimeMs ?? 0}|${st?.size ?? 0}`;
@@ -988,14 +1004,15 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
     if (at === "/knowledge/docs") {
       const docs = await docsOf(roots(), usage);
       const want = q("doc");
-      const selected = want ? docs.find((d) => d.path === want) : docs[0];
+      // by path, or by name (`?doc=architecture.md` — wherever the project keeps its knowledge)
+      const selected = want ? docs.find((d) => d.path === want || d.name === want) : docs[0];
       const content = docsContent(
         {
           counts,
           docs,
           ...(selected ? { selected } : {}),
           ...(want ? { path: want } : {}),
-          architecture: selected?.path === ARCHITECTURE,
+          architecture: selected?.name === ARCHITECTURE,
         },
         actions,
         notice,

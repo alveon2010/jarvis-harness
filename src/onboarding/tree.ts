@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { layoutOf, rootRelative } from "../core/paths.ts";
 import { globMatches, parseFrontMatter } from "../knowledge/frontmatter.ts";
 import { loadSourceDocuments } from "../knowledge/sources.ts";
 import type { KnowledgeRoots } from "../knowledge/standards.ts";
@@ -88,7 +89,7 @@ export function docScopes(roots: KnowledgeRoots): DocScope[] {
   const out: DocScope[] = [];
   const root = roots.projectRoot;
   if (!root) return out;
-  const dir = join(root, ".jarvis", "knowledge");
+  const dir = layoutOf(root).knowledgeDir;
   let names: string[] = [];
   try {
     names = readdirSync(dir).filter((n) => n.endsWith(".md"));
@@ -109,7 +110,7 @@ export function docScopes(roots: KnowledgeRoots): DocScope[] {
     if (paths.length === 0) continue;
     const tags = Array.isArray(data.tags) ? data.tags : [];
     out.push({
-      path: `.jarvis/knowledge/${name}`,
+      path: rootRelative(root, join(dir, name)),
       paths,
       generated: text.includes(MODULE_MARKER) || text.includes(ONBOARD_MARKER),
       source: false,

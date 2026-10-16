@@ -1,6 +1,6 @@
-import { existsSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 
 /** Layout of `~/.jarvis` (ADR-0001 §3). */
 export interface JarvisHome {
@@ -30,7 +30,12 @@ export function jarvisHome(env: NodeJS.ProcessEnv = process.env, home: string = 
   };
 }
 
-/** Layout of `<project>/.jarvis` (ADR-0001 §3). */
+/**
+ * Layout of `<project>/.jarvis` (ADR-0001 §3). For a service of a knowledge repository (ADR-0025)
+ * `root` is still the code — the service's repository — while Jarvis's own files live in the
+ * knowledge repository: `jarvisDir` and `configFile` there, `knowledgeDir` its
+ * `knowledge/services/<service>/`.
+ */
 export interface ProjectPaths {
   readonly root: string;
   readonly jarvisDir: string;
@@ -40,6 +45,20 @@ export interface ProjectPaths {
   readonly approvalsDir: string;
   readonly hasConfig: boolean;
   readonly isGitRepo: boolean;
+  /** The glossary: the knowledge directory's, or the knowledge repository's shared one. */
+  readonly glossaryFile: string;
+  /** Set when the Jarvis files live in a knowledge repository. */
+  readonly meta?: MetaPaths;
+}
+
+/** Where a project's Jarvis files are when they live in a knowledge repository (ADR-0025 §1). */
+export interface MetaPaths {
+  /** The knowledge repository. */
+  readonly root: string;
+  /** Its `knowledge/`: shared documents at the top, a folder per service under `services/`. */
+  readonly knowledgeRoot: string;
+  /** The service `root` is; none when the knowledge repository itself is the project. */
+  readonly service?: string;
 }
 
 export const PROJECT_DIR = ".jarvis";
@@ -48,15 +67,38 @@ export const PROJECT_CONFIG = "project.yaml";
 export function projectPaths(root: string): ProjectPaths {
   const jarvisDir = join(root, PROJECT_DIR);
   const configFile = join(jarvisDir, PROJECT_CONFIG);
+  const knowledgeDir = join(jarvisDir, "knowledge");
   return {
     root,
     jarvisDir,
     configFile,
-    knowledgeDir: join(jarvisDir, "knowledge"),
+    knowledgeDir,
     specsDir: join(jarvisDir, "specs"),
     approvalsDir: join(jarvisDir, "approvals"),
     hasConfig: existsSync(configFile),
     isGitRepo: existsSync(join(root, ".git")),
+    glossaryFile: join(knowledgeDir, "glossary.md"),
+  };
+}
+
+/**
+ * The paths of a project whose Jarvis files live in the knowledge repository `metaRoot`: the code in
+ * `root` (a service's repository, or the knowledge repository itself when `service` is undefined).
+ */
+export function metaProjectPaths(root: string, metaRoot: string, service: string | undefined): ProjectPaths {
+  const jarvisDir = join(metaRoot, PROJECT_DIR);
+  const knowledgeRoot = join(metaRoot, "knowledge");
+  return {
+    root,
+    jarvisDir,
+    configFile: join(jarvisDir, PROJECT_CONFIG),
+    knowledgeDir: service ? join(knowledgeRoot, "services", service) : knowledgeRoot,
+    specsDir: join(jarvisDir, "specs"),
+    approvalsDir: service ? join(jarvisDir, "approvals", service) : join(jarvisDir, "approvals"),
+    hasConfig: true,
+    isGitRepo: existsSync(join(root, ".git")),
+    glossaryFile: join(knowledgeRoot, "glossary.md"),
+    meta: { root: metaRoot, knowledgeRoot, ...(service ? { service } : {}) },
   };
 }
 
@@ -83,4 +125,76 @@ export function discoverProject(cwd: string): ProjectPaths | undefined {
     dir = parent;
   }
   return gitRoot ? projectPaths(gitRoot) : undefined;
+}
+
+/**
+ * The repository a checkout belongs to: a run's clone names it in `.git/jarvis-main`, a worktree's
+ * `.git` file points into its `.git/worktrees/`; anything else is its own.
+ */
+export function mainCheckoutOf(path: string): string {
+  try {
+    const dotGit = join(path, ".git");
+    // a run's clone (workspace.checkout: clone) names the repository it came from
+    const named = join(dotGit, "jarvis-main");
+    if (existsSync(named)) return readFileSync(named, "utf8").trim() || path;
+    if (statSync(dotGit).isFile()) {
+      const pointer = /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGit, "utf8"))?.[1]?.trim();
+      const m = pointer ? /^(.*)[\\/]\.git[\\/]worktrees[\\/][^\\/]+$/.exec(pointer) : undefined;
+      if (m?.[1]) return m[1];
+    }
+  } catch {
+    // not a git checkout: the path itself identifies the repository
+  }
+  return path;
+}
+
+const layouts = new Map<string, ProjectPaths>();
+
+/**
+ * Remembers where a project's Jarvis files are, as loading the configuration found them, so code
+ * that has only a root (a run's checkout, a page's repository) reads knowledge, workflows and
+ * standards from the same place.
+ */
+export function rememberLayout(paths: ProjectPaths): void {
+  layouts.set(resolve(paths.root), paths);
+}
+
+/** Tests: start from no remembered layouts. */
+export function forgetLayouts(): void {
+  layouts.clear();
+}
+
+/**
+ * Where the Jarvis files of the project at `root` are: `<root>/.jarvis`, or — for a service of a
+ * knowledge repository, its run checkouts included — the knowledge repository's (ADR-0025 §1).
+ */
+export function layoutOf(root: string): ProjectPaths {
+  const at = resolve(root);
+  const known = layouts.get(at);
+  if (known) return known;
+  // a run's checkout of a service: the service's layout, with the checkout as the code
+  const main = layouts.get(resolve(mainCheckoutOf(at)));
+  if (main?.meta) return { ...main, root: at, isGitRepo: existsSync(join(at, ".git")) };
+  return projectPaths(at);
+}
+
+/**
+ * A Jarvis file as pages and commands name it: relative to the code root — `.jarvis/knowledge/a.md`,
+ * or for a service `../jarvis-knowledge/knowledge/services/orders-api/a.md` (joined with the root it
+ * is the file again).
+ */
+export function rootRelative(root: string, file: string): string {
+  return relative(resolve(root), resolve(file)).split(sep).join("/");
+}
+
+/** The repository a Jarvis file is versioned in and its path there: the knowledge repository's for a service. */
+export function versionedAt(
+  layout: ProjectPaths,
+  rel: string,
+): { readonly cwd: string; readonly path: string } {
+  const abs = resolve(layout.root, rel);
+  const meta = layout.meta?.root;
+  return meta && (abs === meta || abs.startsWith(meta + sep))
+    ? { cwd: meta, path: relative(meta, abs).split(sep).join("/") }
+    : { cwd: layout.root, path: rel };
 }

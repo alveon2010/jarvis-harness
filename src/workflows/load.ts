@@ -3,6 +3,7 @@ import { join } from "node:path";
 import YAML from "yaml";
 import { ConfigError, zodIssues } from "../core/config/errors.ts";
 import { type WorkflowDefinition, WorkflowDefinitionSchema } from "../core/domain/workflow.ts";
+import { layoutOf } from "../core/paths.ts";
 import { BUILTIN_WORKFLOWS } from "./builtin.ts";
 
 export function parseWorkflow(text: string, source: string): WorkflowDefinition {
@@ -23,7 +24,7 @@ export function loadWorkflows(projectRoot?: string): Map<string, WorkflowDefinit
   for (const [name, text] of Object.entries(BUILTIN_WORKFLOWS))
     map.set(name, parseWorkflow(text, `builtin:${name}`));
   if (projectRoot) {
-    const dir = join(projectRoot, ".jarvis", "workflows");
+    const dir = join(layoutOf(projectRoot).jarvisDir, "workflows");
     if (existsSync(dir)) {
       for (const file of readdirSync(dir)
         .filter((f) => /\.ya?ml$/.test(f))

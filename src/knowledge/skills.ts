@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
+import { layoutOf } from "../core/paths.ts";
 import { loadSourceDocuments, skillIdOf } from "./sources.ts";
 import type { KnowledgeRoots } from "./standards.ts";
 
@@ -134,7 +135,7 @@ export const BUILTIN_SKILLS: readonly Skill[] = [
 /** Project skills override built-ins by id; user skills only add ids nobody else defines. */
 export function loadSkills(roots: KnowledgeRoots): Skill[] {
   const project = roots.projectRoot
-    ? readSkillsDir(join(roots.projectRoot, ".jarvis", "skills"), "project")
+    ? readSkillsDir(join(layoutOf(roots.projectRoot).jarvisDir, "skills"), "project")
     : [];
   const projectIds = new Set(project.map((s) => s.id));
   // knowledge.sources: skills kept in the team's documentation; `.jarvis/skills` wins by id

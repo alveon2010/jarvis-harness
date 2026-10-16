@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { layoutOf } from "../core/paths.ts";
 import { prepareSuggestions } from "../interaction/answers.ts";
 import { questionsOf } from "../interaction/questions.ts";
 import { afterApproval, afterGateReached } from "../interaction/review/lifecycle.ts";
@@ -172,7 +173,7 @@ export function committedApproval(
   task: string,
   artifactType: string,
 ): CommittedApproval | undefined {
-  const path = join(projectRoot, ".jarvis", "approvals", task, `${artifactType}.json`);
+  const path = join(layoutOf(projectRoot).approvalsDir, task, `${artifactType}.json`);
   if (!existsSync(path)) return undefined;
   try {
     return JSON.parse(readFileSync(path, "utf8")) as CommittedApproval;
