@@ -82,11 +82,25 @@ export function projectPaths(root: string): ProjectPaths {
 }
 
 /**
+ * Where a knowledge repository keeps Jarvis's files: `.jarvis/` when it has one, else its root — the
+ * repository is Jarvis's only, so `project.yaml`, `knowledge/`, `workflows/`… may lie at the top.
+ */
+export function metaJarvisDir(metaRoot: string): string {
+  return existsSync(join(metaRoot, PROJECT_CONFIG)) &&
+    !existsSync(join(metaRoot, PROJECT_DIR, PROJECT_CONFIG))
+    ? metaRoot
+    : join(metaRoot, PROJECT_DIR);
+}
+
+/** A knowledge repository's `project.yaml`: at its root, or in its `.jarvis/`. */
+export const metaConfigFile = (metaRoot: string): string => join(metaJarvisDir(metaRoot), PROJECT_CONFIG);
+
+/**
  * The paths of a project whose Jarvis files live in the knowledge repository `metaRoot`: the code in
  * `root` (a service's repository, or the knowledge repository itself when `service` is undefined).
  */
 export function metaProjectPaths(root: string, metaRoot: string, service: string | undefined): ProjectPaths {
-  const jarvisDir = join(metaRoot, PROJECT_DIR);
+  const jarvisDir = metaJarvisDir(metaRoot);
   const knowledgeRoot = join(metaRoot, "knowledge");
   return {
     root,

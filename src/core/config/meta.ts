@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import YAML from "yaml";
-import { PROJECT_CONFIG, PROJECT_DIR } from "../paths.ts";
+import { metaConfigFile, metaJarvisDir } from "../paths.ts";
 import { isPlainObject, type PlainObject } from "./merge.ts";
 
 /**
@@ -14,11 +14,15 @@ export const KNOWLEDGE_REPO_ENV = "JARVIS_KNOWLEDGE";
 export const KNOWLEDGE_REPO_NAME = "jarvis-knowledge";
 
 function readProjectFile(root: string): PlainObject | undefined {
-  const file = join(root, PROJECT_DIR, PROJECT_CONFIG);
+  const file = metaConfigFile(root);
   if (!existsSync(file)) return undefined;
   try {
     const value: unknown = YAML.parse(readFileSync(file, "utf8"));
-    return isPlainObject(value) ? value : undefined;
+    if (!isPlainObject(value)) return undefined;
+    // a project.yaml at the top of some repository is Jarvis's only with its version and a map
+    if (metaJarvisDir(root) === root && !(typeof value.version === "number" && isKnowledgeRepoConfig(value)))
+      return undefined;
+    return value;
   } catch {
     return undefined;
   }
@@ -27,6 +31,20 @@ function readProjectFile(root: string): PlainObject | undefined {
 /** Whether a project.yaml is a knowledge repository's: it maps services. */
 export function isKnowledgeRepoConfig(value: unknown): boolean {
   return isPlainObject(value) && isPlainObject(value.services);
+}
+
+/** A knowledge repository's configuration at `root`, if `root` is one. */
+export function knowledgeConfigOf(root: string): PlainObject | undefined {
+  const value = readProjectFile(root);
+  return value && isKnowledgeRepoConfig(value) ? value : undefined;
+}
+
+/**
+ * Whether `root` is a knowledge repository with its files at the top (no `.jarvis/`): its
+ * `project.yaml` has a version and maps services.
+ */
+export function isTopLevelKnowledgeRepo(root: string): boolean {
+  return metaJarvisDir(root) === root && readProjectFile(root) !== undefined;
 }
 
 function expandHome(path: string, homeDir: string): string {

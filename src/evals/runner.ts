@@ -17,6 +17,7 @@ import { createRuntime, type Runtime } from "../app/runtime.ts";
 import { loadConfig } from "../core/config/load.ts";
 import { serviceRepos } from "../core/config/meta.ts";
 import type { Actor } from "../core/domain/actor.ts";
+import { metaConfigFile } from "../core/paths.ts";
 import type { CassetteMode } from "../models/cassette.ts";
 import { leaseOwner } from "../orchestration/lease.ts";
 import { git, runShell } from "../tools/local/exec.ts";
@@ -204,8 +205,7 @@ async function prepareServiceWorkspace(
   if (top.code !== 0)
     throw new Error(`case ${c.id}: ${c.dir} is in no git repository (the knowledge repository)`);
   const metaTop = top.stdout.trim();
-  const metaConfig =
-    (parse(readFileSync(join(metaTop, ".jarvis", "project.yaml"), "utf8")) as Record<string, unknown>) ?? {};
+  const metaConfig = (parse(readFileSync(metaConfigFile(metaTop), "utf8")) as Record<string, unknown>) ?? {};
   // where this machine has the service's repository: the personal map, then the knowledge repository's
   let userRepos: Record<string, string> | undefined;
   try {
@@ -224,7 +224,7 @@ async function prepareServiceWorkspace(
   await archive(c, metaTop, f.knowledge.commit, knowledgeRepo);
   const overlay = join(c.dir, f.knowledge.overlay);
   if (existsSync(overlay)) cpSync(overlay, knowledgeRepo, { recursive: true });
-  const file = join(knowledgeRepo, ".jarvis", "project.yaml");
+  const file = metaConfigFile(knowledgeRepo);
   const project = (parse(readFileSync(file, "utf8")) as Record<string, unknown>) ?? { version: 1 };
   const services = { ...((project.services as Record<string, Record<string, unknown>>) ?? {}) };
   const entry: Record<string, unknown> = {

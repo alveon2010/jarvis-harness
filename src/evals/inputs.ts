@@ -68,6 +68,9 @@ export interface KnowledgeRepoInputs {
   readonly files: RunInputs;
 }
 
+/** What a knowledge repository with its files at the top keeps of Jarvis's besides `knowledge/`. */
+const META_TOP_LEVEL = ["project.yaml", "workflows", "standards", "skills", "agents"];
+
 /**
  * For a service of a knowledge repository: the knowledge repository's commit, and its configuration
  * and knowledge files that differ from it, kept in its object store. Undefined for a repository with
@@ -81,7 +84,12 @@ export async function recordKnowledgeRepoInputs(repoRoot: string): Promise<Knowl
     const commit = (await git(["rev-parse", "HEAD"], meta.root)).stdout.trim();
     if (!commit) return undefined;
     const rel = (abs: string) => relative(meta.root, abs).split(sep).join("/");
-    const paths = [".jarvis", rel(layout.knowledgeDir), ...(meta.service ? [rel(layout.glossaryFile)] : [])];
+    // its own files: `.jarvis/`, or at the top of the repository the configuration and its folders
+    const own =
+      layout.jarvisDir === meta.root
+        ? META_TOP_LEVEL.filter((p) => existsSync(join(meta.root, p)))
+        : [rel(layout.jarvisDir)];
+    const paths = [...own, rel(layout.knowledgeDir), ...(meta.service ? [rel(layout.glossaryFile)] : [])];
     const status = await git(["status", "--porcelain", "--untracked-files=all", "--", ...paths], meta.root);
     const files: Record<string, string> = {};
     for (const line of status.stdout.split("\n").filter((l) => l.length > 3)) {

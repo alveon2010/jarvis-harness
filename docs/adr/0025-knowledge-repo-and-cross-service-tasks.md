@@ -32,9 +32,8 @@
 ```
 repos/
   jarvis-knowledge/            # мета-репа: владеет команда, изменения через PR
-    .jarvis/
-      project.yaml             # общее для всех сервисов + карта сервисов (§2)
-      workflows/
+    project.yaml               # общее для всех сервисов + карта сервисов (§2)
+    workflows/
     knowledge/
       landscape.md             # границы: домены, сервисы, владельцы — пишут люди
       glossary.md
@@ -48,6 +47,10 @@ repos/
   notify-api/
 ```
 
+Репа только для Jarvis, поэтому его файлы лежат в её корне; `.jarvis/` внутри тоже поддерживается и тогда
+главнее. `project.yaml` в корне считается файлом Jarvis, только если в нём есть `version` и `services:`. Создать
+такую репу с черновиком карты: `jarvis init --knowledge` (по git-репам рядом; код не читается).
+
 Всё, что Jarvis сейчас пишет в `.jarvis` репы (`onboard`, принятые модули, термины глоссария), пишется в мета-репу,
 в `knowledge/services/<сервис>/`. Сам Jarvis в мета-репе не коммитит: страница и `jarvis status` показывают, что в
 её рабочей копии изменено, и дают команду для ветки и PR. Сгенерированное (`contracts.*`, скан) пишется
@@ -58,7 +61,7 @@ repos/
 ### 2. Карта сервисов и конфигурация
 
 ```yaml
-# jarvis-knowledge/.jarvis/project.yaml
+# jarvis-knowledge/project.yaml
 version: 1
 # ключи верхнего уровня — общее для всех сервисов (как project.yaml сейчас)
 stack: [java, spring, mongo, kafka, gradle]
@@ -85,7 +88,7 @@ services:
 
 Запуск в репе сервиса без `.jarvis`:
 1. мета-репа: `JARVIS_KNOWLEDGE`, иначе `knowledgeRepo` личного конфига, иначе соседняя папка, где есть
-   `.jarvis/project.yaml` с `services:` (сначала `jarvis-knowledge`);
+   `project.yaml` (в корне или в `.jarvis/`) с `services:` (сначала `jarvis-knowledge`);
 2. сервис: тот, чья репа по карте (§2) — эта репа (`git rev-parse --show-toplevel`);
 3. не нашлось — предупреждение с подсказкой: `services.<имя папки>` в мета-репе или `repos` в личном конфиге.
    `jarvis doctor` проверяет карту целиком: каждая ли репа на месте, нет ли двух сервисов на одной папке.

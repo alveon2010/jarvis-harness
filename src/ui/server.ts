@@ -619,7 +619,12 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
         .join("/");
     return {
       cwd: layout.meta.root,
-      paths: [rel(layout.knowledgeDir), rel(layout.glossaryFile), ".jarvis/standards", ".jarvis/skills"],
+      paths: [
+        rel(layout.knowledgeDir),
+        rel(layout.glossaryFile),
+        rel(joinPath(layout.jarvisDir, "standards")),
+        rel(joinPath(layout.jarvisDir, "skills")),
+      ],
     };
   };
   const treeOf = async (): Promise<ModuleTree> => {

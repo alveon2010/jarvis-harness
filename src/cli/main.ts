@@ -22,6 +22,7 @@ import { runExplain } from "./commands/explain.ts";
 import { runHooksInstall, runHooksStatus, runHooksUninstall, runPrePush } from "./commands/hooks.ts";
 import { runAnswer, runAttach, runReviewStatus, runReviewSubmit, runThreads } from "./commands/human.ts";
 import { renderInit, runInit } from "./commands/init.ts";
+import { renderInitKnowledge, runInitKnowledge } from "./commands/initKnowledge.ts";
 import { runSkillsList, runStandardsCheck, runStandardsList } from "./commands/knowledge.ts";
 import {
   runKnowledgeIndex,
@@ -145,11 +146,26 @@ export function buildProgram(options: RunOptions = {}): Command {
     .description("create ~/.jarvis and .jarvis/ with templates, initialise the database")
     .option("--user-only", "only set up ~/.jarvis")
     .option("--project-only", "only set up the project")
-    .action(async (opts: { userOnly?: boolean; projectOnly?: boolean }) => {
-      const ctx = ctxFor();
-      const report = await runInit(ctx, opts);
-      ctx.out.result(report, () => renderInit(ctx, report));
-    });
+    .option(
+      "--knowledge",
+      "make this folder a knowledge repository of many services: project.yaml at its top, a map of the git repositories next to it (ADR-0025)",
+    )
+    .option("--repos <dir>", "with --knowledge: where the services' repositories lie (default ..)")
+    .action(
+      async (opts: { userOnly?: boolean; projectOnly?: boolean; knowledge?: boolean; repos?: string }) => {
+        const ctx = ctxFor();
+        if (opts.knowledge) {
+          const report = await runInitKnowledge(ctx, {
+            ...(opts.repos ? { repos: opts.repos } : {}),
+            ...(opts.projectOnly ? { projectOnly: true } : {}),
+          });
+          ctx.out.result(report, () => renderInitKnowledge(ctx, report));
+          return;
+        }
+        const report = await runInit(ctx, opts);
+        ctx.out.result(report, () => renderInit(ctx, report));
+      },
+    );
 
   program
     .command("doctor")

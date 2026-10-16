@@ -13,7 +13,14 @@ import {
 import { envLayers, envOverrides } from "./env.ts";
 import { ConfigError, type ConfigIssue, zodIssues } from "./errors.ts";
 import { type ConfigLayer, isPlainObject, mergeLayers, type PlainObject } from "./merge.ts";
-import { findKnowledgeRepo, folderOf, isKnowledgeRepoConfig, serviceOf, serviceRepos } from "./meta.ts";
+import {
+  findKnowledgeRepo,
+  folderOf,
+  isKnowledgeRepoConfig,
+  isTopLevelKnowledgeRepo,
+  serviceOf,
+  serviceRepos,
+} from "./meta.ts";
 import { applyProfile } from "./profiles.ts";
 import {
   CONFIG_VERSION,
@@ -190,6 +197,9 @@ export async function loadConfig(options: LoadOptions = {}): Promise<LoadedConfi
       : user.value
     : {};
 
+  // a knowledge repository with its files at the top: project.yaml there, no .jarvis/
+  if (project && !project.hasConfig && isTopLevelKnowledgeRepo(project.root))
+    project = metaProjectPaths(project.root, project.root, undefined);
   // ADR-0025 §3: a repository without .jarvis may be a service of a knowledge repository next to it
   let meta: LoadedMeta | undefined;
   if (project && !project.hasConfig && issues.length === 0) {

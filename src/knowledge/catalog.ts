@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import YAML from "yaml";
 import { isPlainObject } from "../core/config/merge.ts";
+import { metaConfigFile } from "../core/paths.ts";
 import type { CodeContracts } from "../design/codeContracts.ts";
 
 /**
@@ -220,7 +221,7 @@ function readJson(file: string): unknown {
 function pathAliases(metaRoot: string): Map<string, string> {
   const aliases = new Map<string, string>();
   try {
-    const value: unknown = YAML.parse(readFileSync(join(metaRoot, ".jarvis", "project.yaml"), "utf8"));
+    const value: unknown = YAML.parse(readFileSync(metaConfigFile(metaRoot), "utf8"));
     const services = isPlainObject(value) && isPlainObject(value.services) ? value.services : {};
     for (const [name, def] of Object.entries(services)) {
       aliases.set(name.toLowerCase(), name);
@@ -398,7 +399,7 @@ export function catalogOf(metaRoot: string): Catalog {
   };
   const names = existsSync(dir) ? readdirSync(dir).sort() : [];
   const key = [
-    stamp(join(metaRoot, ".jarvis", "project.yaml")),
+    stamp(metaConfigFile(metaRoot)),
     ...names.map((n) => `${n}=${stamp(join(dir, n, CONTRACTS_FILE))}`),
   ].join("|");
   const hit = cached.get(metaRoot);
