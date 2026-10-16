@@ -2,9 +2,11 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { Readable, Writable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createEngine } from "../../src/app/engine.ts";
 import { createRuntime } from "../../src/app/runtime.ts";
 import { run } from "../../src/cli/main.ts";
 import { loadConfig } from "../../src/core/config/load.ts";
+import { runPage } from "../../src/ui/model.ts";
 import { type Sandbox, sandbox } from "../helpers/tmp.ts";
 
 let sb: Sandbox;
@@ -694,5 +696,59 @@ steps:
     expect(r.err).toMatch(/✓ \[4\/4\] notes/);
     expect(r.err).toMatch(/✓ \[2\/4\] verify/);
     expect(r.out).toContain("COMPLETED");
+  });
+
+  it("the run's page leaves out what the run did not need: a gate not required, a step impact did not name", async () => {
+    sb.write(
+      "project/.jarvis/project.yaml",
+      "version: 1\nworkspace: { mode: cwd }\nhuman: { gates: { note: { required: false } } }\n",
+    );
+    sb.write(
+      "project/.jarvis/workflows/cond.yaml",
+      `name: cond
+entry: impact
+steps:
+  - id: impact
+    kind: deterministic
+    tool: artifact.write
+    args:
+      type: impact
+      name: impact.json
+      content: '{"affected":[{"path":"src/a.ts","kind":"code","reason":"r"}]}'
+    outputs: [impact]
+    transitions: { onSuccess: verify }
+  - id: verify
+    kind: composite
+    children: [docs, notes]
+    transitions: { onSuccess: approve-note }
+  - id: docs
+    kind: deterministic
+    tool: fail
+    when: { affects: docs }
+  - id: notes
+    kind: deterministic
+    tool: artifact.write
+    when: { affects: code }
+    args: { type: note, name: n.md, content: "n" }
+    outputs: [note]
+  - id: approve-note
+    kind: approval
+    artifactType: note
+    transitions: { onSuccess: DONE }
+`,
+    );
+    const r = await jarvis(["work", "C-2", "--workflow", "cond"], { JARVIS_INTERACTIVE: "off" });
+    expect(r.code).toBe(0);
+    const loaded = await loadConfig({ cwd: sb.project, homeDir: sb.home, env: {} });
+    const rt = createRuntime(loaded, { env: {} });
+    try {
+      const done = rt.runs.list({ includeTerminal: true }).find((x) => x.task === "C-2");
+      const page = await runPage(rt, createEngine(rt), done as NonNullable<typeof done>, {
+        homeDir: sb.home,
+      });
+      expect(page.steps.map((s) => s.id)).toEqual(["impact", "verify", "notes"]);
+    } finally {
+      rt.close();
+    }
   });
 });

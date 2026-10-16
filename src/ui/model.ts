@@ -727,6 +727,41 @@ function artifactStates(runtime: Runtime, run: Run): Array<ArtifactVersion & { s
     });
 }
 
+/** What the impact analysis names, by kind (`docs`, `telemetry`, …); undefined before it. */
+function affectedKinds(runtime: Runtime, run: Run): Set<string> | undefined {
+  const impact = runtime.artifacts.listLatest(run.id, "impact")[0];
+  if (!impact) return undefined;
+  try {
+    const doc = JSON.parse(runtime.artifacts.text(impact)) as { affected?: Array<{ kind?: unknown }> };
+    return new Set((doc.affected ?? []).map((a) => a.kind).filter((k): k is string => typeof k === "string"));
+  } catch {
+    return new Set();
+  }
+}
+
+/**
+ * Whether a step belongs on this run's page. Not drawn: a gate the configuration does not require
+ * (it passes by itself), and a conditional step (`when: { affects }`) before the impact analysis or
+ * when it names nothing of that kind. A step skipped this round because a sibling failed stays: that
+ * is what happened. Pilot: grey rows of steps the run never needed.
+ */
+function forThisRun(
+  runtime: Runtime,
+  run: Run,
+  workflow: WorkflowDefinition | undefined,
+  row: StepRow,
+): boolean {
+  const step = workflow?.steps.find((s) => s.id === row.id);
+  if (!step) return true;
+  // a gate nobody has to pass: also once it passed by itself
+  if (step.kind === "approval" && step.artifactType && row.status !== "waiting" && row.status !== "failed")
+    return runtime.loaded.config.human.gates[step.artifactType]?.required !== false;
+  if (row.status !== "pending" && row.status !== "skipped") return true;
+  const kind = step.when?.affects;
+  if (kind) return affectedKinds(runtime, run)?.has(kind) === true;
+  return true;
+}
+
 export async function runPage(
   runtime: Runtime,
   engine: LocalWorkflowEngine,
@@ -843,7 +878,7 @@ export async function runPage(
   return {
     run,
     plan,
-    steps: order.map(row),
+    steps: order.map(row).filter((r) => forThisRun(runtime, run, workflow, r)),
     tokens,
     workedMs,
     ...((t) => (t ? { time: t } : {}))(timeSplitOf(events, now, leaseLive)),
