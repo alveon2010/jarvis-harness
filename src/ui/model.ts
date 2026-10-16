@@ -12,6 +12,7 @@ import { type PlanProgress, planProgressOf } from "../app/planProgress.ts";
 import { type Resumable, resumableOf } from "../app/resumable.ts";
 import type { Runtime } from "../app/runtime.ts";
 import type { RunTokens } from "../app/status.ts";
+import { MASTER_WORKFLOW, masterOf, type SubtaskView, splitOf, subtasksOf } from "../app/subtasks.ts";
 import { type TimeSplit, timeSplitOf } from "../app/timeSplit.ts";
 import { type TryOut, tryOutOf } from "../app/tryOut.ts";
 import { type Change, changesIn, homePath } from "../cli/checkout.ts";
@@ -561,6 +562,62 @@ export interface RunPage {
   readonly continuedBy?: RunLink;
   /** The run this one went on from. */
   readonly continuedFrom?: RunLink & { readonly contradictions: number };
+  /** A subtask of a task across services (ADR-0025 §6): its master and its place. */
+  readonly subtaskOf?: {
+    readonly master: Run;
+    readonly key: string;
+    readonly service?: string;
+    readonly of: number;
+  };
+  /** A master: its subtasks, and the contract checked in their checkouts. */
+  readonly subtasks?: readonly SubtaskView[];
+  readonly contractCheck?: ContractCheckView;
+}
+
+/** The master's contract check (src/orchestration/tools/cross.ts), as the page shows it. */
+export interface ContractCheckView {
+  readonly ok: boolean;
+  readonly items: ReadonlyArray<{
+    readonly kind: string;
+    readonly id: string;
+    readonly change: string;
+    readonly producerSide: {
+      readonly service: string;
+      readonly status: string;
+      readonly at?: string;
+      readonly note?: string;
+    };
+    readonly consumerSides: ReadonlyArray<{
+      readonly service: string;
+      readonly status: string;
+      readonly at?: string;
+      readonly note?: string;
+    }>;
+  }>;
+}
+
+/** A task across services on its run's page: the subtask's master, or the master's subtasks. */
+function crossOf(runtime: Runtime, run: Run): Pick<RunPage, "subtaskOf" | "subtasks" | "contractCheck"> {
+  const of = masterOf(runtime, run);
+  if (of)
+    return {
+      subtaskOf: {
+        master: of.master,
+        key: run.options?.parent?.key ?? "?",
+        ...(of.subtask ? { service: of.subtask.service } : {}),
+        of: splitOf(runtime, of.master)?.subtasks.length ?? 0,
+      },
+    };
+  if (run.workflow !== MASTER_WORKFLOW) return {};
+  const subtasks = subtasksOf(runtime, run);
+  const check = runtime.artifacts.listLatest(run.id, "contract-check")[0];
+  let contractCheck: ContractCheckView | undefined;
+  try {
+    contractCheck = check ? (JSON.parse(runtime.artifacts.text(check)) as ContractCheckView) : undefined;
+  } catch {
+    contractCheck = undefined;
+  }
+  return { ...(subtasks.length > 0 ? { subtasks } : {}), ...(contractCheck ? { contractCheck } : {}) };
 }
 
 export interface RunLink {
@@ -879,6 +936,7 @@ export async function runPage(
     run,
     plan,
     steps: order.map(row).filter((r) => forThisRun(runtime, run, workflow, r)),
+    ...crossOf(runtime, run),
     tokens,
     workedMs,
     ...((t) => (t ? { time: t } : {}))(timeSplitOf(events, now, leaseLive)),

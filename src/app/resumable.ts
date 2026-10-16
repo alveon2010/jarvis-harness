@@ -34,7 +34,8 @@ export function resumableOf(runtime: Runtime, run: Run, now = Date.now()): Resum
     case "WAITING_BUDGET":
       return "quota";
     case "SUSPENDED":
-      return "suspended";
+      // a task across services waiting for its subtasks goes on by itself when they are done
+      return run.waitingFor?.kind === "children" ? undefined : "suspended";
     case "RUNNING":
       return run.lease && Date.parse(run.lease.until) >= now ? undefined : "interrupted";
     case "WAITING_HUMAN":

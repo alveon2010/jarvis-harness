@@ -10,6 +10,7 @@ import type { EffectRecord } from "../storage/effects.ts";
 import type { StoredEvent } from "../telemetry/events.ts";
 import { type Activity, activityOf, type FormatOptions } from "./activity.ts";
 import type { Runtime } from "./runtime.ts";
+import { MASTER_WORKFLOW, masterOf, type SubtaskView, splitOf, subtasksOf } from "./subtasks.ts";
 
 /**
  * Status data for `jarvis status` and, later, the TUI (ADR-0018 §1, §3). Pure reads over the
@@ -57,10 +58,26 @@ export interface RunDetail {
   /** What the run does right now, from its events (ADR-0018). */
   readonly activity?: Activity;
   readonly activityOptions?: FormatOptions;
+  /** A subtask of a task across services (ADR-0025 §6): its master and its place. */
+  readonly subtaskOf?: {
+    readonly master: Run;
+    readonly key: string;
+    readonly service?: string;
+    readonly of: number;
+  };
+  /** A master: its subtasks. */
+  readonly subtasks?: readonly SubtaskView[];
 }
 
 /** Artifact types that pass through a human gate and therefore may be awaiting approval. */
-export const GATED_ARTIFACT_TYPES = ["spec", "plan", "review", "implementation"] as const;
+export const GATED_ARTIFACT_TYPES = [
+  "spec",
+  "plan",
+  "review",
+  "implementation",
+  "split",
+  "contract-check",
+] as const;
 
 export function poolStatuses(runtime: Runtime): PoolStatus[] {
   return Object.entries(runtime.loaded.config.quotaPools).map(([pool, def]) => {
@@ -149,7 +166,24 @@ export function runDetail(runtime: Runtime, run: Run, now: Date = new Date()): R
     tokens,
     leaseLive: run.lease !== undefined && Date.parse(run.lease.until) >= now.getTime(),
     ...activityFields(runtime, events, now),
+    ...crossFields(runtime, run, now),
   };
+}
+
+/** A subtask's master, or a master's subtasks (ADR-0025 §6). */
+function crossFields(runtime: Runtime, run: Run, now: Date): Pick<RunDetail, "subtaskOf" | "subtasks"> {
+  const of = masterOf(runtime, run);
+  if (of)
+    return {
+      subtaskOf: {
+        master: of.master,
+        key: run.options?.parent?.key ?? "?",
+        ...(of.subtask ? { service: of.subtask.service } : {}),
+        of: splitOf(runtime, of.master)?.subtasks.length ?? 0,
+      },
+    };
+  const subtasks = run.workflow === MASTER_WORKFLOW ? subtasksOf(runtime, run, now) : [];
+  return subtasks.length > 0 ? { subtasks } : {};
 }
 
 function activityFields(

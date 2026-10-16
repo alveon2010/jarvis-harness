@@ -50,6 +50,13 @@ import {
   runWork,
 } from "./commands/run.ts";
 import { runCancel, runStatus } from "./commands/status.ts";
+import {
+  runSubtaskDrop,
+  runSubtaskList,
+  runSubtaskRetry,
+  runSubtaskRun,
+  runSubtaskStart,
+} from "./commands/subtask.ts";
 import { runUi } from "./commands/ui.ts";
 import { type CliContext, defaultContext } from "./context.ts";
 import { DIAGNOSES } from "./diagnostics.ts";
@@ -724,6 +731,40 @@ export function buildProgram(options: RunOptions = {}): Command {
     .option("--resume", "continue the run right away", false)
     .action(async (ref: string | undefined, opts: { resume: boolean }) => {
       await runReviewSubmit(ctxFor(), ref, opts);
+    });
+
+  const subtask = program
+    .command("subtask")
+    .description("the subtasks of a task across services (ADR-0025 §6); each is a run of its own");
+  subtask
+    .command("list <master>")
+    .description("the master's subtasks: service, state, run")
+    .action(async (master: string) => {
+      await runSubtaskList(ctxFor(), master);
+    });
+  subtask
+    .command("start <master> <subtask>")
+    .description("start a queued subtask now (by its number or service), past the parallel limit")
+    .action(async (master: string, which: string) => {
+      await runSubtaskStart(ctxFor(), master, which);
+    });
+  subtask
+    .command("retry <master> <subtask>")
+    .description("a cancelled subtask starts anew; a stopped one says how to resume it")
+    .action(async (master: string, which: string) => {
+      await runSubtaskRetry(ctxFor(), master, which);
+    });
+  subtask
+    .command("drop <master> <subtask>")
+    .description("take a subtask out of the task; the master goes on without it")
+    .action(async (master: string, which: string) => {
+      await runSubtaskDrop(ctxFor(), master, which);
+    });
+  subtask
+    .command("run <master> <subtask>")
+    .description("(started by the master) the subtask's run in its service's repository")
+    .action(async (master: string, which: string) => {
+      await runSubtaskRun(ctxFor(), master, which);
     });
 
   const knowledge = program.command("knowledge").description("project graph (ADR-0008)");

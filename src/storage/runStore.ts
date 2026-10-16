@@ -212,7 +212,10 @@ export class SqliteRunStore {
     const now = this.clock().toISOString();
     // waiting_for describes a waiting state (a person, or a model that is down); others clear it.
     const waiting =
-      (to === "WAITING_HUMAN" || to === "WAITING_BUDGET") && options.waitingFor
+      (to === "WAITING_HUMAN" ||
+        to === "WAITING_BUDGET" ||
+        (to === "SUSPENDED" && options.waitingFor?.kind === "children")) &&
+      options.waitingFor
         ? JSON.stringify(options.waitingFor)
         : null;
     this.db

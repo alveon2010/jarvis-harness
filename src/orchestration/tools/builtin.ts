@@ -10,6 +10,7 @@ import { git } from "../../tools/local/exec.ts";
 import { filesFor, packageDirOf, rulesFor } from "../../tools/local/fix.ts";
 import type { DeterministicTool } from "../executors.ts";
 import { failingOnBase, junitFailures } from "./baseline.ts";
+import { CROSS_TOOLS } from "./cross.ts";
 import { rebuildsFor } from "./rebuild.ts";
 import { classSelection, coveringTests, testRunnerOf } from "./relatedTests.ts";
 
@@ -90,6 +91,9 @@ async function preexistingOf(
 
 export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
   noop: async () => ({ status: "success" }),
+
+  /** A task across services (ADR-0025 §6): catalog, spawn, wait, contract check, delivery. */
+  ...CROSS_TOOLS,
 
   /** The task's inputs read by code (src/design/collect.ts): its issues and pages, API methods, design frames. */
   "sources.collect": collectSources,

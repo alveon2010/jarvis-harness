@@ -11,6 +11,7 @@ import { duration } from "../../app/journey.ts";
 import { preflightMcp } from "../../app/preflight.ts";
 import { createRuntime, type Runtime } from "../../app/runtime.ts";
 import { runDetail } from "../../app/status.ts";
+import { afterRunStops, MASTER_WORKFLOW } from "../../app/subtasks.ts";
 import type { Approval } from "../../artifacts/store.ts";
 import { resolveActor } from "../../core/actor/resolve.ts";
 import type { Actor } from "../../core/domain/actor.ts";
@@ -50,7 +51,7 @@ import { artifactLink } from "../view.ts";
 import { loadForCli } from "./config.ts";
 import { renderSummary } from "./status.ts";
 
-async function actorFor(ctx: CliContext, runtime: Runtime): Promise<Actor> {
+export async function actorFor(ctx: CliContext, runtime: Runtime): Promise<Actor> {
   const resolved = await resolveActor(runtime.loaded.config, ctx.env, runtime.loaded.project?.root);
   if (!resolved.actor) {
     ctx.out.error(
@@ -61,7 +62,7 @@ async function actorFor(ctx: CliContext, runtime: Runtime): Promise<Actor> {
   return resolved.actor;
 }
 
-function requireRun(ctx: CliContext, runtime: Runtime, ref: string): Run {
+export function requireRun(ctx: CliContext, runtime: Runtime, ref: string): Run {
   const run = runtime.runs.resolve(ref);
   if (!run) {
     ctx.out.error(`run "${ref}" not found (see \`jarvis status --all\`)`);
@@ -70,7 +71,7 @@ function requireRun(ctx: CliContext, runtime: Runtime, ref: string): Run {
   return run;
 }
 
-async function executeAndReport(
+export async function executeAndReport(
   ctx: CliContext,
   runtime: Runtime,
   engine: LocalWorkflowEngine,
@@ -142,6 +143,8 @@ async function executeAndReport(
           `${ctx.out.style.muted("left waiting; come back with")} ${ctx.out.style.cmd("jarvis continue")}`,
         );
       }
+      // a subtask that stopped frees its slot for the next; all done, the master goes on (ADR-0025 §6)
+      afterRunStops(runtime, runtime.runs.get(result.run.id) ?? result.run);
       const detail = runDetail(runtime, result.run);
       const goOn =
         result.run.state === "COMPLETED" && !continuedBy(runtime, result.run)
@@ -372,7 +375,7 @@ function waitsFor(r: Run): string {
 }
 
 /** The run's checkout: a worktree of its own (workspace.mode worktree), or the current one. */
-async function prepareWorkspace(
+export async function prepareWorkspace(
   ctx: CliContext,
   runtime: Runtime,
   runId: string,
@@ -566,7 +569,22 @@ export async function runWork(
       throw new CliExit(EXIT.error);
     }
     const runId = newRunId();
-    const workspace = await prepareWorkspace(ctx, runtime, runId, task, options.base);
+    // a task across services runs in the knowledge repository and changes no code there (ADR-0025 §6)
+    if (workflowName === MASTER_WORKFLOW && (!loaded.meta || loaded.meta.service)) {
+      ctx.out.error(
+        `${MASTER_WORKFLOW} runs in the knowledge repository of the services${loaded.meta?.service ? ` (this is the service ${loaded.meta.service}; run it in ${loaded.meta.root})` : ""}`,
+      );
+      throw new CliExit(EXIT.error);
+    }
+    const workspace =
+      workflowName === MASTER_WORKFLOW
+        ? ({
+            mode: "cwd",
+            repoRoot: loaded.project?.root ?? ctx.cwd,
+            path: loaded.project?.root ?? ctx.cwd,
+            baseRef: "HEAD",
+          } satisfies WorkspaceRef)
+        : await prepareWorkspace(ctx, runtime, runId, task, options.base);
     const run = runtime.runs.create({
       id: runId,
       task,

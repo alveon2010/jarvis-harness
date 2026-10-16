@@ -596,7 +596,7 @@ function recentHtml(page: RunsPage): Html {
 <thead><tr><th scope="col">Run</th><th scope="col">Task</th><th scope="col">Workflow</th><th scope="col">State</th><th scope="col">Took</th><th scope="col">Model</th></tr></thead>
 <tbody>${list.runs.map(
           (r) =>
-            html`<tr><td class="mono"><a href="${runHref(r.run)}">${marked(shortRunId(r.run.id), list.terms)}</a></td><td>${marked(firstLine(r.run.task, 90), list.terms)}</td><td>${marked(r.run.workflow, list.terms)}</td><td>${recentState(r.run)}</td><td>${duration(r.tookMs)}</td><td class="muted">${r.modelCalls} call${r.modelCalls === 1 ? "" : "s"}</td></tr>`,
+            html`<tr><td class="mono"><a href="${runHref(r.run)}">${marked(shortRunId(r.run.id), list.terms)}</a></td><td>${marked(firstLine(r.run.task, 90), list.terms)}</td><td>${marked(r.run.workflow === "sdd-cross" ? "sdd (cross-repos)" : r.run.workflow, list.terms)}${r.run.options?.parent ? html` <span class="meta" title="a subtask of a task across services">· subtask ${r.run.options.parent.key} of <a href="/runs/${shortRunId(r.run.options.parent.runId)}">${shortRunId(r.run.options.parent.runId)}</a></span>` : ""}</td><td>${recentState(r.run)}</td><td>${duration(r.tookMs)}</td><td class="muted">${r.modelCalls} call${r.modelCalls === 1 ? "" : "s"}</td></tr>`,
         )}</tbody></table></div>`
       : list.query
         ? html`<div class="panel empty">No runs match «${list.query}».</div>`
@@ -1210,6 +1210,7 @@ export function runContent(
 ${rest ? html`<p class="muted" style="white-space:pre-wrap">${cut(rest, 600)}</p>` : ""}
 ${r.stateReason && r.state !== "RUNNING" && r.state !== "WAITING_BUDGET" ? html`<p class="muted">${r.stateReason}</p>` : ""}
 ${page.continuedFrom ? continuedFromHtml(page.continuedFrom) : ""}
+${page.subtaskOf ? html`<p class="muted">subtask ${page.subtaskOf.key} of ${page.subtaskOf.of}${page.subtaskOf.service ? ` · ${page.subtaskOf.service}` : ""} of <a href="/runs/${shortRunId(page.subtaskOf.master.id)}">${firstLine(page.subtaskOf.master.task, 120)}</a> — the contract is the master's</p>` : ""}
 </div>
 <div class="row headact">${actions && pausable(page) ? (page.pausing ? html`<span class="btn small" aria-disabled="true">Pausing…</span>` : form(actions, `/runs/${encodeURIComponent(shortRunId(r.id))}/pause`, html`<button type="submit" class="btn small" title="Stops after the current model or tool call, keeps its place; Resume goes on">Pause</button>`)) : ""}${actions && !isTerminal(r.state) ? (cancelling(r) ? html`<span class="btn small danger" aria-disabled="true">Cancelling…</span>` : cancelHtml(r, actions)) : ""}</div>
 </div>
@@ -1225,6 +1226,8 @@ ${cancelling(r) ? html`<div class="banner bad" data-live="cancelling" role="stat
 <div class="mainc">
 ${review ?? ""}
 ${card ? (card.kind === "loop" ? loopCardHtml(card, page, actions) : card.kind === "approval" ? approvalCardHtml(card, page, actions) : card.kind === "budget" ? budgetCardHtml(card, page, actions) : card.kind === "clarify" ? clarifyCardHtml(card, page, actions) : otherCardHtml(card.what, page)) : page.wait ? waitHtml(page, page.wait, now, actions) : page.next || page.continuedBy ? continuationHtml(page, actions) : page.evalReady || page.evalCase ? evalHtml(page, actions) : nowHtml(page, now, actions)}
+${page.subtasks ? subtasksHtml(page, actions) : ""}
+${page.contractCheck ? contractCheckHtml(page.contractCheck) : ""}
 ${feedHtml(page.feed)}
 <section class="panel arts" aria-labelledby="artifacts" data-live="arts">
 <h2 id="artifacts">Artifacts</h2>
@@ -1240,6 +1243,50 @@ ${
 ${checkout ?? ""}
 </div>
 </div>`;
+}
+
+/** A master's subtasks (ADR-0025 §6): service, state, step, and what a person may do with each. */
+function subtasksHtml(page: RunPage, actions?: Actions): Html {
+  const r = page.run;
+  const views = page.subtasks ?? [];
+  const done = views.filter((v) => v.state === "COMPLETED" || v.state === "dropped").length;
+  const pill = (state: string) =>
+    html`<span class="pill ${state === "COMPLETED" ? "ok" : state === "FAILED" || state === "CANCELLED" ? "bad" : state === "WAITING_HUMAN" ? "wait" : state === "dropped" || state === "queued" ? "plain" : "info"}">${state === "WAITING_HUMAN" ? "waits for you" : state}</span>`;
+  const act = (key: string, what: "start" | "retry" | "drop", label: string, primary = false) =>
+    actions
+      ? form(
+          actions,
+          `/runs/${encodeURIComponent(shortRunId(r.id))}/subtask`,
+          html`<input type="hidden" name="key" value="${key}"><input type="hidden" name="act" value="${what}"><button type="submit" class="btn small${primary ? " primary" : ""}">${label}</button>`,
+        )
+      : "";
+  return html`<section class="panel" aria-labelledby="subtasks" data-live="subtasks">
+<h2 id="subtasks">Subtasks <span class="meta">${done} of ${views.length} done</span></h2>
+<ul style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:8px">${views.map(
+    (
+      v,
+    ) => html`<li class="row" style="flex-wrap:wrap;gap:8px 14px;padding:8px 0;border-top:1px solid var(--line-soft)">
+<span class="meta">${v.subtask.key}</span>${v.run ? html`<a href="/runs/${shortRunId(v.run.id)}" style="font-weight:600">${v.subtask.service}</a>` : html`<b>${v.subtask.service}</b>`}
+<span class="muted" style="flex:1 1 260px;min-width:0">${firstLine(v.subtask.task, 140)}${v.run?.currentStep && v.state !== "COMPLETED" ? html` · <span class="meta">${v.run.currentStep}</span>` : ""}</span>
+${pill(v.state)}
+${v.state === "queued" ? act(v.subtask.key, "start", "Start now") : ""}${v.state === "CANCELLED" || v.state === "FAILED" ? act(v.subtask.key, "retry", "Retry") : ""}${v.state !== "COMPLETED" && v.state !== "dropped" ? act(v.subtask.key, "drop", "Drop") : ""}
+</li>`,
+  )}</ul>
+</section>`;
+}
+
+/** The contract checked in the subtasks' checkouts: each side's status. */
+function contractCheckHtml(check: NonNullable<RunPage["contractCheck"]>): Html {
+  const side = (x: { service: string; status: string; at?: string; note?: string }) =>
+    html`<span class="pill ${x.status === "ok" ? "ok" : x.status === "missing" ? "bad" : "plain"}" title="${x.note ?? x.at ?? ""}">${x.status === "ok" ? "✓" : x.status === "missing" ? "✗" : "○"} ${x.service}</span>`;
+  return html`<section class="panel" aria-labelledby="contract" data-live="contract">
+<h2 id="contract">Contract <span class="pill ${check.ok ? "ok" : "bad"}">${check.ok ? "every side holds" : "a side does not hold"}</span></h2>
+<p class="hint">Checked in each subtask's checkout without a model: the producer sends or serves it, the consumers read or call it.</p>
+<ul style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:8px">${check.items.map(
+    (i) =>
+      html`<li class="row" style="flex-wrap:wrap;gap:6px 12px"><span class="pill plain">${i.kind}</span><code>${i.id}</code><span class="muted" style="flex:1 1 220px">${i.change}</span>${side(i.producerSide)}${i.consumerSides.map(side)}</li>`,
+  )}</ul>
+</section>`;
 }
 
 /** The new run's line: where it came from and what it brought. */

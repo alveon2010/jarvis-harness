@@ -155,6 +155,44 @@ export const ImpactResult = z.object({
   outcome: z.enum(["ok", "needs_research"]).default("ok"),
 });
 
+/**
+ * ADR-0025 §6: a task across services split into a subtask per service and the contract between them.
+ * The subtasks run as plain sdd in each service's repository; only the master changes the contract.
+ */
+export const SplitResult = z.object({
+  ...Base,
+  subtasks: z
+    .array(
+      z.object({
+        key: z.string().min(1).describe("1, 2, 3 … in delivery order"),
+        service: z.string().min(1).describe("a service of the map, exactly as the catalog names it"),
+        task: z.string().min(1).describe("what this service does for the task, for its own sdd run"),
+        requirements: z.array(z.string()).default([]).describe("ids of the spec's requirements it covers"),
+        deliverAfter: z
+          .array(z.string())
+          .default([])
+          .describe("keys delivered before it: the producer first"),
+      }),
+    )
+    .min(1),
+  contract: z
+    .array(
+      z.object({
+        kind: z.enum(["endpoint", "topic", "dto"]),
+        id: z.string().min(1).describe("`GET /delivery-slots/{id}`, a topic name, or a DTO's name"),
+        change: z.string().min(1).describe("what changes, backward compatible where it can be"),
+        producer: z.string().min(1).describe("the service that serves or sends it"),
+        consumers: z.array(z.string()).default([]),
+      }),
+    )
+    .default([]),
+  notInScope: z
+    .array(z.object({ service: z.string().min(1), why: z.string().min(1) }))
+    .default([])
+    .describe("services the catalog links to the change that need nothing, and why"),
+  outcome: z.enum(["ok", "spec_gap"]).default("ok"),
+});
+
 export const PlanResult = z.object({
   ...Base,
   steps: z.array(

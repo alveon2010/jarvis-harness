@@ -538,6 +538,11 @@ export const CONFIG_VERSION = 1 as const;
  */
 export const LanguageSchema = z.string().min(2).max(40);
 
+/** A task across services (ADR-0025 §6): how many of its subtasks run at once (the models' quota is shared). */
+export const CrossReposSchema = z.strictObject({
+  maxParallel: z.int().positive().default(2),
+});
+
 /** A service's name in a knowledge repository: its folder by default (ADR-0025 §2). */
 export const ServiceNameSchema = z
   .string()
@@ -599,6 +604,7 @@ const ProjectFieldsSchema = z.strictObject({
   language: LanguageSchema.optional(),
   /** Contract maps the task's API methods are checked against before the agents (design step). */
   contracts: z.array(ContractMapSchema).optional(),
+  crossRepos: CrossReposSchema.optional(),
 });
 
 /**
@@ -649,6 +655,7 @@ export const ResolvedConfigSchema = z.strictObject({
   stackScopes: z.record(z.string().min(1), z.array(z.string().min(1))).prefault({}),
   language: LanguageSchema.optional(),
   contracts: z.array(ContractMapSchema).default([]),
+  crossRepos: CrossReposSchema.prefault({}),
   /** Capability patterns denied by the active profile (ADR-0009 §1); applied by the Tool Router. */
   deniedCapabilities: z.array(z.string().min(1)).default([]),
   /** Name of the applied profile, if any. */

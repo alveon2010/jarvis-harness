@@ -12,6 +12,7 @@ import {
   ReviewAnalysisResult,
   ReviewResult,
   SpecResult,
+  SplitResult,
   TelemetryResult,
   TestResult,
 } from "./schemas.ts";
@@ -123,6 +124,29 @@ Produce the result document when the affected set is complete.`,
   output: { type: "impact", schema: ImpactResult, outcomes: ["ok", "needs_research"] },
   limits: DEFAULT_LIMITS,
   contextInputs: ["research", "spec"],
+};
+
+/** ADR-0025 §6: the master's split of a task across services; it reads knowledge, never code it changes. */
+export const SPLIT_AGENT: AgentDefinition = {
+  id: "split",
+  role: "research",
+  description: "Splits a task across services into a subtask per service and the contract between them.",
+  instructions: `You are the split agent of Jarvis, working in the knowledge repository of many services.
+Goal: split the approved specification into one subtask per service that must change, and the contract between them.
+Method:
+- The catalog input lists the services of the map, the links between them (who sends a topic and who reads it, who serves an endpoint and who calls it) and the services the specification names. Use only services listed there, with their names exactly as listed.
+- A service gets a subtask only when a requirement needs it to change. A service the catalog links to the change that needs nothing goes to "notInScope" with why (e.g. it ignores a new optional field).
+- Each subtask names its requirements (ids of the spec) and says what that service does, concretely, for a developer of that service: the endpoint, topic, field, behaviour. Every requirement of the spec is covered by at least one subtask.
+- The contract lists every endpoint, topic or DTO two subtasks share: what changes, who produces it, who consumes it. Prefer backward compatible changes (a new optional field, a new endpoint) so the producer can be delivered first.
+- Keys go in delivery order: the producer before its consumers; "deliverAfter" names the keys that must be delivered before.
+- Read the services' documents (knowledge/services/<service>/) for what you need; do not design the implementation inside a service.
+- If the specification lacks what the split needs (which service owns a behaviour, a field's format), set outcome "spec_gap" with reasons.
+Produce the result document.`,
+  capabilities: ["repo.read", "repo.list", "repo.search", "knowledge.read", "knowledge.search"],
+  requires: { tools: true, structuredOutput: "json" },
+  output: { type: "split", schema: SplitResult, outcomes: ["ok", "spec_gap"] },
+  limits: { ...DEFAULT_LIMITS, maxToolCalls: 20 },
+  contextInputs: ["spec", "catalog", "research"],
 };
 
 export const PLAN_AGENT: AgentDefinition = {
@@ -343,6 +367,7 @@ export const BUILTIN_AGENTS: readonly AgentDefinition[] = [
   SPEC_AGENT,
   IMPACT_AGENT,
   PLAN_AGENT,
+  SPLIT_AGENT,
   IMPLEMENTATION_AGENT,
   TEST_AGENT,
   REVIEW_AGENT,

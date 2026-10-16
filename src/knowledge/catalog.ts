@@ -405,3 +405,103 @@ export function catalogOf(metaRoot: string): Catalog {
   cached.set(metaRoot, { key, catalog });
   return catalog;
 }
+
+/** `GET /delivery-slots/{id}` → method and path; a bare path has no method. */
+export function parseEndpoint(id: string): { readonly method?: string; readonly path: string } {
+  const m = /^\s*(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\S+)/i.exec(id);
+  return m ? { method: (m[1] as string).toUpperCase(), path: m[2] as string } : { path: id.trim() };
+}
+
+/** The same endpoint: method (when both say it) and path, variables aside, with or without `segment` in front. */
+export function sameEndpoint(
+  a: { readonly method?: string; readonly path: string },
+  b: { readonly method?: string; readonly path: string },
+  segment?: string,
+): boolean {
+  if (a.method && b.method && a.method.toUpperCase() !== b.method.toUpperCase()) return false;
+  const strip = (p: string) =>
+    segment
+      ? p.replace(new RegExp(`^/?${segment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?=/|$)`, "i"), "")
+      : p;
+  const left = new Set([norm(a.path), norm(strip(a.path))]);
+  return left.has(norm(b.path)) || left.has(norm(strip(b.path)));
+}
+
+/** A service the text names, and how: by its name, a topic it sends or reads, an endpoint it serves. */
+export interface NamedService {
+  readonly service: string;
+  readonly by: string;
+}
+
+const mentions = (text: string, word: string) =>
+  new RegExp(`(?<![\\w.-])${word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w-]|\\.[\\w])`, "i").test(text);
+
+/**
+ * The services a task's text points at, without a model (ADR-0025 §7): their names, the topics they
+ * send or read, the endpoints they serve (a path of two segments or more). For the New task hint and
+ * the master's split.
+ */
+export function namedServices(catalog: Catalog, text: string, names: readonly string[]): NamedService[] {
+  const out = new Map<string, string>();
+  const add = (service: string, by: string) => {
+    if (!out.has(service)) out.set(service, by);
+  };
+  for (const name of names) if (mentions(text, name)) add(name, "its name");
+  for (const [service, c] of catalog.services) {
+    for (const t of c.produces) if (mentions(text, t.topic)) add(service, `sends ${t.topic}`);
+    for (const t of c.consumes) if (mentions(text, t.topic)) add(service, `reads ${t.topic}`);
+    for (const e of c.serves) {
+      const fixed = e.path.replace(/\{[^}]*\}.*$/, "").replace(/\/+$/, "");
+      if (fixed.split("/").filter(Boolean).length >= 2 && text.includes(fixed))
+        add(service, `serves ${e.path}`);
+    }
+  }
+  return [...out]
+    .map(([service, by]) => ({ service, by }))
+    .sort((a, b) => a.service.localeCompare(b.service));
+}
+
+/** The catalog as a document for the master's agents: services, links, and what the text names. */
+export function catalogDoc(
+  catalog: Catalog,
+  names: readonly string[],
+  named: readonly NamedService[],
+): string {
+  const without = names.filter((n) => !catalog.services.has(n));
+  const linkLine = (l: CatalogLink) =>
+    `- ${l.kind === "topic" ? `topic \`${l.what}\`` : `\`${l.what}\``}: ${l.producer} → ${l.consumer}${l.kind === "http" && !l.endpointFound ? " (endpoint not found in the producer)" : ""}`;
+  const lines = [
+    "# The services and their contracts",
+    "",
+    `Services of the map (use these names exactly): ${names.join(", ") || "none"}.`,
+    ...(without.length > 0
+      ? [`No contracts.json yet (their links are unknown): ${without.join(", ")}.`]
+      : []),
+    "",
+    "## Named by the task and its specification",
+    "",
+    ...(named.length > 0
+      ? named.map((n) => `- ${n.service} — ${n.by}`)
+      : ["- none found by name, topic or endpoint"]),
+    "",
+    "## Links between services (producer → consumer)",
+    "",
+    ...(catalog.links.length > 0 ? catalog.links.map(linkLine) : ["- none known"]),
+    "",
+  ];
+  for (const [service, c] of catalog.services) {
+    lines.push(`## ${service}`, "");
+    if (c.serves.length > 0)
+      lines.push(
+        `Serves: ${c.serves
+          .slice(0, 30)
+          .map((e) => `\`${e.method ? `${e.method} ` : ""}${e.path}\``)
+          .join(", ")}${c.serves.length > 30 ? ` … +${c.serves.length - 30}` : ""}`,
+      );
+    if (c.produces.length > 0) lines.push(`Sends: ${c.produces.map((t) => `\`${t.topic}\``).join(", ")}`);
+    if (c.consumes.length > 0)
+      lines.push(`Reads: ${[...new Set(c.consumes.map((t) => `\`${t.topic}\``))].join(", ")}`);
+    lines.push("");
+  }
+  return lines.join("\n");
+}

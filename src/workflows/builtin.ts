@@ -416,7 +416,97 @@ steps:
         requirements_wrong: { to: spec, maxIterations: 1 }
 `;
 
+/**
+ * ADR-0025 §6: a task across services, run in the knowledge repository. One spec for the task, then
+ * the split into a subtask per service and the contract between them; each subtask is a plain sdd
+ * run in its service's repository (`jarvis subtask`). The master never changes code: it waits for the
+ * subtasks, checks each side of the contract in their checkouts and delivers them in order.
+ */
+export const SDD_CROSS_WORKFLOW = `
+name: sdd-cross
+version: 1
+description: A task across services (ADR-0025 §6) — one spec, a subtask per service, the contract between them
+entry: sources
+steps:
+  - id: sources
+    kind: deterministic
+    tool: sources.collect
+    outputs: [sources, design]
+    transitions: { onSuccess: research }
+  - id: research
+    kind: agentic
+    agent: research
+    phase: research
+    inputs: [sources, design]
+    outputs: [research]
+    transitions: { onSuccess: spec }
+  - id: spec
+    kind: agentic
+    agent: specification
+    onLimit: ask
+    phase: spec
+    inputs: [research, design]
+    outputs: [spec]
+    transitions: { onSuccess: approve-spec }
+  - id: approve-spec
+    kind: approval
+    artifactType: spec
+    transitions:
+      onSuccess: catalog
+      onOutcome:
+        request_changes: { to: spec, maxIterations: 3 }
+  # the services, their links and what the task names: from the contract catalog, no model
+  - id: catalog
+    kind: deterministic
+    tool: cross.catalog
+    outputs: [catalog]
+    transitions: { onSuccess: split }
+  - id: split
+    kind: agentic
+    agent: split
+    phase: spec
+    inputs: [spec, catalog, research]
+    outputs: [split]
+    transitions:
+      onSuccess: approve-split
+      onOutcome:
+        spec_gap: { to: spec, maxIterations: 1 }
+  - id: approve-split
+    kind: approval
+    artifactType: split
+    transitions:
+      onSuccess: spawn
+      onOutcome:
+        request_changes: { to: split, maxIterations: 3 }
+  - id: spawn
+    kind: deterministic
+    tool: cross.spawn
+    transitions: { onSuccess: wait }
+  # parks (waiting for its subtasks) until every subtask is completed or dropped
+  - id: wait
+    kind: deterministic
+    tool: cross.wait
+    transitions: { onSuccess: contract-check }
+  - id: contract-check
+    kind: deterministic
+    tool: cross.check
+    outputs: [contract-check]
+    transitions: { onSuccess: approve-delivery }
+  - id: approve-delivery
+    kind: approval
+    artifactType: contract-check
+    transitions:
+      onSuccess: deliver
+      onOutcome:
+        request_changes: { to: wait, maxIterations: 3 }
+  - id: deliver
+    kind: deterministic
+    tool: cross.deliver
+    transitions: { onSuccess: DONE }
+`;
+
 export const BUILTIN_WORKFLOWS: Readonly<Record<string, string>> = {
+  "sdd-cross": SDD_CROSS_WORKFLOW,
   sdd: SDD_WORKFLOW,
   fix: FIX_WORKFLOW,
   smoke: SMOKE_WORKFLOW,

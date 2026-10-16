@@ -97,7 +97,18 @@ export const InteractionKindSchema = z.enum(["approval", "clarification", "revie
 export type InteractionKind = z.infer<typeof InteractionKindSchema>;
 
 export const WaitingForSchema = z.strictObject({
-  kind: z.enum(["approval", "clarification", "review", "conflict", "budget", "effect", "loop", "model"]),
+  kind: z.enum([
+    "approval",
+    "clarification",
+    "review",
+    "conflict",
+    "budget",
+    "effect",
+    "loop",
+    "model",
+    // a task across services waits for its subtasks (ADR-0025 §6)
+    "children",
+  ]),
   interactionId: z.string().min(1).optional(),
   detail: z.string().optional(),
 });
@@ -109,6 +120,8 @@ export type FreshSource = z.infer<typeof FreshSourceSchema>;
 export const RunOptionsSchema = z.strictObject({
   /** Sources read again past Jarvis's cache: "design" — the Figma frames (a frame changed at the same link). */
   fresh: z.array(FreshSourceSchema).optional(),
+  /** A subtask of a task across services (ADR-0025 §6): its master run and its key in the split. */
+  parent: z.strictObject({ runId: z.string().min(1), key: z.string().min(1) }).optional(),
 });
 export type RunOptions = z.infer<typeof RunOptionsSchema>;
 

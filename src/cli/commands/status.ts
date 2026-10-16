@@ -173,6 +173,15 @@ export function renderDetail(ctx: CliContext, d: RunDetail, now: Date, eventLimi
     out.line(
       `             ${st.warn("no process holds it (interrupted or crashed):")} ${st.cmd(`jarvis resume ${shortRunId(r.id)}`)} ${st.muted("|")} ${st.cmd(`jarvis cancel ${shortRunId(r.id)}`)}`,
     );
+  if (d.subtaskOf)
+    out.line(
+      `${f("subtask")}${d.subtaskOf.key} of ${d.subtaskOf.of}${d.subtaskOf.service ? ` · ${d.subtaskOf.service}` : ""} ${st.muted("of")} ${oneLine(d.subtaskOf.master.task, 60)} ${st.muted(`· master ${shortRunId(d.subtaskOf.master.id)}`)}`,
+    );
+  if (d.subtasks)
+    for (const v of d.subtasks)
+      out.line(
+        `${f(v === d.subtasks[0] ? "subtasks" : "")}${v.subtask.key} ${padEnd(v.subtask.service, 22)} ${st.state(v.state)}${v.run ? ` ${st.muted(shortRunId(v.run.id))}${v.run.currentStep ? ` ${st.muted(`· ${v.run.currentStep}`)}` : ""}` : ""}`,
+      );
   out.line(`${f("step")}${r.currentStep ? `${r.currentStep} #${r.currentIteration}` : "-"}`);
   // ADR-0018: what the run does right now — the same line the foreground command draws
   if (d.activity && !d.activity.finished && r.state === "RUNNING")

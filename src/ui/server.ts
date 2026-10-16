@@ -43,6 +43,7 @@ import { modelsHealthOf } from "../app/modelHealth.ts";
 import { pauseRequested, requestPause } from "../app/pause.ts";
 import { resumableOf } from "../app/resumable.ts";
 import type { Runtime } from "../app/runtime.ts";
+import { isDone, resumeMaster, startSubtask, subtasksOf } from "../app/subtasks.ts";
 import { tryOutOf } from "../app/tryOut.ts";
 import { type OpenChecked, type OpenIn, type OpenResult, reviewFiles } from "../cli/checkout.ts";
 import { humanMove } from "../cli/commands/human.ts";
@@ -448,6 +449,9 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       "already-ended": html`<div class="banner bad">The run has ended already: nothing to cancel</div>`,
       cleaned: html`<div class="banner ok">Checkout removed — the files go in the background; the branch stays</div>`,
       applied: html`<div class="banner ok">Applied: ${r.url.searchParams.get("files") ?? "?"} file(s) as <code>${r.url.searchParams.get("commit") ?? ""}</code> on the branch checked out in the repository — not pushed</div>`,
+      "subtask-started": html`<div class="banner ok">The subtask starts in its service's repository — it shows up here in a moment</div>`,
+      "subtask-dropped": html`<div class="banner ok">Dropped from the task; once the others are done the master goes on without it</div>`,
+      "no-subtask": html`<div class="banner bad">No such subtask, or its service has no repository on this machine</div>`,
       "apply-failed": html`<div class="banner bad">Not applied: ${r.url.searchParams.get("why") ?? "see jarvis logs"}</div>`,
       restored: html`<div class="banner ok">The branch is back — apply it, or remove it again</div>`,
       "restore-failed": html`<div class="banner bad">The branch could not be restored (a branch of that name exists?)</div>`,
@@ -1331,7 +1335,7 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       });
     }
     const m =
-      /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|clarify|eval|note|pause|cleanup|apply|restore-branch)$/.exec(
+      /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|clarify|eval|note|pause|cleanup|apply|restore-branch|subtask)$/.exec(
         r.url.pathname,
       );
     const run = m ? resolveRun(m[1] as string) : undefined;
@@ -1346,6 +1350,32 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
     const goOn = (r: Run): void => {
       if (options.launcher && !waitingCard(runtime, r.id)) options.launcher.adopt(r);
     };
+    if (m[2] === "subtask") {
+      // a master's subtask (ADR-0025 §6): start a queued one now, retry a stopped one, drop one
+      const key = form.get("key") ?? "";
+      const act = form.get("act");
+      const view = subtasksOf(runtime, run).find((v) => v.subtask.key === key);
+      if (!view) return redirect(r, `/runs/${short}?notice=no-subtask`);
+      if (act === "drop") {
+        const who = await actor();
+        runtime.events.emit({
+          kind: "subtask.dropped",
+          runId: run.id,
+          ...(who ? { actor: `${who.kind}:${who.id}` } : {}),
+          payload: { key, service: view.subtask.service, channel: "ui" },
+        });
+        const current = runtime.runs.get(run.id) ?? run;
+        if (subtasksOf(runtime, current).every(isDone) && current.waitingFor?.kind === "children")
+          resumeMaster(runtime, current);
+        return redirect(r, `/runs/${short}?notice=subtask-dropped`);
+      }
+      if (act === "retry" && view.run && view.state === "FAILED") {
+        options.launcher?.adopt(view.run);
+        return redirect(r, `/runs/${short}?notice=subtask-started`);
+      }
+      const started = startSubtask(runtime, run, key);
+      return redirect(r, `/runs/${short}?notice=${started.ok ? "subtask-started" : "no-subtask"}`);
+    }
     if (m[2] === "note") {
       // a note to the running step: binding for its agent from its next model call, and for the rest
       const text = (form.get("text") ?? "").trim();
