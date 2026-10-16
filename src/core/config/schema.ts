@@ -616,7 +616,7 @@ export const ServiceConfigSchema = ProjectFieldsSchema.omit({ version: true }).e
   repo: z.string().min(1).optional(),
   /** The path segment the balancer routes to it (`http://${SERVICE_HOST}/<path>`), when not its name. */
   path: z.string().min(1).optional(),
-  /** What it is, as `jarvis onboard` found it (react, vue, angular… → frontend); said, not acted on. */
+  /** What it is, as `jarvis onboard` found it from its stack (src/onboarding/serviceEntry.ts); said, not acted on. */
   kind: z.enum(["backend", "frontend"]).optional(),
 });
 export type ServiceConfig = z.infer<typeof ServiceConfigSchema>;
