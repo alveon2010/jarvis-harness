@@ -693,6 +693,16 @@ export const SCRIPT = `
     newForm.addEventListener('change', (e) => {
       if (e.target && (e.target.name === 'workflow' || e.target.name === 'repo')) look();
     });
+    // "Switch to sdd (cross-repos)" under the task (ADR-0025 §7): the workflow and the knowledge repository
+    newForm.addEventListener('click', (e) => {
+      const cross = e.target.closest('[data-cross]');
+      if (!cross) return;
+      const workflow = newForm.elements.namedItem('workflow');
+      const repo = newForm.elements.namedItem('repo');
+      if (workflow) workflow.value = 'sdd-cross';
+      if (repo && cross.dataset.repo) repo.value = cross.dataset.repo;
+      look();
+    });
     look();
   }
 

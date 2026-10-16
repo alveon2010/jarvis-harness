@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { applyRun } from "../../app/applyRun.ts";
+import { SCOPE_TYPE, scopeDecision, scopeOf } from "../../app/crossScope.ts";
 import {
   type ContractItem,
   deliveryOrder,
@@ -235,7 +236,34 @@ const deliverStep: DeterministicTool = async (ctx) => {
   return { status: "success" };
 };
 
+/**
+ * `scope.check` (an sdd in a service, after impact; ADR-0025 §7): a requirement the analysis ties to
+ * another service that the catalog links to this one stops the run at the scope gate; anything else
+ * passes on — with the report kept when it says something.
+ */
+const scopeStep: DeterministicTool = async (ctx) => {
+  const report = scopeOf(ctx.runtime, ctx.run);
+  if (!report) return { status: "success" };
+  const said = report.spans.length + report.unconfirmed.length + report.consumers.length > 0;
+  if (!said) return { status: "success" };
+  const text = JSON.stringify(report, null, 2);
+  const latest = ctx.runtime.artifacts.listLatest(ctx.run.id, SCOPE_TYPE)[0];
+  const ref =
+    latest && ctx.runtime.artifacts.text(latest) === text
+      ? `${latest.artifactId}@${latest.version}`
+      : put(ctx, SCOPE_TYPE, "scope.json", text, "application/json");
+  if (report.spans.length === 0 || scopeDecision(ctx.runtime, ctx.run.id) === "single")
+    return { status: "success", outputs: [ref] };
+  const others = [...new Set(report.spans.map((r) => r.service))];
+  throw new SuspendRun(
+    "WAITING_HUMAN",
+    `the task reaches ${others.length === 1 ? "another service" : `${others.length} more services`}: ${others.join(", ")}`,
+    { waitingFor: { kind: "scope", detail: others.join(", ") } },
+  );
+};
+
 export const CROSS_TOOLS: Record<string, DeterministicTool> = {
+  "scope.check": scopeStep,
   "cross.catalog": catalogStep,
   "cross.spawn": spawnStep,
   "cross.wait": waitStep,

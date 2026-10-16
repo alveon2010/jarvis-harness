@@ -150,6 +150,17 @@ export const ImpactResult = z.object({
     }),
   ),
   dependencies: z.array(z.string()).default([]).describe("modules/services that depend on the affected code"),
+  /** ADR-0025 §7: requirements another service must implement, by the neighbours document. */
+  elsewhere: z
+    .array(
+      z.object({
+        requirement: z.string().min(1).describe("the spec's requirement id"),
+        service: z.string().min(1).describe("the other service, as the neighbours document names it"),
+        why: z.string().min(1),
+      }),
+    )
+    .default([])
+    .describe("requirements another service of the knowledge repository must implement, not this one"),
   risks: z.array(z.string()).default([]),
   unknowns: z.array(z.string()).default([]),
   outcome: z.enum(["ok", "needs_research"]).default("ok"),

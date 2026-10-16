@@ -365,6 +365,8 @@ export function neighboursDoc(catalog: Catalog, service: string): string | undef
     "",
     "Generated from the services' contracts.json in the knowledge repository (ADR-0025 §4): what other services use of this one, and what it uses of them. A change to these is a change to them too.",
     "",
+    "For the impact analysis: a requirement that another service must implement — its behaviour, not this service's code — goes to \"elsewhere\" with that service's name as written here and why; it is not an affected path of this service.",
+    "",
     ...(out.length > 0 ? [`## Used by other services`, "", ...group(out, "consumer"), ""] : []),
     ...(uses.length > 0 ? [`## Used by ${service}`, "", ...group(uses, "producer"), ""] : []),
     ...(unknown.length > 0

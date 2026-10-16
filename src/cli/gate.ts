@@ -10,6 +10,7 @@ import {
   sourceOf,
   unitOf,
 } from "../app/budgetStop.ts";
+import { goCross, goSingle } from "../app/crossScope.ts";
 import {
   awaitedArtifact,
   DecisionTakenError,
@@ -42,6 +43,7 @@ import {
   watchCheckout,
 } from "./checkout.ts";
 import { clarifyLoop } from "./commands/human.ts";
+import { scopeLines } from "./commands/scope.ts";
 import type { CliContext } from "./context.ts";
 import { passthrough, titleSequence } from "./notify.ts";
 import type { Prompt } from "./prompt.ts";
@@ -753,6 +755,29 @@ export async function humanGate(
     return (await clarifyLoop(ctx, runtime, run, thread, actor, prompt)) === "resolved"
       ? "decided"
       : "detached";
+  }
+  if (run.waitingFor?.kind === "scope") {
+    // ADR-0025 §7: on as a task across services, or only this service
+    ctx.out.line();
+    for (const line of scopeLines(runtime, run)) ctx.out.line(line);
+    const answer = (
+      await prompt.ask(
+        `${st.heading("[c]")} as a task across services  ${st.heading("[s]")} only this service  ${st.muted("[q] later")} ${st.cmd(">")} `,
+      )
+    )
+      ?.trim()
+      .toLowerCase();
+    if (answer === "s") {
+      goSingle(runtime, run, actor, "cli");
+      return "decided";
+    }
+    if (answer === "c") {
+      const master = goCross(runtime, run, actor, "cli");
+      ctx.out.line(
+        `went on as sdd (cross-repos) ${shortRunId(master.id)} in ${master.workspace.repoRoot} — \`jarvis follow ${shortRunId(master.id)}\``,
+      );
+    }
+    return "detached";
   }
   const open = tools.open ?? systemOpener(ctx);
   if (run.waitingFor?.kind === "budget") return budgetGate(ctx, runtime, run, prompt, actor);

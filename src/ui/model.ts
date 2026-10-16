@@ -4,6 +4,7 @@ import { type BudgetGrant, type BudgetStop, budgetGranted, budgetStopOf } from "
 import { type BudgetWait, budgetWaitOf } from "../app/budgetWait.ts";
 import { candidatesOf } from "../app/candidates.ts";
 import { type Continuation, continuationOf, continuedFromOf, contradictionsOf } from "../app/continuation.ts";
+import { crossContinuationOf, type ScopeReport, scopeOf } from "../app/crossScope.ts";
 import { awaitedArtifact, type Decision, decisionOn, rerunRequested, waitingCard } from "../app/decide.ts";
 import { continuedBy } from "../app/handoff.ts";
 import { Journey, type LoopReport, type StepReport } from "../app/journey.ts";
@@ -36,6 +37,7 @@ import {
 } from "../interaction/clarify.ts";
 import { notesOf, type RunNote } from "../interaction/notes.ts";
 import type { Interaction, InteractionMessage } from "../interaction/store.ts";
+import type { NamedService } from "../knowledge/catalog.ts";
 import type { LocalWorkflowEngine } from "../orchestration/runtime.ts";
 import { shortRunId } from "../storage/runStore.ts";
 import type { StoredEvent } from "../telemetry/events.ts";
@@ -96,6 +98,12 @@ export interface OtherCard {
   readonly what: string;
 }
 
+/** ADR-0025 §7: an sdd whose impact reaches other services — on as a task across services, or here only. */
+export interface ScopeCard {
+  readonly kind: "scope";
+  readonly report: ScopeReport;
+}
+
 /**
  * A clarification thread (ADR-0019 §4) answered on the page: the agent's question, the turns so far,
  * Jarvis's proposed rule. Pilot: the run stood at «Answer in the terminal» and the page's flow broke.
@@ -113,7 +121,7 @@ export interface ClarifyCard {
   readonly earlier: readonly EarlierRule[];
 }
 
-export type WaitCard = LoopCard | ApprovalCard | BudgetCard | ClarifyCard | OtherCard;
+export type WaitCard = LoopCard | ApprovalCard | BudgetCard | ClarifyCard | ScopeCard | OtherCard;
 
 /** The open clarification thread of a run, as the page shows it. */
 export function clarifyCardOf(runtime: Runtime, run: Run): ClarifyCard | undefined {
@@ -295,6 +303,10 @@ export async function waitCardOf(runtime: Runtime, run: Run, homeDir: string): P
   if (kind === "clarification") {
     const card = clarifyCardOf(runtime, run);
     if (card) return card;
+  }
+  if (kind === "scope") {
+    const report = scopeOf(runtime, run);
+    if (report) return { kind: "scope", report };
   }
   const awaited = kind === "approval" || !kind ? awaitedArtifact(runtime, run) : undefined;
   if (awaited) {
@@ -558,6 +570,8 @@ export interface RunPage {
   readonly evalCase?: { readonly dir: string; readonly suite: string };
   /** A finished research/spec that can go on (src/app/continuation.ts): "Continue to sdd". */
   readonly next?: Continuation & { readonly contradictions: number };
+  /** A finished research/spec of a service naming linked services: «Continue to sdd (cross-repos)» (ADR-0025 §7). */
+  readonly nextCross?: readonly NamedService[];
   /** The run that went on from this one. */
   readonly continuedBy?: RunLink;
   /** The run this one went on from. */
@@ -990,6 +1004,7 @@ function continuationLinks(
   const next = by ? undefined : continuationOf(runtime, engine, run);
   return {
     ...(next ? { next: { ...next, contradictions: contradictionsOf(runtime, run.id) } } : {}),
+    ...((cross) => (next && cross ? { nextCross: cross } : {}))(crossContinuationOf(runtime, run)),
     ...(by ? { continuedBy: linkOf(by) } : {}),
     ...(from
       ? { continuedFrom: { ...linkOf(from), contradictions: contradictionsOf(runtime, from.id) } }

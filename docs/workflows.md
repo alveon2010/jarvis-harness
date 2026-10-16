@@ -129,6 +129,12 @@ sources → research → spec → approve-spec → catalog → split → approve
   `contract-check.json`; на гейте `approve-delivery` человек видит каждую сторону.
 - `deliver` — Apply каждого сабтаска в его репе в порядке `deliverAfter`: сначала отдающий. PR — позже.
 
+У сервиса репы знаний в `sdd` после `impact` вставляется шаг `scope` (`scope.check`, без модели): требования,
+которые impact отнёс другому сервису (`elsewhere`), сверяются с каталогом. Подтверждённая связь — гейт
+(`WAITING_HUMAN`, `waitingFor: scope`): «Continue as sdd (cross-repos)» или «Only this service»
+([cli.md](cli.md#jarvis-scope-run---cross----single---resume)); неподтверждённая — предупреждение в отчёте
+`scope.json`, прогон идёт дальше. У репы со своей `.jarvis` и у сабтаска шага нет или он проходит сразу.
+
 ## Агенты (ADR-0001 §6)
 
 `AgentDefinition`: инструкции, роль модели, набор возможностей по принципу наименьших привилегий,

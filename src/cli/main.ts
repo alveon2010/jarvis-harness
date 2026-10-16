@@ -49,6 +49,7 @@ import {
   runShow,
   runWork,
 } from "./commands/run.ts";
+import { runScope } from "./commands/scope.ts";
 import { runCancel, runStatus } from "./commands/status.ts";
 import {
   runSubtaskDrop,
@@ -733,6 +734,15 @@ export function buildProgram(options: RunOptions = {}): Command {
       await runReviewSubmit(ctxFor(), ref, opts);
     });
 
+  program
+    .command("scope <run>")
+    .description("the scope gate of an sdd whose impact reaches other services (ADR-0025 §7)")
+    .option("--cross", "go on as a task across services: a master run in the knowledge repository")
+    .option("--single", "only this service: go on to the plan, not asked again")
+    .option("--resume", "with --single: go on now in the foreground")
+    .action(async (ref: string, opts: { cross?: boolean; single?: boolean; resume?: boolean }) => {
+      await runScope(ctxFor(), ref, opts);
+    });
   const subtask = program
     .command("subtask")
     .description("the subtasks of a task across services (ADR-0025 §6); each is a run of its own");

@@ -18,7 +18,7 @@ import { moduleOfRun } from "../onboarding/moduleRun.ts";
  * Module research (the Modules page) is started the same way — `jarvis onboard --module <path>` —
  * one at a time per server: the rest wait in a queue and start as the one before them ends.
  */
-export type Workflow = "fix" | "sdd" | "research" | "spec";
+export type Workflow = "fix" | "sdd" | "research" | "spec" | "sdd-cross";
 
 export const WORKFLOWS: ReadonlyArray<{
   readonly id: Workflow;
@@ -34,9 +34,20 @@ export const WORKFLOWS: ReadonlyArray<{
     about: "the full way: requirements, spec to approve, impact, plan, implementation",
   },
   { id: "spec", label: "spec", about: "up to an approved spec, nothing implemented" },
+  {
+    id: "sdd-cross",
+    label: "sdd (cross-repos)",
+    about: "a task across services, in the knowledge repository: one spec, a subtask per service",
+  },
 ];
 
-const COMMAND: Record<Workflow, string> = { fix: "fix", sdd: "work", spec: "spec", research: "research" };
+const COMMAND: Record<Workflow, string> = {
+  fix: "fix",
+  sdd: "work",
+  spec: "spec",
+  research: "research",
+  "sdd-cross": "work",
+};
 
 export interface Launch {
   readonly id: string;
@@ -208,7 +219,12 @@ export function createLauncher(options: LauncherOptions): Launcher {
         exitCode: null,
       };
       launches.unshift(launch);
-      const args = [COMMAND[input.workflow], input.task, ...(input.freshDesign ? ["--fresh", "design"] : [])];
+      const args = [
+        COMMAND[input.workflow],
+        input.task,
+        ...(input.workflow === "sdd-cross" ? ["--workflow", "sdd-cross"] : []),
+        ...(input.freshDesign ? ["--fresh", "design"] : []),
+      ];
       spawnCli(args, input.repoRoot, log, (code) => {
         launch.exitCode = code ?? 1;
         if (launch.runId) busy.delete(launch.runId);

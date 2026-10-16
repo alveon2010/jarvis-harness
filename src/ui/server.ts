@@ -17,6 +17,7 @@ import {
   targetOf,
 } from "../app/candidates.ts";
 import { continuationOf, startPointOf } from "../app/continuation.ts";
+import { crossContinuationOf, crossStartOf, goCross, goSingle } from "../app/crossScope.ts";
 import {
   awaitedArtifact,
   DecisionTakenError,
@@ -63,6 +64,7 @@ import {
 import { earlierRulesFor } from "../interaction/clarify.ts";
 import { addNote } from "../interaction/notes.ts";
 import { answerFromKnowledge, plan } from "../knowledge/ask.ts";
+import { catalogOf, namedServices } from "../knowledge/catalog.ts";
 import { loadKnowledgeDocs } from "../knowledge/resolver.ts";
 import { loadGlossary } from "../knowledge/retrieval/glossary.ts";
 import type { RetrievalResult } from "../knowledge/retrieval/retriever.ts";
@@ -106,6 +108,7 @@ import {
   type ArtifactExtras,
   artifactContent,
   type Chrome,
+  crossHintHtml,
   errorContent,
   forbiddenPage,
   launchContent,
@@ -449,6 +452,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       "already-ended": html`<div class="banner bad">The run has ended already: nothing to cancel</div>`,
       cleaned: html`<div class="banner ok">Checkout removed — the files go in the background; the branch stays</div>`,
       applied: html`<div class="banner ok">Applied: ${r.url.searchParams.get("files") ?? "?"} file(s) as <code>${r.url.searchParams.get("commit") ?? ""}</code> on the branch checked out in the repository — not pushed</div>`,
+      "went-cross": html`<div class="banner ok">Going on as a task across services: the research and the spec are here — next, the split to approve</div>`,
       "subtask-started": html`<div class="banner ok">The subtask starts in its service's repository — it shows up here in a moment</div>`,
       "subtask-dropped": html`<div class="banner ok">Dropped from the task; once the others are done the master goes on without it</div>`,
       "no-subtask": html`<div class="banner bad">No such subtask, or its service has no repository on this machine</div>`,
@@ -589,7 +593,8 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
   const knownRepos = (): string[] => [
     ...new Set([
       ...(options.projectRoot ? [options.projectRoot] : []),
-      // a knowledge repository's services on this machine (ADR-0025 §2)
+      // a knowledge repository and its services on this machine (ADR-0025 §2)
+      ...(runtime.loaded.meta ? [runtime.loaded.meta.root] : []),
       ...Object.values(runtime.loaded.meta?.repos ?? {}).filter((path) => existsSync(path)),
       ...runtime.runs.list({ includeTerminal: true, limit: 500 }).map((x) => x.workspace.repoRoot),
     ]),
@@ -1273,6 +1278,20 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       }).filter((w): w is string => w !== undefined),
     );
 
+  /**
+   * Under "New task": the task names two services or more that the contract catalog links — likely a
+   * task across services (ADR-0025 §7). A hint with a switch; nothing switches by itself.
+   */
+  const crossHintOf = (task: string, workflow: string): Html | string => {
+    const meta = runtime.loaded.meta;
+    if (!meta || workflow === "sdd-cross" || task.trim().length < 8) return "";
+    const catalog = catalogOf(meta.root);
+    const named = namedServices(catalog, task, Object.keys(meta.repos));
+    const names = new Set(named.map((n) => n.service));
+    const linked = catalog.links.some((l) => names.has(l.producer) && names.has(l.consumer));
+    return named.length >= 2 && linked ? crossHintHtml(named, meta.root) : "";
+  };
+
   /** `GET /runs/from?task=&workflow=&repo=`: the box under "New task" (src/app/continuation.ts). */
   const startFrom = async (r: Request): Promise<void> => {
     if (!options.launcher || !actions) return notFound(r, "Starting tasks is off here.");
@@ -1285,7 +1304,9 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       known && task.trim()
         ? await startPointOf(runtime, engine, { task, workflow, repoRoot: repo })
         : undefined;
-    const body = known ? startFromHtml(point, { task, workflow, targets: targets() }, Date.now()) : "";
+    const body = known
+      ? html`${startFromHtml(point, { task, workflow, targets: targets() }, Date.now())}${crossHintOf(task, workflow)}`
+      : "";
     return send(r, 200, String(body), "text/html; charset=utf-8", { "Cache-Control": "no-store" });
   };
 
@@ -1335,7 +1356,7 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       });
     }
     const m =
-      /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|clarify|eval|note|pause|cleanup|apply|restore-branch|subtask)$/.exec(
+      /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|clarify|eval|note|pause|cleanup|apply|restore-branch|subtask|scope)$/.exec(
         r.url.pathname,
       );
     const run = m ? resolveRun(m[1] as string) : undefined;
@@ -1350,6 +1371,20 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
     const goOn = (r: Run): void => {
       if (options.launcher && !waitingCard(runtime, r.id)) options.launcher.adopt(r);
     };
+    if (m[2] === "scope") {
+      // ADR-0025 §7: on as a task across services, or only this service
+      if (run.state !== "WAITING_HUMAN" || run.waitingFor?.kind !== "scope")
+        return redirect(r, `/runs/${short}?notice=not-waiting`);
+      const who = await actor();
+      if (!who) return redirect(r, `/runs/${short}?notice=actor`);
+      if (form.get("choice") === "cross") {
+        const master = goCross(runtime, run, who, "ui");
+        return redirect(r, `/runs/${shortRunId(master.id)}?notice=went-cross`);
+      }
+      goSingle(runtime, run, who, "ui");
+      goOn(runtime.runs.get(run.id) ?? run);
+      return redirect(r, `/runs/${short}?notice=resumed`);
+    }
     if (m[2] === "subtask") {
       // a master's subtask (ADR-0025 §6): start a queued one now, retry a stopped one, drop one
       const key = form.get("key") ?? "";
@@ -1457,6 +1492,14 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       return redirect(r, `/runs/${short}`);
     }
     if (m[2] === "continue") {
+      // "Continue to sdd (cross-repos)": a master in the knowledge repository from this run (ADR-0025 §7)
+      if (form.get("workflow") === "sdd-cross") {
+        const who = await actor();
+        if (!who) return redirect(r, `/runs/${short}?notice=actor`);
+        if (!crossContinuationOf(runtime, run)) return redirect(r, `/runs/${short}?notice=cannot-continue`);
+        const master = goCross(runtime, run, who, "ui", crossStartOf(run));
+        return redirect(r, `/runs/${shortRunId(master.id)}?notice=went-cross`);
+      }
       // "Continue to sdd" on a finished research/spec: as `jarvis continue <run>`, in the background
       if (!options.launcher) return redirect(r, `/runs/${short}?notice=no-launcher`);
       const next = continuationOf(runtime, engine, run);
@@ -1714,7 +1757,7 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
           actions,
           options.launcher && actions
             ? {
-                workflows: WORKFLOWS,
+                workflows: WORKFLOWS.filter((w) => w.id !== "sdd-cross" || runtime.loaded.meta !== undefined),
                 repos: knownRepos(),
                 ...(noticeOf(r) ? { notice: noticeOf(r) as Html } : {}),
                 ...((repo ?? options.projectRoot)

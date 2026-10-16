@@ -13,6 +13,7 @@ import { toolMix } from "../cli/progress.ts";
 import { documentToMarkdown } from "../cli/render.ts";
 import { incompleteOf } from "../cli/style.ts";
 import { isTerminal, type Run } from "../core/domain/run.ts";
+import type { NamedService } from "../knowledge/catalog.ts";
 import type { EgressNotice } from "../security/policy/egress.ts";
 import { shortRunId } from "../storage/runStore.ts";
 import { type DiffFile, escapeHtml, type Html, html, join, markdownToHtml, type Part, raw } from "./html.ts";
@@ -25,6 +26,7 @@ import type {
   LoopCard,
   RunPage,
   RunsPage,
+  ScopeCard,
   StepRow,
   WaitCard,
   WaitingCandidate,
@@ -296,6 +298,13 @@ ${card.proposal ? html`<p class="ok">Jarvis proposes a rule — accept it or ans
 <div class="actions"><a class="btn primary" href="${runHref(run)}#decision">Answer</a></div>
 </article>`;
   }
+  if (card.kind === "scope")
+    return html`<article class="panel card">
+<div class="row"><span class="pill wait">⏸ spans services · ${[...new Set(card.report.spans.map((x) => x.service))].join(", ")}</span>${meta}</div>
+<h3>${firstLine(run.task)}</h3>
+<p>The impact reaches other services: on as a task across services, or only ${card.report.service}</p>
+<div class="actions"><a class="btn primary" href="${runHref(run)}#decision">Decide</a></div>
+</article>`;
   return html`<article class="panel card">
 <div class="row"><span class="pill wait">⏸ ${card.what}</span>${meta}</div>
 <h3>${firstLine(run.task)}</h3>
@@ -440,6 +449,14 @@ ${repoField}
 <p class="hint">Runs in the background, as <code>jarvis research "…"</code> (or the workflow chosen) would without a terminal; where it needs you, it waits here — decide on the page and it goes on.</p>`,
 )}
 </section>`;
+}
+
+/** "Looks like this task spans N services" under "New task" (ADR-0025 §7), with the switch. */
+export function crossHintHtml(named: readonly NamedService[], metaRoot: string): Html {
+  return html`<div class="from" style="background:var(--accent-soft);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:6px">
+<div class="row" style="flex-wrap:wrap;gap:8px 14px"><b>Looks like this task spans ${named.length} services</b><button type="button" class="btn small primary" data-cross data-repo="${metaRoot}">Switch to sdd (cross-repos)</button></div>
+<p class="sub hint">${named.map((n, i) => html`${i > 0 ? " · " : ""}<b>${n.service}</b> ${n.by}`)} — from the contract catalog and the names in the task, before any model. Nothing switches by itself; sdd asks again after its impact if the code says so.</p>
+</div>`;
 }
 
 /** `20:35` today, `Oct 3, 14:10` before. */
@@ -1225,7 +1242,7 @@ ${cancelling(r) ? html`<div class="banner bad" data-live="cancelling" role="stat
 </section>
 <div class="mainc">
 ${review ?? ""}
-${card ? (card.kind === "loop" ? loopCardHtml(card, page, actions) : card.kind === "approval" ? approvalCardHtml(card, page, actions) : card.kind === "budget" ? budgetCardHtml(card, page, actions) : card.kind === "clarify" ? clarifyCardHtml(card, page, actions) : otherCardHtml(card.what, page)) : page.wait ? waitHtml(page, page.wait, now, actions) : page.next || page.continuedBy ? continuationHtml(page, actions) : page.evalReady || page.evalCase ? evalHtml(page, actions) : nowHtml(page, now, actions)}
+${card ? (card.kind === "loop" ? loopCardHtml(card, page, actions) : card.kind === "approval" ? approvalCardHtml(card, page, actions) : card.kind === "budget" ? budgetCardHtml(card, page, actions) : card.kind === "clarify" ? clarifyCardHtml(card, page, actions) : card.kind === "scope" ? scopeCardHtml(card, page, actions) : otherCardHtml(card.what, page)) : page.wait ? waitHtml(page, page.wait, now, actions) : page.next || page.continuedBy ? continuationHtml(page, actions) : page.evalReady || page.evalCase ? evalHtml(page, actions) : nowHtml(page, now, actions)}
 ${page.subtasks ? subtasksHtml(page, actions) : ""}
 ${page.contractCheck ? contractCheckHtml(page.contractCheck) : ""}
 ${feedHtml(page.feed)}
@@ -1243,6 +1260,38 @@ ${
 ${checkout ?? ""}
 </div>
 </div>`;
+}
+
+/**
+ * The scope gate (ADR-0025 §7): the requirements tied to other services the catalog links to this one,
+ * and the two ways on — a task across services, or only this service (not asked again).
+ */
+function scopeCardHtml(card: ScopeCard, page: RunPage, actions?: Actions): Html {
+  const r = page.run;
+  const rep = card.report;
+  const others = [...new Set(rep.spans.map((x) => x.service))];
+  const choice = (value: "cross" | "single", label: string, primary: boolean) =>
+    actions
+      ? form(
+          actions,
+          `/runs/${encodeURIComponent(shortRunId(r.id))}/scope`,
+          html`<input type="hidden" name="choice" value="${value}"><button type="submit" class="btn${primary ? " primary" : ""}">${label}</button>`,
+        )
+      : html`<code>jarvis scope ${shortRunId(r.id)} ${value === "cross" ? "--cross" : "--single --resume"}</code>`;
+  return html`<section class="panel decision" aria-labelledby="decision" data-live="card">
+<span class="warn" style="font-size:13px;font-weight:500">The impact reaches other services</span>
+<h2 id="decision">This task spans ${others.length + 1} services</h2>
+<p class="hint">The specification asks for behaviour in other services, and the contract catalog links each of them to ${rep.service} through what this change touches.</p>
+<div class="scroll"><table><thead><tr><th scope="col">Requirement</th><th scope="col">Service</th><th scope="col">Link in the catalog</th><th scope="col">Why</th></tr></thead><tbody>
+<tr><td class="muted">—</td><td><b>${rep.service}</b> <span class="meta">this run</span></td><td></td><td></td></tr>
+${rep.spans.map((x) => html`<tr><td><b>${x.requirement}</b></td><td><b>${x.service}</b></td><td><span class="pill ok">✓ ${x.link ?? ""}</span></td><td class="muted">${x.why}</td></tr>`)}
+</tbody></table></div>
+${rep.unconfirmed.length > 0 ? html`<p class="hint">Tied by the analysis, not linked in the catalog (a warning, not a stop): ${rep.unconfirmed.map((x, i) => html`${i > 0 ? ", " : ""}<b>${x.service}</b> (${x.requirement})`)}</p>` : ""}
+<div class="row" style="flex-wrap:wrap;gap:16px;align-items:stretch">
+<div class="panel" style="flex:1 1 320px;display:flex;flex-direction:column;gap:8px"><b>Continue as sdd (cross-repos)</b> <span class="pill info">recommended</span><p class="hint">The research and the approved spec go to a master run in the knowledge repository; this run ends, ${rep.service} gets a subtask of its own. Next you approve the split and the contract.</p>${choice("cross", "Continue as sdd (cross-repos)", true)}</div>
+<div class="panel" style="flex:1 1 320px;display:flex;flex-direction:column;gap:8px"><b>Only ${rep.service}</b><p class="hint">Goes on to the plan here. The other services stay tasks of their own. Not asked again in this run.</p>${choice("single", `Only ${rep.service}`, false)}</div>
+</div>
+</section>`;
 }
 
 /** A master's subtasks (ADR-0025 §6): service, state, step, and what a person may do with each. */
@@ -1332,9 +1381,22 @@ function continuationHtml(page: RunPage, actions?: Actions): Html {
 <h2 id="decision">Take it into the full cycle</h2>
 <p>${next.workflow} starts at <b>${next.startAt}</b> with this ${r.workflow}: ${carried.join(", ")} go in as they are — the steps done here do not run again.</p>
 <p>Then ${next.rest.join(" → ")}${approval}.</p>
+${
+  page.nextCross
+    ? html`<div class="banner info"><b>It names ${page.nextCross.length} services the catalog links</b> — ${page.nextCross.map((n, i) => html`${i > 0 ? " · " : ""}<b>${n.service}</b> ${n.by}`)}: likely a task across services (recommended)</div>`
+    : ""
+}
 <div class="actions">${
     actions?.canLaunch
-      ? html`${form(actions, `/runs/${shortRunId(r.id)}/continue`, html`<button type="submit" class="btn primary big">Continue to ${next.workflow}</button>`)}<span class="hint">same as <code>${cmd}</code></span>`
+      ? html`${
+          page.nextCross
+            ? form(
+                actions,
+                `/runs/${shortRunId(r.id)}/continue`,
+                html`<input type="hidden" name="workflow" value="sdd-cross"><button type="submit" class="btn primary big">Continue to sdd (cross-repos)</button>`,
+              )
+            : ""
+        }${form(actions, `/runs/${shortRunId(r.id)}/continue`, html`<button type="submit" class="btn${page.nextCross ? "" : " primary"} big">Continue to ${next.workflow}</button>`)}<span class="hint">same as <code>${cmd}</code>${page.nextCross ? html` · <code>jarvis scope ${shortRunId(r.id)} --cross</code>` : ""}</span>`
       : html`<span class="hint">Go on with <code>${cmd}</code></span><button type="button" class="btn" data-copy="${cmd}">Copy command</button>`
   }</div>
 </section>`;

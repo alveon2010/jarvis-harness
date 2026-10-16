@@ -2,7 +2,11 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import YAML from "yaml";
 import { ConfigError, zodIssues } from "../core/config/errors.ts";
-import { type WorkflowDefinition, WorkflowDefinitionSchema } from "../core/domain/workflow.ts";
+import {
+  StepDefinitionSchema,
+  type WorkflowDefinition,
+  WorkflowDefinitionSchema,
+} from "../core/domain/workflow.ts";
 import { layoutOf } from "../core/paths.ts";
 import { BUILTIN_WORKFLOWS } from "./builtin.ts";
 
@@ -34,6 +38,30 @@ export function loadWorkflows(projectRoot?: string): Map<string, WorkflowDefinit
         map.set(wf.name, wf);
       }
     }
+    // a service of a knowledge repository: sdd checks after its impact whether the task reaches other
+    // services (ADR-0025 §7); a repository of its own keeps sdd exactly as it is
+    if (layoutOf(projectRoot).meta?.service) {
+      const sdd = map.get("sdd");
+      if (sdd) map.set("sdd", withScope(sdd));
+    }
   }
   return map;
+}
+
+/** `impact → scope → <what came after impact>`: the scope step inserted, unless the workflow has one or no impact. */
+export function withScope(wf: WorkflowDefinition): WorkflowDefinition {
+  const at = wf.steps.findIndex((s) => s.id === "impact");
+  const impact = wf.steps[at];
+  if (!impact || wf.steps.some((s) => s.id === "scope")) return wf;
+  const scope = StepDefinitionSchema.parse({
+    id: "scope",
+    kind: "deterministic",
+    tool: "scope.check",
+    outputs: ["scope"],
+    transitions: { onSuccess: impact.transitions.onSuccess },
+  });
+  const steps = [...wf.steps];
+  steps[at] = { ...impact, transitions: { ...impact.transitions, onSuccess: "scope" } };
+  steps.splice(at + 1, 0, scope);
+  return { ...wf, steps };
 }

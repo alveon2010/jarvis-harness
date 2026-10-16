@@ -337,7 +337,11 @@ export function nextCommands(d: RunDetail, goOn?: string): Array<{ cmd: string; 
   const id = shortRunId(r.id);
   const out: Array<{ cmd: string; why: string }> = [];
   const pending = d.pendingApprovals[0];
-  if (r.state === "WAITING_HUMAN") {
+  if (r.state === "WAITING_HUMAN" && r.waitingFor?.kind === "scope") {
+    // ADR-0025 §7: the task reaches other services
+    out.push({ cmd: `jarvis scope ${id} --cross`, why: "go on as a task across services" });
+    out.push({ cmd: `jarvis scope ${id} --single --resume`, why: "only this service: go on to the plan" });
+  } else if (r.state === "WAITING_HUMAN") {
     // one command, no flags: it asks right there (questions, accept, send back) and goes on
     out.push({
       cmd: "jarvis continue",
@@ -355,6 +359,11 @@ export function nextCommands(d: RunDetail, goOn?: string): Array<{ cmd: string; 
         ? { cmd: "jarvis continue", why: `waits for model ${r.waitingFor.detail ?? ""} here and goes on` }
         : { cmd: `jarvis resume ${id}`, why: "when the quota window frees up" },
     );
+  } else if (r.state === "SUSPENDED" && r.waitingFor?.kind === "children") {
+    out.push({
+      cmd: `jarvis subtask list ${id}`,
+      why: "its subtasks; it goes on by itself when they are done",
+    });
   } else if (r.state === "SUSPENDED") {
     out.push({ cmd: "jarvis continue", why: "go on from where it stopped" });
   } else if (r.state === "FAILED") {

@@ -108,6 +108,8 @@ export const WaitingForSchema = z.strictObject({
     "model",
     // a task across services waits for its subtasks (ADR-0025 §6)
     "children",
+    // an sdd whose impact reaches other services: on as a task across services, or only here (§7)
+    "scope",
   ]),
   interactionId: z.string().min(1).optional(),
   detail: z.string().optional(),
