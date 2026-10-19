@@ -45,6 +45,7 @@ import {
   runForget,
   runGc,
   runOpen,
+  runRedo,
   runRestart,
   runResume,
   runShellIn,
@@ -396,9 +397,24 @@ export function buildProgram(options: RunOptions = {}): Command {
       "a stopped run (cancelled, failed, finished) again from one of its steps, with what it did before it",
     )
     .option("--from <step>", "the step to start at (default: right after the last approval)")
+    .option("--note <text>", "for the first step: what to do differently")
     .option("--no-run", "create the run, do not start it")
-    .action(async (run: string, opts: { from?: string; run: boolean }) => {
-      await runRestart(ctxFor(), run, { ...(opts.from ? { from: opts.from } : {}), noRun: !opts.run });
+    .action(async (run: string, opts: { from?: string; note?: string; run: boolean }) => {
+      await runRestart(ctxFor(), run, {
+        ...(opts.from ? { from: opts.from } : {}),
+        ...(opts.note ? { note: opts.note } : {}),
+        noRun: !opts.run,
+      });
+    });
+  program
+    .command("redo <run> <step>")
+    .description(
+      "back to a step the run went through, with a note for it; the steps after it run again (an ended run: a new one from the step)",
+    )
+    .option("--note <text>", "what the step should do differently")
+    .option("--no-run", "record it, do not go on now")
+    .action(async (run: string, step: string, opts: { note?: string; run: boolean }) => {
+      await runRedo(ctxFor(), run, step, { ...(opts.note ? { note: opts.note } : {}), noRun: !opts.run });
     });
   program
     .command("forget [runs...]")

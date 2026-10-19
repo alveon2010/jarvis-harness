@@ -413,4 +413,32 @@ Library code must not write to the console; use the logger.
       expect.arrayContaining(["skill:onboarding-change@1", "standard:no-console@1"]),
     );
   });
+
+  it("redo: the run goes back to the research with the person's note, and the research agent reads it", async () => {
+    server.respond((req) => {
+      const agent = agentOf(req);
+      if (wantsResult(req)) return completion(JSON.stringify(docs[agent]?.(1)));
+      return completion("done");
+    });
+    const first = await jarvis(["--json", "work", "ABC-44"]);
+    expect(first.code).toBe(10);
+    const runId = (JSON.parse(first.out) as { run: { id: string } }).run.id;
+    const before = server.requests.filter((r) => agentOf(r) === "research").length;
+    const redo = await jarvis([
+      "redo",
+      runId,
+      "research",
+      "--note",
+      "the restart must also cover PROCESSING",
+    ]);
+    expect(redo.code).toBe(10);
+    const again = server.requests.filter((r) => agentOf(r) === "research").slice(before);
+    expect(again.length).toBeGreaterThan(0);
+    const prompt = lastUser(again[0] as CapturedRequest);
+    expect(prompt).toContain("# A person sent the run back to this step (binding)");
+    expect(prompt).toContain("the restart must also cover PROCESSING");
+    // the steps after it do not get the note as theirs
+    const spec = server.requests.filter((r) => agentOf(r) === "specification").at(-1) as CapturedRequest;
+    expect(lastUser(spec)).not.toContain("# A person sent the run back to this step");
+  });
 });

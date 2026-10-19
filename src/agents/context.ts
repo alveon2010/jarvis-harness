@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { z } from "zod";
 import { planProgressOf } from "../app/planProgress.ts";
+import { redoNotesFor } from "../app/redo.ts";
 import { stableJson } from "../context/serialize.ts";
 import type { ProjectGraphExtractor } from "../core/capabilities/contracts.ts";
 import type { KnowledgeConfig } from "../core/config/schema.ts";
@@ -162,7 +163,11 @@ export function buildBaseMessages(input: BuildInput): Message[] {
   const clarifications = describeClarifications(ctx);
   const decided = describeAcceptances(ctx);
   const review = humanReviewOf(ctx, def);
+  const sentBack = redoNotesFor(ctx.runtime, run.id, ctx.step.id, ctx.iteration);
   const l2 = [
+    sentBack.length > 0
+      ? `# A person sent the run back to this step (binding)\n${sentBack.map((r) => `- ${r.actor ?? "a person"}: ${r.note}`).join("\n")}`
+      : "",
     loopReasons ? `# Why this step runs again\n${loopReasons}` : "",
     review ? review.instructions : "",
     clarifications ? `# Clarifications decided with a human (binding)\n${clarifications}` : "",

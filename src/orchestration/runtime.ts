@@ -1,6 +1,7 @@
 import { reasonOf } from "../app/activity.ts";
 import { rerunBackTo } from "../app/decide.ts";
 import { pausedText, pauseRequested } from "../app/pause.ts";
+import { pendingRedo } from "../app/redo.ts";
 import type { Runtime } from "../app/runtime.ts";
 import { BudgetExceededError, BudgetedGateway } from "../budget/runBudget.ts";
 import { EXIT } from "../cli/output.ts";
@@ -505,12 +506,21 @@ export class LocalWorkflowEngine {
       this.emit(running, "run.state", { state: running.state });
       return running;
     }
-    if (run.state === "RUNNING") {
+    // a person sent the run back to a step (src/app/redo.ts): it goes on from there, a fresh round
+    const redo = pendingRedo(this.rt, run.id);
+    if (redo && workflow.steps.some((s) => s.id === redo.step)) {
+      this.rt.runs.update(run.id, { currentStep: redo.step, currentIteration: redo.iteration });
+      this.emit(run, "step.redo.applied", {
+        step: redo.step,
+        iteration: redo.iteration,
+        from: run.currentStep,
+      });
+      if (run.state === "RUNNING") return this.rt.runs.get(run.id) ?? run;
+    } else if (run.state === "RUNNING") {
       // A previous holder died mid-step; its lease expired. Continue from the step the run is on.
       this.emit(run, "run.recovered", { stepId: run.currentStep });
       return run;
-    }
-    if (run.state === "WAITING_HUMAN" && run.waitingFor?.kind === "loop" && run.currentStep) {
+    } else if (run.state === "WAITING_HUMAN" && run.waitingFor?.kind === "loop" && run.currentStep) {
       // a used-up back edge (ADR-0004 §3): the person fixed the checkout, the step runs again as a
       // fresh round — not the round that used the loop up, whose agents' state would be restored;
       // or the person asked the step the loop went back to for one more round

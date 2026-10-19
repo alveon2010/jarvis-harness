@@ -1,6 +1,7 @@
 import { Writable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createEngine } from "../../src/app/engine.ts";
+import { redoNotesFor } from "../../src/app/redo.ts";
 import { mainCourse, writesCode } from "../../src/app/restart.ts";
 import { createRuntime } from "../../src/app/runtime.ts";
 import { run } from "../../src/cli/main.ts";
@@ -170,5 +171,61 @@ describe("jarvis restart", () => {
     expect(writing[0]).toBe("implementation");
     const impact = sdd.steps.find((s) => s.id === "impact");
     expect(impact && writesCode(impact, sdd)).toBe(false);
+  });
+});
+
+describe("jarvis redo", () => {
+  it("a waiting run goes back to a step it went through, with a note for that round; the steps after it run again", async () => {
+    await jarvis(["work", "ABC-50", "--workflow", "staged"]);
+    const [first] = await runs();
+    const id = (first?.run.id ?? "").slice(4, 12);
+    expect(first?.run.currentStep).toBe("approve-spec");
+    const r = await jarvis(["redo", id, "research", "--note", "look at the address handler too"]);
+    expect(r.out).toContain("goes back to research");
+    expect(r.code).toBe(10);
+    const loaded = await loadConfig({ cwd: sb.project, homeDir: sb.home, env: {} });
+    const rt = createRuntime(loaded, { env: {} });
+    try {
+      const run = rt.runs.get(first?.run.id as string);
+      expect(run?.currentStep).toBe("approve-spec");
+      const rounds = rt.history
+        .list(run?.id as string)
+        .filter((h) => h.stepId === "research")
+        .map((h) => h.iteration);
+      expect(rounds).toEqual([1, 2]);
+      expect(redoNotesFor(rt, run?.id as string, "research", 2).map((n) => n.note)).toEqual([
+        "look at the address handler too",
+      ]);
+      expect(redoNotesFor(rt, run?.id as string, "spec", 2)).toEqual([]);
+      // the spec was written again: a new version waits for approval
+      expect(rt.artifacts.listLatest(run?.id as string, "spec")[0]?.version).toBe(2);
+    } finally {
+      rt.close();
+    }
+  });
+
+  it("a step the run never reached is refused", async () => {
+    await jarvis(["work", "ABC-51", "--workflow", "staged"]);
+    const id = ((await runs())[0]?.run.id ?? "").slice(4, 12);
+    const r = await jarvis(["redo", id, "plan"]);
+    expect(r.code).not.toBe(0);
+    expect(r.err).toContain('"plan" is not a step this run went through');
+  });
+
+  it("an ended run starts again from the step as a new run, the note for its first round", async () => {
+    const id = await cancelledAtImpact();
+    const r = await jarvis(["redo", id, "spec", "--note", "one restart only", "--no-run"]);
+    expect(r.code).toBe(0);
+    const [, again] = await runs();
+    expect(again?.run.currentStep).toBe("spec");
+    const loaded = await loadConfig({ cwd: sb.project, homeDir: sb.home, env: {} });
+    const rt = createRuntime(loaded, { env: {} });
+    try {
+      expect(redoNotesFor(rt, again?.run.id as string, "spec", 1).map((n) => n.note)).toEqual([
+        "one restart only",
+      ]);
+    } finally {
+      rt.close();
+    }
   });
 });

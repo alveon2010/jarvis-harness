@@ -9,6 +9,7 @@ import { canForget, forgetRuns } from "../../app/forget.ts";
 import { continuationStep, continuedBy, handOff } from "../../app/handoff.ts";
 import { duration } from "../../app/journey.ts";
 import { preflightMcp } from "../../app/preflight.ts";
+import { noteForStart, requestRedo } from "../../app/redo.ts";
 import { carriedSteps, RESTARTABLE, restartPlanOf } from "../../app/restart.ts";
 import { createRuntime, type Runtime } from "../../app/runtime.ts";
 import { runDetail } from "../../app/status.ts";
@@ -537,7 +538,7 @@ async function startContinuation(
 export async function runRestart(
   ctx: CliContext,
   ref: string,
-  options: { readonly from?: string; readonly noRun?: boolean },
+  options: { readonly from?: string; readonly noRun?: boolean; readonly note?: string },
 ): Promise<void> {
   let loaded = await loadForCli(ctx);
   let runtime = createRuntime(loaded, { env: ctx.env });
@@ -622,6 +623,7 @@ export async function runRestart(
       ...(from.options?.fresh?.length ? { options: { fresh: [...from.options.fresh] } } : {}),
     });
     const carried = handOff(runtime, from, run, startAt, (a) => !a.stepId || keepSteps.has(a.stepId));
+    if (options.note) noteForStart(runtime, run, startAt, actor, options.note);
     runtime.events.emit({
       kind: "run.created",
       runId: run.id,
@@ -650,6 +652,69 @@ export async function runRestart(
   } finally {
     runtime.close();
   }
+}
+
+/**
+ * `jarvis redo <run> <step> [--note]` (src/app/redo.ts): a run that waits, is paused or failed goes
+ * back to a step it went through, with a note for that step, and goes on from there in its own
+ * checkout; a run that ended starts again from the step as a new run (`jarvis restart`).
+ */
+export async function runRedo(
+  ctx: CliContext,
+  ref: string,
+  step: string,
+  options: { readonly note?: string; readonly noRun?: boolean },
+): Promise<void> {
+  const loaded = await loadForCli(ctx);
+  const runtime = createRuntime(loaded, { env: ctx.env });
+  let ended = false;
+  try {
+    const run = requireRun(ctx, runtime, ref);
+    if (run.options?.parent) {
+      ctx.out.error(
+        `${shortRunId(run.id)} is subtask ${run.options.parent.key} of ${shortRunId(run.options.parent.runId)}: \`jarvis subtask retry\``,
+      );
+      throw new CliExit(EXIT.error);
+    }
+    ended = run.state === "CANCELLED" || run.state === "COMPLETED";
+    if (!ended) {
+      const engine = createEngine(runtime);
+      const workflow = engine.workflow(run.workflow);
+      const actor = await actorFor(ctx, runtime);
+      try {
+        requestRedo(runtime, run, workflow, step, actor, "cli", options.note);
+      } catch (error) {
+        ctx.out.error(error instanceof Error ? error.message : String(error));
+        throw new CliExit(EXIT.error);
+      }
+      const st = ctx.out.style;
+      ctx.out.line(
+        `${st.ok("↶")} ${st.name(shortRunId(run.id))} goes back to ${step}${options.note ? st.muted(" with your note") : ""} ${st.muted("— the steps after it run again; the checkout keeps what the run wrote")}`,
+      );
+      if (options.noRun) {
+        ctx.out.line(st.muted(`  not started: \`jarvis resume ${shortRunId(run.id)}\``));
+        return;
+      }
+      await executeAndReport(
+        ctx,
+        runtime,
+        engine,
+        runtime.runs.get(run.id) ?? run,
+        false,
+        {},
+        promptFor(ctx, runtime),
+      );
+      return;
+    }
+  } finally {
+    runtime.close();
+  }
+  // ended: a new run from the step
+  await runRestart(ctx, ref, {
+    from: step,
+    ...(options.note ? { note: options.note } : {}),
+    ...(options.noRun ? { noRun: true } : {}),
+  });
 }
 
 /** What the rest of the work is, for the question. */
