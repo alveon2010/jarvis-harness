@@ -230,6 +230,7 @@ describe("worktree workspace end to end (ADR-0003)", () => {
         "  local:",
         '    test-pkg: "cd pkg && echo tests ran in pkg && exit 3"',
         '    test-jest: "cd pkg && echo jest"',
+        '    test-long: "cd pkg && seq 1 60 && exit 4"',
         '    typecheck-other: "cd other && echo never"',
         '    lint: "echo not a check"',
       ].join("\n"),
@@ -263,15 +264,26 @@ steps:
       results: Array<{ check: string; command: string; ok: boolean; skipped?: string; tail?: string }>;
       reasons: Array<{ summary: string }>;
     };
+    const logs = rt.artifacts.listLatest(runId, "check-log");
+    const logText = logs[0] ? rt.artifacts.text(logs[0]) : "";
     rt.close();
+    expect(logs.map((l) => l.name)).toEqual(["test-long.log"]);
+    expect(logText).toContain("\n1\n2\n");
+    expect(logText).toContain("[exit 4");
     expect(checks.changed).toEqual(["pkg/a.ts"]);
     expect(checks.results.map((r) => [r.check, r.ok, r.skipped ?? ""])).toEqual([
       ["test-pkg", false, ""],
       ["test-jest", true, ""],
+      ["test-long", false, ""],
       ["typecheck-other", true, "no changed code in its scope"],
       ["lint", true, ""],
     ]);
-    expect(checks.results[3]?.command).toBe("echo not a check pkg/a.ts");
+    expect(checks.results[4]?.command).toBe("echo not a check pkg/a.ts");
+    // a long failed output: its tail for the reasons, the whole of it kept as a log
+    const long = checks.results[2] as { tail?: string; log?: string };
+    expect(long.tail?.split("\n")).toHaveLength(40);
+    expect(long.log).toMatch(/^art_\w+@\d+$/);
+    expect((checks.results[0] as { log?: string }).log).toBeUndefined();
     // jest on the related tests only, and no related test is not a failure
     expect(checks.results[1]?.command).toBe("cd pkg && echo jest --passWithNoTests --findRelatedTests a.ts");
     expect(checks.reasons[0]?.summary).toContain(

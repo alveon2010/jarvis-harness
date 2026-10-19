@@ -10,7 +10,7 @@ import type { Runtime } from "./runtime.ts";
  * there was no way on to the implementation without starting over.
  */
 /** Kinds of artifacts that belong to the course of a run, not to its bookkeeping. */
-const NOT_CARRIED = new Set(["candidate", "tool-output", "loop-exhausted", "invalid-output"]);
+const NOT_CARRIED = new Set(["candidate", "tool-output", "loop-exhausted", "invalid-output", "check-log"]);
 
 /** Where `target` goes on after the step `from` finished on, or undefined when it cannot. */
 export function continuationStep(from: Run, target: WorkflowDefinition): string | undefined {

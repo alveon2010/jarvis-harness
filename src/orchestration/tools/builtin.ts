@@ -25,6 +25,8 @@ const BEYOND_CODE =
   /\b(telemetry|metrics?|analytics|tracking|logging|events?|docs|documentation|readme|changelog)\b|метрик|аналитик|событи|документац/i;
 const CODE_FILE = /\.(tsx?|jsx?|mjs|cjs|vue|svelte|py|go|rs|java|kt|kts|groovy|scala|cs|rb|php|swift)$/;
 const TEST_FILE = /(\.|_)(test|spec)\.[a-z]+$|(^|\/)(__tests__|tests?)\//;
+/** The whole output of a failed check (`project.checks`), for a person; not carried to a run that goes on. */
+export const CHECK_LOG = "check-log";
 
 /** Repository files named in a text: `src/a.ts`, `src/a.ts:89`, `apps/web/src/x.tsx:12-20`. */
 export function filesNamedIn(text: string, workspace: string): string[] {
@@ -372,10 +374,29 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
       fixed?: string[];
       /** Test classes that fail on the base commit too: not the run's (src/orchestration/tools/baseline.ts). */
       preexisting?: string[];
+      /** The failed command's whole output: a `check-log` artifact (`artifactId@version`). */
+      log?: string;
     }> = [];
     const tools = ctx.runtime.loaded.config.tools;
     const tail = (r: { text?: string; denied?: string }): string =>
       (r.text ?? r.denied ?? "").split("\n").slice(-40).join("\n");
+    // a failed command's whole output, kept: the tail above is for the agent's reasons, a person
+    // reading why tests failed needs all of it (pilot: the tail held the summary, not the failure)
+    const logOf = (check: string, r: { ok: boolean; text?: string; denied?: string }) => {
+      const text = r.text ?? r.denied ?? "";
+      if (r.ok || text.split("\n").length <= 40) return {};
+      const log = ctx.runtime.artifacts.put({
+        runId: ctx.run.id,
+        type: CHECK_LOG,
+        name: `${check.replace(/[^\w.-]+/g, "-")}.log`,
+        content: text,
+        mediaType: "text/plain",
+        provenance: { kind: "tool", capability: `project.${check}` },
+        stepId: ctx.step.id,
+        iteration: ctx.iteration,
+      });
+      return { log: `${log.artifactId}@${log.version}` };
+    };
     // the fixers first (tools.fix): what they fix is no defect, what they cannot is lint's to report
     for (const { run, files } of rulesFor(
       tools.fix,
@@ -421,7 +442,7 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
         check: `rebuild:${name}`,
         command,
         ok: r.ok,
-        ...(r.ok ? {} : { tail: tail(r) }),
+        ...(r.ok ? {} : { tail: tail(r), ...logOf(`rebuild-${name}`, r) }),
       });
       if (r.ok) rebuilt.push(name);
     }
@@ -451,7 +472,7 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
           check: name,
           command,
           ok: r.ok,
-          ...(r.ok ? {} : { tail: tail(r) }),
+          ...(r.ok ? {} : { tail: tail(r), ...logOf(name, r) }),
         });
         continue;
       }
@@ -504,7 +525,7 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
         check: name,
         command: `${command}${related}`,
         ok: r.ok || preexisting?.excused === true,
-        ...(r.ok || preexisting?.excused ? {} : { tail: tail(r) }),
+        ...(r.ok || preexisting?.excused ? {} : { tail: tail(r), ...logOf(name, r) }),
         ...(preexisting && preexisting.classes.length > 0 ? { preexisting: preexisting.classes } : {}),
       });
     }
@@ -517,7 +538,7 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
         continue;
       }
       const r = await ctx.tools.invoke(`project.${run}`, {});
-      results.push({ check: run, command, ok: r.ok, ...(r.ok ? {} : { tail: tail(r) }) });
+      results.push({ check: run, command, ok: r.ok, ...(r.ok ? {} : { tail: tail(r), ...logOf(run, r) }) });
     }
     const failed = results.filter((r) => !r.ok);
     const reasons = failed.map((r) => ({
