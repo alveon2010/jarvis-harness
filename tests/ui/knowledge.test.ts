@@ -40,6 +40,9 @@ function stubLauncher(): Launcher {
     restartRun: () => {
       throw new Error("not here");
     },
+    exec: async () => {
+      throw new Error("not here");
+    },
     startModule(input) {
       started.push({ module: input.module, ...(input.note ? { note: input.note } : {}) });
       const l: Launch = {

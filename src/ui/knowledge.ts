@@ -23,10 +23,13 @@ export interface KnowledgeCounts {
   readonly standards: number;
   readonly skills: number;
   readonly terms: number;
+  /** Services of the knowledge repository's map; the tab shows only with one. */
+  readonly services?: number;
 }
 
 export type KnowledgeTab =
   | "overview"
+  | "services"
   | "ask"
   | "modules"
   | "docs"
@@ -44,6 +47,7 @@ export function knowledgeTabs(current: KnowledgeTab, counts?: KnowledgeCounts): 
   return html`<div class="lede"><h1>Knowledge</h1><span class="muted">what the agents know about this project</span></div>
 <nav class="tabs" aria-label="Knowledge">
 ${tab("overview", "/knowledge", "Overview")}
+${counts?.services !== undefined ? tab("services", "/knowledge/services", "Services", counts.services) : ""}
 ${tab("ask", "/knowledge/ask", "Ask")}
 ${tab("modules", "/knowledge/modules", "Modules")}
 ${tab("docs", "/knowledge/docs", "Documents", counts?.docs)}

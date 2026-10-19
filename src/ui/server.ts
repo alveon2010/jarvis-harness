@@ -46,6 +46,7 @@ import { requestRedo } from "../app/redo.ts";
 import { restartPlanOf } from "../app/restart.ts";
 import { resumableOf } from "../app/resumable.ts";
 import type { Runtime } from "../app/runtime.ts";
+import { servicesOf } from "../app/servicesView.ts";
 import { isDone, resumeMaster, startSubtask, subtasksOf } from "../app/subtasks.ts";
 import { tryOutOf } from "../app/tryOut.ts";
 import { type OpenChecked, type OpenIn, type OpenResult, reviewFiles } from "../cli/checkout.ts";
@@ -53,7 +54,7 @@ import { humanMove } from "../cli/commands/human.ts";
 import type { Actor } from "../core/domain/actor.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import { isTerminal, type Run } from "../core/domain/run.ts";
-import { layoutOf, rootRelative } from "../core/paths.ts";
+import { layoutOf, metaConfigFile, rootRelative } from "../core/paths.ts";
 import { caseOfRun, casesRootOf, runToCase } from "../evals/runToCase.ts";
 import {
   answersText,
@@ -128,6 +129,7 @@ import {
   runsContent,
   startFromHtml,
 } from "./pages.ts";
+import { type ServicesPage, serviceContent, servicesContent } from "./services.ts";
 
 /**
  * `jarvis ui` (ADR-0023 §3, §5): a local page over the journal. `node:http`, no framework; only
@@ -767,6 +769,8 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       decided: html`<div class="banner bad">This candidate was decided meanwhile (in a terminal or another window)</div>`,
       committed: html`<div class="banner ok">Committed: ${file}</div>`,
       "nothing-to-commit": html`<div class="banner bad">Nothing to commit under .jarvis/</div>`,
+      onboarded: html`<div class="banner ok">Onboarded ${file}: the map and the service's documents are written — not committed yet</div>`,
+      "onboard-failed": html`<div class="banner bad">jarvis onboard failed for ${file} — see <code>jarvis logs --event ui.onboard</code></div>`,
       "commit-failed": html`<div class="banner bad">git commit failed — see <code>jarvis logs --event ui.commit</code></div>`,
       opened: html`<div class="banner ok">↗ opened in ${r.url.searchParams.get("editor") ?? "your editor"}</div>`,
       "no-editor": html`<div class="banner bad">No editor found — set JARVIS_EDITOR (code, idea, webstorm…) where you start <code>jarvis ui</code></div>`,
@@ -828,6 +832,27 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
     };
     if (at === "/knowledge/glossary") return glossaryPost(r, form);
     if (at === "/knowledge/ask") return askPost(r, form);
+    if (at === "/knowledge/services/onboard") {
+      // the quick scan of each service, in the knowledge repository: what `jarvis onboard` does there
+      const meta = runtime.loaded.meta;
+      const names = [...new Set(form.getAll("service"))].filter((n) => meta?.repos[n] !== undefined);
+      if (!meta || !options.launcher || names.length === 0) return redirect(r, backTo("no-file"));
+      const failed: string[] = [];
+      for (const name of names) {
+        const out = await options.launcher.exec(["onboard", "--service", name], meta.root);
+        if (out.code !== 0) {
+          failed.push(name);
+          runtime.log.error("ui.onboard", { service: name, code: out.code, output: out.output.slice(-4000) });
+        }
+      }
+      const done = names.filter((n) => !failed.includes(n));
+      return redirect(
+        r,
+        failed.length > 0
+          ? backTo("onboard-failed", `&file=${encodeURIComponent(failed.join(", "))}`)
+          : backTo("onboarded", `&file=${encodeURIComponent(done.join(", "))}`),
+      );
+    }
     if (at === "/knowledge/modules/research") {
       if (!options.launcher) return notFound(r, "Starting research is off here.");
       const tree = await treeOf();
@@ -954,6 +979,7 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       standards: safe(() => loadStandards(r).length),
       skills: safe(() => loadSkills(r).length),
       terms: safe(() => loadGlossary(root).length),
+      ...(runtime.loaded.meta ? { services: Object.keys(runtime.loaded.meta.repos).length } : {}),
     };
   };
   let glossaryCache: { key: string; view: Promise<GlossaryView> } | undefined;
@@ -1017,6 +1043,36 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
         notice,
       );
       return knowledgePage(r, query ? `Knowledge · ${query}` : "Knowledge", content, "/knowledge");
+    }
+    if (at === "/knowledge/services") {
+      const meta = runtime.loaded.meta;
+      if (!meta)
+        return notFound(r, "Services are those of a knowledge repository's map: this repository has none.");
+      const view = servicesOf({
+        metaRoot: meta.root,
+        repos: meta.repos,
+        runs: runtime.runs.list({ includeTerminal: true, limit: 500 }),
+        projectRoot: root,
+      });
+      const servicesPage: ServicesPage = {
+        counts,
+        view,
+        homeDir: options.homeDir,
+        configPath: rootRelative(root, metaConfigFile(meta.root)),
+        fileOf: (rel) => rootRelative(root, joinPath(meta.root, rel)),
+        canOnboard: options.launcher !== undefined,
+      };
+      const name = q("name");
+      const one = name ? view.services.find((x) => x.name === name) : undefined;
+      if (name && !one) return notFound(r, `${name} is not a service of the map.`);
+      return knowledgePage(
+        r,
+        one ? `Knowledge · ${one.name}` : "Knowledge · services",
+        one
+          ? serviceContent(servicesPage, one, actions, notice)
+          : servicesContent(servicesPage, actions, notice),
+        r.url.pathname + r.url.search,
+      );
     }
     if (at === "/knowledge/docs") {
       const docs = await docsOf(roots(), usage);

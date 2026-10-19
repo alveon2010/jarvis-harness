@@ -92,6 +92,11 @@ export interface Launcher {
   tend(now?: Date): void;
   /** The last lines of a launch's log. */
   tail(launch: Launch, lines?: number): string;
+  /**
+   * A short command of the CLI, waited for (`jarvis onboard --service <name>` — a scan, no model):
+   * its exit code and what it printed. Killed past `timeoutMs`.
+   */
+  exec(args: readonly string[], cwd: string, timeoutMs?: number): Promise<{ code: number; output: string }>;
 }
 
 export interface LauncherOptions {
@@ -184,6 +189,37 @@ export function createLauncher(options: LauncherOptions): Launcher {
   };
 
   return {
+    exec(args, cwd, timeoutMs = 180_000) {
+      const [command, ...pre] = options.cli;
+      return new Promise((done) => {
+        let output = "";
+        const child = spawn(command as string, [...pre, ...args], {
+          cwd,
+          stdio: ["ignore", "pipe", "pipe"],
+          env: {
+            ...process.env,
+            ...options.env,
+            JARVIS_INTERACTIVE: "off",
+            JARVIS_PROGRESS: "plain",
+            NO_COLOR: "1",
+          },
+        });
+        const keep = (b: Buffer) => {
+          output = (output + b.toString("utf8")).slice(-20_000);
+        };
+        child.stdout?.on("data", keep);
+        child.stderr?.on("data", keep);
+        const timer = setTimeout(() => child.kill("SIGTERM"), timeoutMs);
+        child.on("error", (e) => {
+          clearTimeout(timer);
+          done({ code: 127, output: `${output}${e.message}` });
+        });
+        child.on("close", (code) => {
+          clearTimeout(timer);
+          done({ code: code ?? 1, output });
+        });
+      });
+    },
     startModule(input) {
       const id = randomBytes(6).toString("hex");
       const launch: Launch = {
