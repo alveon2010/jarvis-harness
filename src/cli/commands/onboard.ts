@@ -8,6 +8,7 @@ import { codeContractsOf } from "../../design/codeContracts.ts";
 import { CONTRACTS_FILE, serviceContractsOf, springConfigOf } from "../../knowledge/catalog.ts";
 import { repoIdOf, updateGraph } from "../../knowledge/graph/update.ts";
 import { mapModule, taskFor } from "../../onboarding/deep.ts";
+import { declaredPublishes, librariesOf, libraryOf, usesOf } from "../../onboarding/library.ts";
 import {
   applyCommands,
   ONBOARD_MARKER,
@@ -153,10 +154,22 @@ export async function runOnboard(ctx: CliContext, options: OnboardOptions): Prom
   // a service: its kind and commands into its entry of the map, where nothing is set (ADR-0025 §2)
   let entry: FilledEntry | undefined;
   if (service && configPath && existsSync(configPath)) {
-    const kind = kindOf(report.stacks);
+    // a library: it changes first in a task across services, and is published for the others' builds;
+    // the services that depend on it — by the names the map's libraries publish
+    const library = libraryOf(root);
+    const others = Object.fromEntries(
+      Object.entries(loaded.meta?.repos ?? {}).filter(([name]) => name !== service),
+    );
+    const uses = usesOf(root, librariesOf(others, declaredPublishes(readFileSync(configPath, "utf8"))));
+    const kind = library ? "library" : kindOf(report.stacks);
     entry = fillServiceEntry(readFileSync(configPath, "utf8"), service, {
       ...(kind ? { kind } : {}),
-      commands: report.commands,
+      commands: [
+        ...report.commands,
+        ...(library ? [{ name: "publish-local", command: library.publishLocal }] : []),
+      ],
+      ...(library ? { publishes: library.publishes } : {}),
+      ...(uses.length > 0 ? { uses } : {}),
     });
     if (entry.added.length > 0 && !options.dryRun) writeFileSync(configPath, entry.text, "utf8");
   }

@@ -162,6 +162,28 @@ describe("jarvis onboard in a knowledge repository", () => {
     expect(r.out).toContain("added to services.orders-api");
   });
 
+  it("a library and the services that use it: its kind, what it publishes, publish-local; their uses", async () => {
+    repo("common-lib", {
+      "build.gradle": "plugins {\n  id 'java-library'\n  id 'maven-publish'\n}\ngroup = 'com.example'\n",
+      "settings.gradle": "rootProject.name = 'common-lib'\n",
+    });
+    sb.write(
+      "repos/orders-api/build.gradle",
+      "dependencies { implementation 'com.example:common-lib:2.14.0' }\n",
+    );
+    await jarvis(meta, ["init", "--knowledge", "--project-only"]);
+    for (const name of ["common-lib", "orders-api"]) {
+      execFileSync("git", ["add", "-A"], { cwd: join(repos, name) });
+      commit(join(repos, name));
+    }
+    const r = await jarvis(meta, ["onboard", "--no-graph"]);
+    expect(r.code).toBe(0);
+    const map = readFileSync(join(meta, "project.yaml"), "utf8");
+    expect(map).toMatch(/common-lib:\n {4}kind: library\n {4}publishes: \[ com\.example:common-lib \]/);
+    expect(map).toContain("publish-local: gradle publishToMavenLocal");
+    expect(map).toMatch(/orders-api:\n {4}kind: backend\n {4}uses: \[ common-lib \]/);
+  });
+
   it("--service: one of the map; a name not in it is said", async () => {
     await jarvis(meta, ["init", "--knowledge", "--project-only"]);
     commit(join(repos, "orders-api"));

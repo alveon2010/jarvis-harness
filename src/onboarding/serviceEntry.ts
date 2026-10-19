@@ -1,11 +1,11 @@
-import { isMap, isScalar, parseDocument, type YAMLMap } from "yaml";
+import { isMap, isScalar, isSeq, parseDocument, type YAMLMap } from "yaml";
 
 /**
  * What `jarvis onboard` writes into a service's entry of the knowledge repository's map (ADR-0025 §2):
  * its kind and the commands the scan found, each only where nothing is set — neither under the service
  * nor in the shared configuration above it. What a person wrote stays as it is.
  */
-export type ServiceKind = "backend" | "frontend";
+export type ServiceKind = "backend" | "frontend" | "library";
 
 const FRONTEND = new Set(["react", "vue", "angular", "svelte", "nextjs"]);
 const BACKEND = new Set(["java", "kotlin", "dotnet", "csharp", "go", "python", "rust", "node"]);
@@ -32,7 +32,14 @@ const keyOf = (map: YAMLMap, key: string): boolean =>
 export function fillServiceEntry(
   text: string,
   service: string,
-  found: { readonly kind?: ServiceKind; readonly commands: ReadonlyArray<{ name: string; command: string }> },
+  found: {
+    readonly kind?: ServiceKind;
+    readonly commands: ReadonlyArray<{ name: string; command: string }>;
+    /** A library: the names services depend on it by. */
+    readonly publishes?: readonly string[];
+    /** The libraries of the map it depends on. */
+    readonly uses?: readonly string[];
+  },
 ): FilledEntry {
   const doc = parseDocument(text);
   const services = doc.get("services", true);
@@ -56,6 +63,20 @@ export function fillServiceEntry(
     if (!own || !keyOf(own, "kind")) set(["kind"], found.kind);
     else if (doc.getIn(["services", service, "kind"]) !== found.kind) kept.push("kind");
   }
+  const list = (key: "publishes" | "uses", values: readonly string[] | undefined) => {
+    if (!values || values.length === 0) return;
+    if (!own || !keyOf(own, key)) {
+      const node = doc.createNode([...values]);
+      node.flow = true;
+      set([key], node);
+    } else {
+      const now = doc.getIn(["services", service, key]);
+      const same = isSeq(now) && JSON.stringify(now.toJSON()) === JSON.stringify([...values]);
+      if (!same) kept.push(key);
+    }
+  };
+  list("publishes", found.publishes);
+  list("uses", found.uses);
   for (const c of found.commands) {
     const path = ["tools", "local", c.name];
     // said only where what is set differs from what the scan found

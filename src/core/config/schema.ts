@@ -623,8 +623,16 @@ export const ServiceConfigSchema = ProjectFieldsSchema.omit({ version: true }).e
   repo: z.string().min(1).optional(),
   /** The path segment the balancer routes to it (`http://${SERVICE_HOST}/<path>`), when not its name. */
   path: z.string().min(1).optional(),
-  /** What it is, as `jarvis onboard` found it from its stack (src/onboarding/serviceEntry.ts); said, not acted on. */
-  kind: z.enum(["backend", "frontend"]).optional(),
+  /**
+   * What it is, as `jarvis onboard` found it (src/onboarding/serviceEntry.ts). `library`: in a task across
+   * services it changes first — the services that use it start once its change is accepted and published
+   * (`tools.local.publish-local`); backend and frontend are said, not acted on.
+   */
+  kind: z.enum(["backend", "frontend", "library"]).optional(),
+  /** A library: the names the services depend on it by (`com.example:common-lib`, `@acme/ui-kit`). */
+  publishes: z.array(z.string().min(1)).optional(),
+  /** The libraries of the map this service depends on: it waits for their change in a task across services. */
+  uses: z.array(ServiceNameSchema).optional(),
 });
 export type ServiceConfig = z.infer<typeof ServiceConfigSchema>;
 
