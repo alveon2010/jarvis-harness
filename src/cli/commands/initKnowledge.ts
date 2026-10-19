@@ -1,8 +1,8 @@
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import { knowledgeConfigOf, serviceRepos } from "../../core/config/meta.ts";
-import { ServiceNameSchema } from "../../core/config/schema.ts";
 import { metaProjectPaths, PROJECT_CONFIG, PROJECT_DIR } from "../../core/paths.ts";
+import { type FoundRepo, findServiceRepos } from "../../onboarding/serviceRepos.ts";
 import { git } from "../../tools/local/exec.ts";
 import type { CliContext } from "../context.ts";
 import { KNOWLEDGE_README, PROJECT_CONFIG_TEMPLATE, SKILLS_README, STANDARDS_README } from "../templates.ts";
@@ -15,17 +15,6 @@ import { runInit } from "./init.ts";
  * read in them but which folder is a repository and its build file; their code is `jarvis onboard`'s.
  * The map is a draft to edit. Run again, it writes nothing over and lists what the map has not yet.
  */
-export interface FoundRepo {
-  readonly name: string;
-  readonly path: string;
-  /** From its build file: gradle, maven, node, go, python. */
-  readonly stack?: string;
-  /** It has a `.jarvis/` of its own: it works on its own until that is removed. */
-  readonly ownJarvis: boolean;
-  /** Already in the knowledge repository's map. */
-  readonly mapped: boolean;
-}
-
 export interface InitKnowledgeReport {
   readonly root: string;
   readonly reposDir: string;
@@ -36,52 +25,6 @@ export interface InitKnowledgeReport {
   readonly created: string[];
   readonly skipped: string[];
   readonly gitInit: boolean;
-}
-
-const STACKS: ReadonlyArray<readonly [string, string]> = [
-  ["build.gradle.kts", "gradle"],
-  ["build.gradle", "gradle"],
-  ["pom.xml", "maven"],
-  ["package.json", "node"],
-  ["go.mod", "go"],
-  ["pyproject.toml", "python"],
-  ["requirements.txt", "python"],
-];
-
-const stackOf = (dir: string): string | undefined => STACKS.find(([f]) => existsSync(join(dir, f)))?.[1];
-
-/** The git repositories under `reposDir`, but the knowledge repository and any other one. */
-export function findServiceRepos(
-  reposDir: string,
-  knowledgeRoot: string,
-  mapped: ReadonlySet<string>,
-): FoundRepo[] {
-  let names: string[] = [];
-  try {
-    names = readdirSync(reposDir, { withFileTypes: true })
-      .filter((d) => d.isDirectory() && !d.name.startsWith("."))
-      .map((d) => d.name)
-      .sort((a, b) => a.localeCompare(b));
-  } catch {
-    return [];
-  }
-  const out: FoundRepo[] = [];
-  for (const name of names) {
-    const path = join(reposDir, name);
-    if (resolve(path) === resolve(knowledgeRoot)) continue;
-    if (!existsSync(join(path, ".git"))) continue;
-    if (!ServiceNameSchema.safeParse(name).success) continue;
-    if (knowledgeConfigOf(path)) continue;
-    const stack = stackOf(path);
-    out.push({
-      name,
-      path,
-      ...(stack ? { stack } : {}),
-      ownJarvis: existsSync(join(path, PROJECT_DIR, PROJECT_CONFIG)),
-      mapped: mapped.has(name),
-    });
-  }
-  return out;
 }
 
 const HEADER = `# project.yaml — the knowledge repository of many services (ADR-0025). Versioned here only: the
