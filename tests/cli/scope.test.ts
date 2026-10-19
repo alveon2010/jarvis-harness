@@ -147,7 +147,15 @@ describe("the scope gate of an sdd in a service", () => {
     const runs = await lastRun(orders);
     const master = runs.find((x) => x.workflow === "sdd-cross");
     expect(master?.workspace.repoRoot).toBe(meta);
-    expect(master?.currentStep).toBe("catalog");
+    // past its research and the approved spec: the split, with the catalog made for it
+    expect(master?.currentStep).toBe("split");
+    const rt = createRuntime(await loadConfig({ cwd: meta, homeDir: sb.home, env: {} }), { env: {} });
+    try {
+      const catalog = rt.artifacts.listLatest(master?.id as string, "catalog")[0];
+      expect(catalog && rt.artifacts.text(catalog)).toContain("# The services and their contracts");
+    } finally {
+      rt.close();
+    }
     expect(runs.find((x) => x.id === waiting?.id)?.state).toBe("CANCELLED");
     expect(launches.map((l) => [l.args[0], l.cwd])).toEqual([["resume", meta]]);
   });

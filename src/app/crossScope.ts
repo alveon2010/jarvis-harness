@@ -3,6 +3,7 @@ import type { Run } from "../core/domain/run.ts";
 import { layoutOf } from "../core/paths.ts";
 import { type Catalog, catalogOf, type NamedService, namedServices } from "../knowledge/catalog.ts";
 import { newRunId, shortRunId } from "../storage/runStore.ts";
+import { crossCatalogText } from "./crossCatalog.ts";
 import { handOff } from "./handoff.ts";
 import type { Runtime } from "./runtime.ts";
 import { MASTER_WORKFLOW, resumeMaster } from "./subtasks.ts";
@@ -117,7 +118,7 @@ export function goSingle(runtime: Runtime, run: Run, actor: Actor, channel: "cli
 
 /**
  * «Continue as sdd (cross-repos)» (also from a finished research): a master run in the knowledge
- * repository with this run's research and approved spec, from its catalog step (`startAt`); this run
+ * repository with this run's research and approved spec, from its split (`startAt`), the catalog made for it; this run
  * ends there — its service gets a subtask of its own. The master goes on in the background, in the
  * knowledge repository, with its configuration.
  */
@@ -126,7 +127,7 @@ export function goCross(
   run: Run,
   actor: Actor,
   channel: "cli" | "ui",
-  startAt = "catalog",
+  startAt = "split",
 ): Run {
   const meta = runtime.loaded.meta;
   if (!meta) throw new Error("not a service of a knowledge repository: no task across services");
@@ -140,6 +141,18 @@ export function goCross(
     ...(run.profile ? { profile: run.profile } : {}),
   });
   const carried = handOff(runtime, run, master, startAt);
+  // the catalog comes before the research; a master that starts past it gets it made now
+  const catalog = crossCatalogText(runtime, runtime.runs.get(master.id) ?? master);
+  if (catalog !== undefined)
+    runtime.artifacts.put({
+      runId: master.id,
+      type: "catalog",
+      name: "catalog.md",
+      content: catalog,
+      provenance: { kind: "tool", capability: "cross.catalog" },
+      stepId: "catalog",
+      iteration: 1,
+    });
   runtime.events.emit({
     kind: "run.created",
     runId: master.id,
@@ -201,4 +214,4 @@ export function crossContinuationOf(runtime: Runtime, run: Run): readonly NamedS
 }
 
 /** Where a master made from a finished run starts: after the research, or after an approved spec. */
-export const crossStartOf = (run: Run): string => (run.workflow === "spec" ? "catalog" : "spec");
+export const crossStartOf = (run: Run): string => (run.workflow === "spec" ? "split" : "spec");

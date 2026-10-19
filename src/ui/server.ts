@@ -48,6 +48,7 @@ import { resumableOf } from "../app/resumable.ts";
 import type { Runtime } from "../app/runtime.ts";
 import { servicesOf } from "../app/servicesView.ts";
 import {
+  IN_KNOWLEDGE_REPO,
   isDone,
   libraryBlockers,
   libraryMapOf,
@@ -468,6 +469,8 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       cleaned: html`<div class="banner ok">Checkout removed — the files go in the background; the branch stays</div>`,
       applied: html`<div class="banner ok">Applied: ${r.url.searchParams.get("files") ?? "?"} file(s) as <code>${r.url.searchParams.get("commit") ?? ""}</code> on the branch checked out in the repository — not pushed</div>`,
       "went-cross": html`<div class="banner ok">Going on as a task across services: the research and the spec are here — next, the split to approve</div>`,
+      "knowledge-no-code": html`<div class="banner bad">The knowledge repository has no code to change: pick sdd (cross-repos) for a task across services, or the service's repository for a task in one</div>`,
+      "cross-elsewhere": html`<div class="banner bad">sdd (cross-repos) runs in the knowledge repository of the services: pick it as the repository</div>`,
       "subtask-started": html`<div class="banner ok">The subtask starts in its service's repository — it shows up here in a moment</div>`,
       "subtask-publishing": html`<div class="banner ok">publish-local runs again in the library's checkout — the services waiting for it start when it passes</div>`,
       "subtask-dropped": html`<div class="banner ok">Dropped from the task; once the others are done the master goes on without it</div>`,
@@ -1344,13 +1347,15 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
   /** Workflows a finished run goes on as (`next:`): "New task" offers a research to start them from. */
   const targets = (): Set<string> =>
     new Set(
-      WORKFLOWS.map((w) => {
-        try {
-          return engine.workflow(w.id).next;
-        } catch {
-          return undefined;
-        }
-      }).filter((w): w is string => w !== undefined),
+      [...WORKFLOWS.map((w) => w.id), ...Object.values(IN_KNOWLEDGE_REPO)]
+        .map((w) => {
+          try {
+            return engine.workflow(w).next;
+          } catch {
+            return undefined;
+          }
+        })
+        .filter((w): w is string => w !== undefined),
     );
 
   /**
@@ -1433,6 +1438,13 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
     const repo = form.get("repo") ?? options.projectRoot ?? "";
     if (!task || !workflow) return redirect(r, "/?notice=no-task#new");
     if (!knownRepos().includes(repo) || !existsSync(repo)) return redirect(r, "/?notice=no-repo#new");
+    // the knowledge repository has no code: research and spec there are across services, sdd and fix
+    // are not; sdd (cross-repos) runs nowhere else
+    const meta = runtime.loaded.meta;
+    const inKnowledge = meta !== undefined && resolvePath(repo) === resolvePath(meta.root);
+    if (inKnowledge && (workflow === "sdd" || workflow === "fix"))
+      return redirect(r, "/?notice=knowledge-no-code#new");
+    if (!inKnowledge && workflow === "sdd-cross") return redirect(r, "/?notice=cross-elsewhere#new");
     const fromRef = form.get("from");
     if (fromRef) {
       // started from a finished research (the box under the form): `jarvis continue <run>`

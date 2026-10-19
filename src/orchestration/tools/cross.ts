@@ -1,11 +1,11 @@
 import { existsSync } from "node:fs";
 import { applyRun } from "../../app/applyRun.ts";
+import { crossCatalogText } from "../../app/crossCatalog.ts";
 import { SCOPE_TYPE, scopeDecision, scopeOf } from "../../app/crossScope.ts";
 import {
   type ContractItem,
   deliveryOrder,
   isDone,
-  libraryMapOf,
   scheduleSubtasks,
   splitOf,
   subtasksOf,
@@ -13,9 +13,6 @@ import {
 import type { Run } from "../../core/domain/run.ts";
 import { codeContractsOf } from "../../design/codeContracts.ts";
 import {
-  catalogDoc,
-  catalogOf,
-  namedServices,
   parseEndpoint,
   type ServiceContracts,
   sameEndpoint,
@@ -49,30 +46,12 @@ const put = (ctx: StepContext, type: string, name: string, content: string, medi
   return `${a.artifactId}@${a.version}`;
 };
 
-/** The task's text and its latest specification, for what they name. */
-function taskText(ctx: StepContext): string {
-  const spec = ctx.runtime.artifacts.listLatest(ctx.run.id, "spec")[0];
-  return `${ctx.run.task}\n${spec ? ctx.runtime.artifacts.text(spec) : ""}`;
-}
-
-/** `cross.catalog`: the services, their links and what the task names — the split agent's input. */
+/** `cross.catalog`: the services, their links, the libraries and what the task names — for the research and the split. */
 const catalogStep: DeterministicTool = async (ctx) => {
-  const m = meta(ctx);
-  if (!m)
+  const text = crossCatalogText(ctx.runtime, ctx.run);
+  if (text === undefined)
     return { status: "failure", reason: "a task across services runs in a knowledge repository (ADR-0025)" };
-  const catalog = catalogOf(m.root);
-  const names = Object.keys(m.repos).sort();
-  const named = namedServices(catalog, taskText(ctx), names);
-  const map = libraryMapOf(ctx.runtime);
-  const libraries = [...map.libraries].sort().map((service) => ({
-    service,
-    publishes: map.publishes.get(service) ?? [],
-    usedBy: names.filter((n) => (map.uses.get(n) ?? []).includes(service)),
-  }));
-  return {
-    status: "success",
-    outputs: [put(ctx, "catalog", "catalog.md", catalogDoc(catalog, names, named, libraries))],
-  };
+  return { status: "success", outputs: [put(ctx, "catalog", "catalog.md", text)] };
 };
 
 /** `cross.spawn`: the approved split's subtasks, the first ones started. */

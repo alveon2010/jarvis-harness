@@ -432,12 +432,19 @@ steps:
     kind: deterministic
     tool: sources.collect
     outputs: [sources, design]
+    transitions: { onSuccess: catalog }
+  # the services, their links, the libraries and what the task names: from the map and the contract
+  # catalog, no model — the research starts from it, the split builds on it
+  - id: catalog
+    kind: deterministic
+    tool: cross.catalog
+    outputs: [catalog]
     transitions: { onSuccess: research }
   - id: research
     kind: agentic
     agent: research
     phase: research
-    inputs: [sources, design]
+    inputs: [sources, design, catalog]
     outputs: [research]
     transitions: { onSuccess: spec }
   - id: spec
@@ -452,15 +459,9 @@ steps:
     kind: approval
     artifactType: spec
     transitions:
-      onSuccess: catalog
+      onSuccess: split
       onOutcome:
         request_changes: { to: spec, maxIterations: 3 }
-  # the services, their links and what the task names: from the contract catalog, no model
-  - id: catalog
-    kind: deterministic
-    tool: cross.catalog
-    outputs: [catalog]
-    transitions: { onSuccess: split }
   - id: split
     kind: agentic
     agent: split
@@ -505,7 +506,81 @@ steps:
     transitions: { onSuccess: DONE }
 `;
 
+/**
+ * In a knowledge repository there is no code to research: `jarvis research` there researches a task
+ * across services — the map, the links, the services' knowledge — and goes on as sdd-cross.
+ */
+export const RESEARCH_CROSS_WORKFLOW = `
+name: research-cross
+version: 1
+description: Research across services, in the knowledge repository — what the task touches in which service, nothing changed
+entry: sources
+next: sdd-cross
+steps:
+  - id: sources
+    kind: deterministic
+    tool: sources.collect
+    outputs: [sources, design]
+    transitions: { onSuccess: catalog }
+  - id: catalog
+    kind: deterministic
+    tool: cross.catalog
+    outputs: [catalog]
+    transitions: { onSuccess: research }
+  - id: research
+    kind: agentic
+    agent: research
+    phase: research
+    inputs: [sources, design, catalog]
+    outputs: [research]
+    transitions: { onSuccess: DONE }
+`;
+
+/** `jarvis spec` in a knowledge repository: up to the approved spec of a task across services. */
+export const SPEC_CROSS_WORKFLOW = `
+name: spec-cross
+version: 1
+description: Up to the approved spec of a task across services, in the knowledge repository
+entry: sources
+next: sdd-cross
+steps:
+  - id: sources
+    kind: deterministic
+    tool: sources.collect
+    outputs: [sources, design]
+    transitions: { onSuccess: catalog }
+  - id: catalog
+    kind: deterministic
+    tool: cross.catalog
+    outputs: [catalog]
+    transitions: { onSuccess: research }
+  - id: research
+    kind: agentic
+    agent: research
+    phase: research
+    inputs: [sources, design, catalog]
+    outputs: [research]
+    transitions: { onSuccess: spec }
+  - id: spec
+    kind: agentic
+    agent: specification
+    onLimit: ask
+    phase: spec
+    inputs: [research, design]
+    outputs: [spec]
+    transitions: { onSuccess: approve-spec }
+  - id: approve-spec
+    kind: approval
+    artifactType: spec
+    transitions:
+      onSuccess: DONE
+      onOutcome:
+        request_changes: { to: spec, maxIterations: 3 }
+`;
+
 export const BUILTIN_WORKFLOWS: Readonly<Record<string, string>> = {
+  "research-cross": RESEARCH_CROSS_WORKFLOW,
+  "spec-cross": SPEC_CROSS_WORKFLOW,
   "sdd-cross": SDD_CROSS_WORKFLOW,
   sdd: SDD_WORKFLOW,
   fix: FIX_WORKFLOW,

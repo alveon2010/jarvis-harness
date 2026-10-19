@@ -42,6 +42,47 @@ export interface Split {
 export const SPLIT_TYPE = "split";
 export const MASTER_WORKFLOW = "sdd-cross";
 
+/**
+ * Workflows of a knowledge repository (ADR-0025): they read the map and the services' knowledge and
+ * change no code there — they run in its working copy, not a worktree of their own.
+ */
+export const CROSS_WORKFLOWS: ReadonlySet<string> = new Set([
+  MASTER_WORKFLOW,
+  "research-cross",
+  "spec-cross",
+]);
+
+/** In a knowledge repository, what `jarvis research` and `jarvis spec` run as. */
+export const IN_KNOWLEDGE_REPO: Readonly<Record<string, string>> = {
+  research: "research-cross",
+  spec: "spec-cross",
+};
+
+/**
+ * The workflow a run in this repository goes as: research and spec of a knowledge repository as their
+ * cross-service kind; a workflow that changes code there is refused, as is a cross one outside it.
+ */
+export function workflowHere(
+  name: string,
+  meta: { readonly root: string; readonly service?: string } | undefined,
+): { workflow: string } | { refused: string } {
+  const knowledgeRepo = meta !== undefined && meta.service === undefined;
+  if (knowledgeRepo) {
+    const cross = IN_KNOWLEDGE_REPO[name];
+    if (cross) return { workflow: cross };
+    if (name === "sdd" || name === "fix")
+      return {
+        refused: `the knowledge repository has no code to change: a task across services is \`jarvis work "<task>" --workflow ${MASTER_WORKFLOW}\` here; a task in one service — run it in that service's repository`,
+      };
+    return { workflow: name };
+  }
+  if (CROSS_WORKFLOWS.has(name))
+    return {
+      refused: `${name} runs in the knowledge repository of the services${meta?.service ? ` (this is the service ${meta.service}; run it in ${meta.root})` : ""}`,
+    };
+  return { workflow: name };
+}
+
 const strings = (v: unknown): string[] =>
   Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
 

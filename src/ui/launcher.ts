@@ -26,14 +26,22 @@ export const WORKFLOWS: ReadonlyArray<{
   readonly about: string;
 }> = [
   // first and selected: find out before changing anything
-  { id: "research", label: "research", about: "find out and write it down, nothing changed" },
+  {
+    id: "research",
+    label: "research",
+    about: "find out and write it down, nothing changed; in the knowledge repository — across its services",
+  },
   { id: "fix", label: "fix", about: "a short way for a bug: spec, implementation, checks, review" },
   {
     id: "sdd",
     label: "sdd",
     about: "the full way: requirements, spec to approve, impact, plan, implementation",
   },
-  { id: "spec", label: "spec", about: "up to an approved spec, nothing implemented" },
+  {
+    id: "spec",
+    label: "spec",
+    about: "up to an approved spec, nothing implemented; in the knowledge repository — across its services",
+  },
   {
     id: "sdd-cross",
     label: "sdd (cross-repos)",

@@ -13,7 +13,7 @@ import { noteForStart, requestRedo } from "../../app/redo.ts";
 import { carriedSteps, RESTARTABLE, restartPlanOf } from "../../app/restart.ts";
 import { createRuntime, type Runtime } from "../../app/runtime.ts";
 import { runDetail } from "../../app/status.ts";
-import { afterRunStops, MASTER_WORKFLOW } from "../../app/subtasks.ts";
+import { afterRunStops, CROSS_WORKFLOWS, workflowHere } from "../../app/subtasks.ts";
 import type { Approval } from "../../artifacts/store.ts";
 import { resolveActor } from "../../core/actor/resolve.ts";
 import type { Actor } from "../../core/domain/actor.ts";
@@ -493,7 +493,10 @@ async function startContinuation(
   ctx.out.note(
     `${ctx.out.errStyle.ok("→")} run ${shortRunId(from.id)} goes on as ${targetName} from ${startAt} ${ctx.out.errStyle.muted("— preparing the checkout")}`,
   );
-  const workspace = await prepareWorkspace(ctx, runtime, runId, from.task, undefined, prompt);
+  // research or spec across services goes on as sdd-cross in the same knowledge repository
+  const workspace: WorkspaceRef = CROSS_WORKFLOWS.has(targetName)
+    ? { mode: "cwd", repoRoot: from.workspace.repoRoot, path: from.workspace.repoRoot, baseRef: "HEAD" }
+    : await prepareWorkspace(ctx, runtime, runId, from.task, undefined, prompt);
   const run = runtime.runs.create({
     id: runId,
     task: from.task,
@@ -527,6 +530,8 @@ async function startContinuation(
     ctx.out.line(
       st.muted(`  works in its own checkout ${workspace.path}; yours stays as it is until \`jarvis apply\``),
     );
+  else if (CROSS_WORKFLOWS.has(targetName))
+    ctx.out.line(st.muted("  works in the knowledge repository: the subtasks change the services' code"));
   else ctx.out.line(st.warn("  works in your checkout: changes land in your working tree"));
   return runtime.runs.get(run.id);
 }
@@ -608,10 +613,9 @@ export async function runRestart(
     const actor = await actorFor(here, runtime);
     const runId = newRunId();
     const prompt = promptFor(here, runtime);
-    const workspace: WorkspaceRef =
-      from.workflow === MASTER_WORKFLOW
-        ? { mode: "cwd", repoRoot: from.workspace.repoRoot, path: from.workspace.repoRoot, baseRef: "HEAD" }
-        : await prepareWorkspace(here, runtime, runId, from.task, undefined, prompt);
+    const workspace: WorkspaceRef = CROSS_WORKFLOWS.has(from.workflow)
+      ? { mode: "cwd", repoRoot: from.workspace.repoRoot, path: from.workspace.repoRoot, baseRef: "HEAD" }
+      : await prepareWorkspace(here, runtime, runId, from.task, undefined, prompt);
     const run = runtime.runs.create({
       id: runId,
       task: from.task,
@@ -741,7 +745,13 @@ export async function runWork(
   const runtime = createRuntime(loaded, { env: ctx.env });
   try {
     const engine = createEngine(runtime);
-    const workflowName = options.workflow ?? "sdd";
+    // in a knowledge repository research and spec are across services; work and fix have no code there
+    const here = workflowHere(options.workflow ?? "sdd", loaded.meta);
+    if ("refused" in here) {
+      ctx.out.error(here.refused);
+      throw new CliExit(EXIT.error);
+    }
+    const workflowName = here.workflow;
     const workflow = engine.workflow(workflowName);
     const actor = await actorFor(ctx, runtime);
     const preflight = await preflightMcp(runtime, workflow);
@@ -758,21 +768,14 @@ export async function runWork(
     }
     const runId = newRunId();
     // a task across services runs in the knowledge repository and changes no code there (ADR-0025 §6)
-    if (workflowName === MASTER_WORKFLOW && (!loaded.meta || loaded.meta.service)) {
-      ctx.out.error(
-        `${MASTER_WORKFLOW} runs in the knowledge repository of the services${loaded.meta?.service ? ` (this is the service ${loaded.meta.service}; run it in ${loaded.meta.root})` : ""}`,
-      );
-      throw new CliExit(EXIT.error);
-    }
-    const workspace =
-      workflowName === MASTER_WORKFLOW
-        ? ({
-            mode: "cwd",
-            repoRoot: loaded.project?.root ?? ctx.cwd,
-            path: loaded.project?.root ?? ctx.cwd,
-            baseRef: "HEAD",
-          } satisfies WorkspaceRef)
-        : await prepareWorkspace(ctx, runtime, runId, task, options.base);
+    const workspace = CROSS_WORKFLOWS.has(workflowName)
+      ? ({
+          mode: "cwd",
+          repoRoot: loaded.project?.root ?? ctx.cwd,
+          path: loaded.project?.root ?? ctx.cwd,
+          baseRef: "HEAD",
+        } satisfies WorkspaceRef)
+      : await prepareWorkspace(ctx, runtime, runId, task, options.base);
     const run = runtime.runs.create({
       id: runId,
       task,

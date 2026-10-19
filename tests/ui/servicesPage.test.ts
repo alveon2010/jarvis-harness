@@ -134,3 +134,15 @@ describe("Services in jarvis ui", () => {
     expect((await page(bad.location)).text).toContain("jarvis onboard failed for orders-api");
   });
 });
+
+describe("New task in a knowledge repository", () => {
+  it("sdd and fix are refused there: no code to change", async () => {
+    const r = await post("/runs/new", [
+      ["task", "ABC-64"],
+      ["workflow", "fix"],
+      ["repo", meta()],
+    ]);
+    expect(r.location).toBe("/?notice=knowledge-no-code#new");
+    expect((await page(r.location)).text).toContain("The knowledge repository has no code to change");
+  });
+});
