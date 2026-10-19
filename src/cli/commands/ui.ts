@@ -38,6 +38,7 @@ export function systemBrowser(ctx: CliContext): BrowserOpener {
       const child = spawn(command[0] as string, command.slice(1), {
         detached: true,
         stdio: "ignore",
+        windowsHide: true,
         env: { ...process.env, ...env },
       });
       child.on("error", () => {});

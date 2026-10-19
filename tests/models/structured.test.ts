@@ -116,6 +116,40 @@ describe("generateStructured", () => {
     expect(soe.rawText).toBe("nope");
     expect(server.requests).toHaveLength(3);
   });
+
+  it("an answer cut at the output limit: asks for a shorter document, without the cut text, and says why", async () => {
+    const cut = (text: string) =>
+      completion(text, {
+        choices: [{ index: 0, finish_reason: "length", message: { role: "assistant", content: text } }],
+      });
+    server.queue(
+      cut('{"title":"T","risks":["a very long'),
+      completion(JSON.stringify({ title: "T", risks: ["r"] })),
+    );
+    const r = await generateStructured(gateway(), {
+      modelId: "private",
+      mode: "json",
+      name: "spec",
+      schema: Spec,
+      messages,
+    });
+    expect(r.repairs).toBe(1);
+    const second = server.requests[1]?.body as { messages: Array<{ role: string; content: string }> };
+    expect(second.messages).toHaveLength(messages.length);
+    expect(second.messages.at(-1)?.content).toContain("cut off at the output limit");
+    expect(JSON.stringify(second.messages)).not.toContain("a very long");
+
+    server.queue(cut('{"title":"'), cut('{"title":"'), cut('{"title":"'));
+    const error = (await generateStructured(gateway(), {
+      modelId: "private",
+      mode: "json",
+      name: "spec",
+      schema: Spec,
+      messages,
+    }).catch((e: unknown) => e)) as StructuredOutputError;
+    expect(error.message).toContain("cut at the output limit");
+    expect(error.message).toContain("models.private.maxOutput");
+  });
 });
 
 describe("a quote the model did not escape inside a string (pilot: one more model call only to escape it)", () => {

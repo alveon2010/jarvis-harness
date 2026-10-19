@@ -135,6 +135,7 @@ export function createLauncher(options: LauncherOptions): Launcher {
         cwd,
         detached: true,
         stdio: ["ignore", fd, fd],
+        windowsHide: true,
         env: {
           ...process.env,
           ...options.env,
@@ -204,6 +205,7 @@ export function createLauncher(options: LauncherOptions): Launcher {
         const child = spawn(command as string, [...pre, ...args], {
           cwd,
           stdio: ["ignore", "pipe", "pipe"],
+          windowsHide: true,
           env: {
             ...process.env,
             ...options.env,

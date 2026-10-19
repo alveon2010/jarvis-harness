@@ -32,7 +32,15 @@ export class CapabilityRegistry {
     return this.adapters;
   }
 
-  async discover(config: ResolvedConfig, workspacePath: string): Promise<ProjectCapabilities> {
+  /**
+   * `knowledgeRepo`: the workspace is a knowledge repository itself (ADR-0025 §1, §6) — no code of its
+   * own, the services' commands run in their repositories, so no command is not UNSUPPORTED there.
+   */
+  async discover(
+    config: ResolvedConfig,
+    workspacePath: string,
+    options: { readonly knowledgeRepo?: boolean } = {},
+  ): Promise<ProjectCapabilities> {
     const detected = detectStacks(workspacePath);
     const configured = [...config.stack];
     const scopes = detectStackScopes(workspacePath, config.stackScopes);
@@ -66,7 +74,12 @@ export class CapabilityRegistry {
       );
     }
     let level: CapabilityLevel;
-    if (Object.keys(commands).length === 0) {
+    if (Object.keys(commands).length === 0 && options.knowledgeRepo) {
+      level = "BASIC";
+      reasons.push(
+        "knowledge repository: no code of its own — knowledge, the services' catalog and model reading only; the services' commands run in their repositories (ADR-0025 §6)",
+      );
+    } else if (Object.keys(commands).length === 0) {
       level = "UNSUPPORTED";
       reasons.push("no project command at all: declare tools.local.test / build (ADR-0021 §7)");
     } else if (caps.codeIntelligence === "adapter" && caps.graph === "adapter") {

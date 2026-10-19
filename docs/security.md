@@ -20,7 +20,9 @@ Jarvis рассчитан на закрытый контур: конфиденц
 Один MCP-сервер можно выпустить за пределы сети его `dataClass` только на чтение: `egressExceptions: [{ server,
 capabilities, reason }]` в `.jarvis/project.yaml` (и только там), `reason` — не короче 10 символов. Эффекты не
 выпускаются никогда. Каждый прогон и каждая страница `jarvis ui` об исключении предупреждают, у вызова в журнале —
-`egressException` (ADR-0016 §6). Для будущего экспорта телеметрии (`telemetry.export`) правило уже проверяется через `network` (`doctor`), сам экспортёр пока не реализован.
+`egressException` (ADR-0016 §6). Облачную модель (`egress: cloud`) проекту с `dataClass` internal/confidential
+можно разрешить так же явно: `modelEgressExceptions: [{ model, reason }]` в `project.yaml` (и только там) — с
+предупреждением в каждом прогоне, на страницах `jarvis ui` и в `jarvis doctor`. Для будущего экспорта телеметрии (`telemetry.export`) правило уже проверяется через `network` (`doctor`), сам экспортёр пока не реализован.
 
 ## Секреты (ADR-0010, ADR-0014 §1)
 

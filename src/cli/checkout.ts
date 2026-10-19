@@ -117,6 +117,7 @@ export function changesIn(dir: string): Change[] | undefined {
   const r = spawnSync("git", ["status", "--porcelain", "--untracked-files=all"], {
     cwd: dir,
     encoding: "utf8",
+    windowsHide: true,
   });
   if (r.status !== 0) return undefined;
   return r.stdout
@@ -295,6 +296,7 @@ export function systemOpener(ctx: CliContext): OpenIn {
       const child = spawn(command as string, args, {
         detached: true,
         stdio: "ignore",
+        windowsHide: true,
         env: { ...process.env, ...env },
       });
       child.on("error", () => {});
@@ -361,6 +363,7 @@ export function checkedOpener(ctx: CliContext, waitMs = 2500): OpenChecked {
         const child = spawn(command[0] as string, command.slice(1), {
           detached: true,
           stdio: ["ignore", "ignore", fd],
+          windowsHide: true,
           env: { ...process.env, ...env },
         });
         child.on("error", (e: NodeJS.ErrnoException) =>
@@ -396,7 +399,7 @@ export function checkedOpener(ctx: CliContext, waitMs = 2500): OpenChecked {
  * files; at most `max`.
  */
 export function reviewFiles(dir: string, base: string | undefined, reasons = "", max = 8): FileToOpen[] {
-  const git = (args: string[]) => spawnSync("git", args, { cwd: dir, encoding: "utf8" });
+  const git = (args: string[]) => spawnSync("git", args, { cwd: dir, encoding: "utf8", windowsHide: true });
   const changed: Array<{ file: string; size: number }> = [];
   const firstLine = new Map<string, number>();
   if (base) {

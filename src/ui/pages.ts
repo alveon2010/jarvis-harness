@@ -15,7 +15,7 @@ import { toolMix } from "../cli/progress.ts";
 import { documentToMarkdown } from "../cli/render.ts";
 import { incompleteOf } from "../cli/style.ts";
 import { isTerminal, type Run } from "../core/domain/run.ts";
-import type { EgressNotice } from "../security/policy/egress.ts";
+import type { EgressNotice, ModelEgressNotice } from "../security/policy/egress.ts";
 import { shortRunId } from "../storage/runStore.ts";
 import { checksHtml, checksOf } from "./checks.ts";
 import { type DiffFile, escapeHtml, type Html, html, join, markdownToHtml, type Part, raw } from "./html.ts";
@@ -97,6 +97,8 @@ export interface Chrome {
   readonly refresh?: number;
   /** MCP servers out of the project's data class by an exception (ADR-0016 §6): said on every page. */
   readonly egress?: readonly EgressNotice[];
+  /** Cloud models allowed by the project's exception (ADR-0016 §6): said on every page. */
+  readonly modelEgress?: readonly ModelEgressNotice[];
 }
 
 export function layout(chrome: Chrome, content: Html): string {
@@ -133,10 +135,13 @@ ${chrome.canStart ? html`<a class="btn primary small" href="/#new">New task</a>`
 </div>
 </div></header>
 ${
-  chrome.egress && chrome.egress.length > 0
-    ? html`<div class="egress" role="note"><div class="wrap">${chrome.egress.map(
+  (chrome.egress && chrome.egress.length > 0) || (chrome.modelEgress && chrome.modelEgress.length > 0)
+    ? html`<div class="egress" role="note"><div class="wrap">${(chrome.egress ?? []).map(
         (n) =>
           html`<p><span aria-hidden="true">⚠</span> <b>dataClass ${n.dataClass}</b> — MCP server <code>${n.server}</code> goes to the ${n.network} by an exception, reads only: ${n.reason}</p>`,
+      )}${(chrome.modelEgress ?? []).map(
+        (n) =>
+          html`<p><span aria-hidden="true">⚠</span> <b>dataClass ${n.dataClass}</b> — model <code>${n.model}</code> is a cloud model, allowed by an exception: ${n.reason}</p>`,
       )}</div></div>`
     : ""
 }

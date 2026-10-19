@@ -33,6 +33,8 @@ export function runCommand(
       cwd: options.cwd,
       env: options.env ?? process.env,
       stdio: ["pipe", "pipe", "pipe"],
+      // Windows: a run started by the page has no console, so each console child would open a window
+      windowsHide: true,
     });
     let stdout = "";
     let stderr = "";
@@ -78,11 +80,22 @@ export function runCommand(
   });
 }
 
+/**
+ * cmd.exe reads `/` as a switch: `./gradlew test` is "'.' is not recognized". A command word that
+ * starts with `./` or `../` (at the start of the line or after `&&`, `||`, `&`, `|`, `(`) gets
+ * backslashes, so `.\gradlew` finds gradlew.bat — the commands of project.yaml stay POSIX-style.
+ */
+export function windowsCommandLine(command: string): string {
+  return command.replace(
+    /(^|&&|\|\||[&|(])(\s*)(\.\.?\/[^\s&|()<>"]*)/g,
+    (_, sep: string, space: string, word: string) => `${sep}${space}${word.replace(/\//g, "\\")}`,
+  );
+}
+
 /** Runs a command line through the shell (project commands, `shell.run`). */
 export function runShell(command: string, options: CommandOptions): Promise<CommandResult> {
-  const shell = process.platform === "win32" ? "cmd.exe" : "/bin/sh";
-  const flag = process.platform === "win32" ? "/c" : "-c";
-  return runCommand(shell, [flag, command], options);
+  if (process.platform === "win32") return runCommand("cmd.exe", ["/c", windowsCommandLine(command)], options);
+  return runCommand("/bin/sh", ["-c", command], options);
 }
 
 let rgAvailable: boolean | undefined;
@@ -90,7 +103,7 @@ let rgAvailable: boolean | undefined;
 export async function hasRipgrep(): Promise<boolean> {
   if (rgAvailable !== undefined) return rgAvailable;
   rgAvailable = await new Promise<boolean>((resolve) => {
-    execFile("rg", ["--version"], (error) => resolve(!error));
+    execFile("rg", ["--version"], { windowsHide: true }, (error) => resolve(!error));
   });
   return rgAvailable;
 }

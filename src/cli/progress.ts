@@ -5,7 +5,12 @@ import type { ResolvedConfig } from "../core/config/schema.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import type { Run } from "../core/domain/run.ts";
 import { interruption } from "../orchestration/interrupt.ts";
-import { egressNotices, formatEgressNotice } from "../security/policy/egress.ts";
+import {
+  egressNotices,
+  formatEgressNotice,
+  formatModelEgressNotice,
+  modelEgressNotices,
+} from "../security/policy/egress.ts";
 import type { StoredEvent } from "../telemetry/events.ts";
 import type { CliContext } from "./context.ts";
 import { diagnose } from "./diagnostics.ts";
@@ -68,6 +73,8 @@ export function formatRunHeader(
   if (plan.length > 1) lines.push(`  ${st.muted(plan.join(" → "))}`);
   // ADR-0016 §6: a server out of the data class's network by an exception is said at every start
   for (const n of config ? egressNotices(config) : []) lines.push(`${st.warn("⚠")} ${formatEgressNotice(n)}`);
+  for (const n of config ? modelEgressNotices(config) : [])
+    lines.push(`${st.warn("⚠")} ${formatModelEgressNotice(n)}`);
   return lines;
 }
 

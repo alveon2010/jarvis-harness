@@ -109,6 +109,37 @@ describe("jarvis models", () => {
     expect(server.requests).toHaveLength(0);
   });
 
+  it("lets a cloud model out by the project's modelEgressExceptions, and says so (ADR-0016 §6)", async () => {
+    sb.write(
+      "project/.jarvis/project.yaml",
+      "version: 1\nmodelEgressExceptions:\n  - model: cloud\n    reason: public model for research, agreed with security\n",
+    );
+    const list = await jarvis(["models", "list"]);
+    expect(list.out).not.toContain("cloud✗");
+    server.respond((req) => {
+      const body = req.body as { response_format?: { type: string }; tools?: unknown[] };
+      if (body.tools) return toolCallCompletion("ping", { echo: "hi" });
+      if (body.response_format) return completion('{"ok":true}');
+      return completion("PONG");
+    });
+    const probe = await jarvis(["models", "probe", "cloud"]);
+    expect(probe.code).toBe(0);
+    const doctor = await jarvis(["--json", "doctor"]);
+    const report = JSON.parse(doctor.out) as { checks: { id: string; status: string; detail: string }[] };
+    expect(report.checks.find((c) => c.id === "egress:exception:model:cloud")?.detail).toContain(
+      "agreed with security",
+    );
+  });
+
+  it("refuses modelEgressExceptions outside project.yaml", async () => {
+    sb.write(
+      "home/.jarvis/config.yaml",
+      "version: 1\nmodelEgressExceptions:\n  - model: cloud\n    reason: public model for research, agreed\n",
+    );
+    const r = await jarvis(["models", "list"]);
+    expect(r.code).not.toBe(0);
+  });
+
   it("returns exit 11 when the probe hits quota exhaustion", async () => {
     server.respond(() => ({ status: 429, body: { error: { message: "insufficient_quota" } } }));
     const r = await jarvis(["models", "probe", "flash"]);

@@ -105,6 +105,8 @@ class LibsecretBackend implements KeychainBackend {
 class WindowsDpapiBackend implements KeychainBackend {
   readonly kind = "windows" as const;
   private readonly file: FileBackend;
+  /** Decrypted values by their stored form: one PowerShell per secret per process, not per call. */
+  private readonly plain = new Map<string, string>();
 
   constructor(file: string) {
     this.file = new FileBackend(file);
@@ -113,8 +115,12 @@ class WindowsDpapiBackend implements KeychainBackend {
   private async powershell(script: string, input: string): Promise<string> {
     const { stdout } = await execFileAsync(
       "powershell.exe",
-      ["-NoProfile", "-NonInteractive", "-Command", script],
-      { env: { ...process.env, JARVIS_DPAPI_INPUT: input }, maxBuffer: 1024 * 1024 },
+      ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script],
+      {
+        env: { ...process.env, JARVIS_DPAPI_INPUT: input },
+        maxBuffer: 1024 * 1024,
+        windowsHide: true,
+      },
     );
     return stdout.trim();
   }
@@ -122,12 +128,16 @@ class WindowsDpapiBackend implements KeychainBackend {
   async get(account: string): Promise<string | undefined> {
     const stored = await this.file.get(account);
     if (!stored) return undefined;
+    const known = this.plain.get(stored);
+    if (known !== undefined) return known;
     const script =
       "Add-Type -AssemblyName System.Security; " +
       "$b = [Convert]::FromBase64String($env:JARVIS_DPAPI_INPUT); " +
       "$p = [System.Security.Cryptography.ProtectedData]::Unprotect($b, $null, 'CurrentUser'); " +
       "[Console]::Out.Write([Text.Encoding]::UTF8.GetString($p))";
-    return this.powershell(script, stored);
+    const value = await this.powershell(script, stored);
+    this.plain.set(stored, value);
+    return value;
   }
 
   async set(account: string, value: string): Promise<void> {

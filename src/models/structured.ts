@@ -185,6 +185,7 @@ export async function generateStructured<T>(
   const hint = schemaInstruction(options.name, jsonSchema);
   let messages: Message[] =
     options.mode === "schema" ? [...options.messages] : withSchemaHint(options.messages, hint);
+  const firstMessages = messages;
   const totalUsage = { promptTokens: 0, cachedTokens: 0, outputTokens: 0 };
   let repairs = 0;
   let lastText = "";
@@ -200,10 +201,25 @@ export async function generateStructured<T>(
     if (parsed.ok) {
       return { value: parsed.value, response, repairs, mode: options.mode, totalUsage };
     }
-    const issues = parsed.issues;
+    // the answer hit the output limit: asking to "correct" it brings the same long document, cut again
+    // (pilot: three answers of 4096 tokens, each cut mid-string) — ask for a shorter one instead
+    const cut = response.finishReason === "length";
+    const issues = cut
+      ? [
+          `the answer was cut at the output limit (${response.usage.outputTokens} tokens) before the document ended — raise models.${options.modelId}.maxOutput (or roles.<role>.maxOutput) if the model allows more`,
+          ...parsed.issues,
+        ]
+      : parsed.issues;
     lastIssues = issues;
     if (repairs >= maxRepairs) break;
     repairs += 1;
+    if (cut) {
+      const target = Math.max(2000, Math.round(response.text.length * (repairs === 1 ? 0.6 : 0.4)));
+      // the cut answer is not sent back: it is lost anyway, and it would only pull the next one as long
+      const shorter = `Your previous answer was cut off at the output limit (${response.usage.outputTokens} tokens) before the JSON document ended, so it was lost. Write the whole document again, complete and valid, in at most about ${target} characters: keep every text field short (a sentence or two), list only the most important items, no long quotes or code. Return only the JSON document.`;
+      messages = withSchemaHint(firstMessages, shorter);
+      continue;
+    }
     messages = [
       ...messages,
       { role: "assistant", content: response.text },

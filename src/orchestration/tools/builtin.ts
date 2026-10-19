@@ -138,7 +138,10 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
   /** ADR-0021 §3: stack detection and the capability level, recorded before any agent runs. */
   "project.discover": async (ctx) => {
     const registry = ctx.runtime.capabilities ?? new CapabilityRegistry();
-    const caps = await registry.discover(ctx.runtime.loaded.config, ctx.workspace.ref.path);
+    const meta = ctx.runtime.loaded.meta;
+    const caps = await registry.discover(ctx.runtime.loaded.config, ctx.workspace.ref.path, {
+      knowledgeRepo: !!meta && !meta.service,
+    });
     // The project graph is what impact analysis stands on: bring it up to date for this tree (cheap when
     // nothing changed — facts come from the content-addressed cache) so agents never meet a stale or missing one.
     try {
