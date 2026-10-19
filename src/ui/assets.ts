@@ -138,6 +138,14 @@ section.group{display:flex;flex-direction:column;gap:14px}
 .pill.bad{background:var(--bad-bg);color:var(--bad)}
 .pill.plain{background:var(--chip);color:var(--ink-2)}
 .tf-all{display:flex;flex-direction:column;gap:16px}
+.choose{border:0;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
+.choose .opt{display:flex;align-items:center;gap:10px;min-height:44px;padding:0 10px;border-radius:8px;cursor:pointer}
+.choose .opt.rec{background:var(--accent-soft)}
+.choose .opt .hint{margin-left:auto}
+.redo{padding:14px 20px}
+.redo summary{cursor:pointer}
+.redo-body{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+.redo-body select,.redo-body textarea{font:inherit;font-size:15px;padding:8px 10px;border:1px solid var(--field-line);border-radius:8px;background:var(--panel);color:var(--ink)}
 .tf-check{padding:18px 20px;display:flex;flex-direction:column;gap:14px}
 .tf-check h2{margin:0;font-size:17px}
 .tf{border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:10px;min-width:0}

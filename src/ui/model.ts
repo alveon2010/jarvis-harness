@@ -10,6 +10,7 @@ import { continuedBy } from "../app/handoff.ts";
 import { Journey, type LoopReport, type StepReport } from "../app/journey.ts";
 import { pauseRequested } from "../app/pause.ts";
 import { type PlanProgress, planProgressOf } from "../app/planProgress.ts";
+import { redoableInPlace, redoTargets } from "../app/redo.ts";
 import { type RestartPlan, restartPlanOf } from "../app/restart.ts";
 import { type Resumable, resumableOf } from "../app/resumable.ts";
 import type { Runtime } from "../app/runtime.ts";
@@ -573,6 +574,8 @@ export interface RunPage {
   readonly next?: Continuation & { readonly contradictions: number };
   /** A finished research/spec of a service naming linked services: «Continue to sdd (cross-repos)» (ADR-0025 §7). */
   readonly nextCross?: readonly NamedService[];
+  /** A run that waits, is paused or failed: the steps it can go back to with a note (src/app/redo.ts). */
+  readonly redo?: { readonly targets: readonly string[]; readonly current?: string };
   /** A cancelled or failed run: the steps it can start again from (src/app/restart.ts). */
   readonly restart?: RestartPlan & { readonly restartedAs?: RunLink };
   /** The run that went on from this one. */
@@ -971,6 +974,7 @@ export async function runPage(
     ...((r) => (r ? { resumable: r } : {}))(resumableOf(runtime, run, now.getTime())),
     ...continuationLinks(runtime, engine, run),
     ...restartOf(runtime, engine, run),
+    ...redoOf(runtime, engine, run),
     ...evalOf(runtime, run),
     ...((n) => (n.length > 0 ? { notes: n } : {}))(notesOf(runtime, run.id)),
     ...((p) => (p ? { pausing: p.by ? { by: p.by } : {} } : {}))(
@@ -993,6 +997,16 @@ export async function runPage(
       run.state === "RUNNING" && implementing(activity) ? planProgressOf(runtime, run, events) : undefined,
     ),
   };
+}
+
+/** The steps a run that waits, is paused or failed can go back to (src/app/redo.ts). */
+function redoOf(runtime: Runtime, engine: LocalWorkflowEngine, run: Run): Pick<RunPage, "redo"> {
+  if (run.options?.parent || !redoableInPlace(run)) return {};
+  const workflow = workflowOf(engine, run);
+  const targets = workflow ? redoTargets(runtime, run, workflow) : [];
+  return targets.length > 0
+    ? { redo: { targets, ...(run.currentStep ? { current: run.currentStep } : {}) } }
+    : {};
 }
 
 /**

@@ -148,8 +148,9 @@ describe("jarvis restart", () => {
       const html = String(runContent(page, Date.now(), { token: "t", canLaunch: true }));
       expect(html).toContain("Start again from");
       expect(html).toContain(`/runs/${cancelled.id.slice(4, 12)}/restart`);
-      expect(html).toMatch(/name="step" value="impact"><button type="submit" class="btn primary">impact/);
-      expect(html).toContain("approved, taken on");
+      expect(html).toContain('<input type="radio" name="step" value="impact" checked>');
+      expect(html).toContain('name="note"');
+      expect(html).toContain("— research, spec go in (spec approved)");
       // New task for the same issue: offered, not picked
       const hint = String(
         restartHintHtml(cancelled, page.restart as NonNullable<typeof page.restart>, { token: "t" }),
@@ -199,6 +200,24 @@ describe("jarvis redo", () => {
       expect(redoNotesFor(rt, run?.id as string, "spec", 2)).toEqual([]);
       // the spec was written again: a new version waits for approval
       expect(rt.artifacts.listLatest(run?.id as string, "spec")[0]?.version).toBe(2);
+    } finally {
+      rt.close();
+    }
+  });
+
+  it("the page of a waiting run: «Redo from a step» with the steps it went through", async () => {
+    await jarvis(["work", "ABC-52", "--workflow", "staged"]);
+    const loaded = await loadConfig({ cwd: sb.project, homeDir: sb.home, env: {} });
+    const rt = createRuntime(loaded, { env: {} });
+    try {
+      const waiting = rt.runs.list({ includeTerminal: true })[0];
+      if (!waiting) throw new Error("no run");
+      const page = await runPage(rt, createEngine(rt), waiting, { homeDir: sb.home });
+      expect(page.redo).toEqual({ targets: ["research", "spec", "approve-spec"], current: "approve-spec" });
+      const html = String(runContent(page, Date.now(), { token: "t", canLaunch: true }));
+      expect(html).toContain("Redo from a step…");
+      expect(html).toContain(`/runs/${waiting.id.slice(4, 12)}/redo`);
+      expect(html).toContain('<option value="approve-spec" selected>approve-spec (now)</option>');
     } finally {
       rt.close();
     }

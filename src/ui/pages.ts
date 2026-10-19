@@ -1263,6 +1263,7 @@ ${cancelling(r) ? html`<div class="banner bad" data-live="cancelling" role="stat
 <div class="mainc">
 ${review ?? ""}
 ${card ? (card.kind === "loop" ? loopCardHtml(card, page, actions) : card.kind === "approval" ? approvalCardHtml(card, page, actions) : card.kind === "budget" ? budgetCardHtml(card, page, actions) : card.kind === "clarify" ? clarifyCardHtml(card, page, actions) : card.kind === "scope" ? scopeCardHtml(card, page, actions) : otherCardHtml(card.what, page)) : page.wait ? waitHtml(page, page.wait, now, actions) : page.next || page.continuedBy ? continuationHtml(page, actions) : page.restart && page.resumable !== "retry" ? restartHtml(page, page.restart, actions) : page.evalReady || page.evalCase ? evalHtml(page, actions) : nowHtml(page, now, actions)}
+${page.redo && actions?.canLaunch ? redoHtml(page, page.redo, actions) : ""}
 ${page.subtasks ? subtasksHtml(page, actions) : ""}
 ${page.contractCheck ? contractCheckHtml(page.contractCheck) : ""}
 ${feedHtml(page.feed)}
@@ -1430,47 +1431,56 @@ function restartHtml(page: RunPage, restart: NonNullable<RunPage["restart"]>, ac
   const r = page.run;
   const short = shortRunId(r.id);
   const steps = restart.steps.filter((s) => s.startable);
-  const at = steps.findIndex((s) => s.id === restart.startAt);
-  const rows = steps.map((s, i) => {
-    const kept = i < at;
-    const mark =
-      s.id === restart.startAt
-        ? html`<span class="ok">→</span>`
-        : kept
-          ? html`<span class="ok">✓</span>`
-          : html`<span class="muted">·</span>`;
-    const note =
-      s.id === restart.startAt
-        ? "starts here (recommended)"
-        : kept
-          ? s.approved
-            ? "approved, taken on"
-            : "taken on"
-          : "";
-    return html`<li>${mark} <b>${s.id}</b> <span class="muted">${note}</span></li>`;
-  });
   const cmd = `jarvis restart ${short}`;
-  const buttons = steps
-    .slice(1)
-    .map((s) =>
-      form(
-        actions as Actions,
-        `/runs/${short}/restart`,
-        html`<input type="hidden" name="step" value="${s.id}"><button type="submit" class="btn${s.id === restart.startAt ? " primary" : ""}">${s.id}</button>`,
-      ),
-    );
+  const options = steps.slice(1).map((s, i) => {
+    const kept = steps.slice(0, i + 1).filter((k) => k.kind !== "approval");
+    const approved = kept.filter((k) => k.approved).map((k) => k.id);
+    const what =
+      kept.length > 0
+        ? `${kept.map((k) => k.id).join(", ")} go in${approved.length > 0 ? ` (${approved.join(", ")} approved)` : ""}`
+        : "nothing goes in";
+    return html`<label class="opt${s.id === restart.startAt ? " rec" : ""}"><input type="radio" name="step" value="${s.id}"${s.id === restart.startAt ? " checked" : ""}><span><b>${s.id}</b> <span class="muted">— ${what}</span></span>${s.id === restart.startAt ? html`<span class="hint">recommended</span>` : ""}</label>`;
+  });
   return html`<section class="panel decision" aria-labelledby="decision" data-live="card">
-<span class="${r.state === "FAILED" ? "bad" : "warn"}" style="font-size:13px;font-weight:500">${r.state === "FAILED" ? "The run failed" : "The run was cancelled"}${r.currentStep ? ` at ${r.currentStep}` : ""}</span>
+<span class="${r.state === "FAILED" ? "bad" : "warn"}" style="font-size:13px;font-weight:500">${r.state === "FAILED" ? "The run failed" : r.state === "COMPLETED" ? "The run is done" : "The run was cancelled"}${r.currentStep ? ` at ${r.currentStep}` : ""}</span>
 <h2 id="decision">Start again from</h2>
 <p>A new ${r.workflow} run in a fresh checkout of the current code: what was done before the step you pick goes in with its approvals and does not run again. Code the run wrote is not taken on.</p>
-<ul style="list-style:none;padding:0;margin:8px 0">${rows}</ul>
+${
+  actions?.canLaunch
+    ? form(
+        actions,
+        `/runs/${short}/restart`,
+        html`<fieldset class="choose"><legend class="sr">Start again from</legend>${options}</fieldset>
+<label for="restart-note" class="muted" style="font-size:14px">For the first step: what to do differently <span class="hint">(optional)</span></label>
+<textarea id="restart-note" name="note" rows="2"></textarea>
+<div class="actions"><button type="submit" class="btn primary big">Start again</button><span class="hint">same as <code>${cmd} --from &lt;step&gt; --note "…"</code></span></div>`,
+      )
+    : html`<div class="actions"><span class="hint">Start again with <code>${cmd}</code></span><button type="button" class="btn" data-copy="${cmd}">Copy command</button></div>`
+}
 ${restart.restartedAs ? html`<p class="muted">started again as <a href="/runs/${shortRunId(restart.restartedAs.id)}">${restart.restartedAs.workflow} ${shortRunId(restart.restartedAs.id)}</a> · ${restart.restartedAs.state}</p>` : ""}
-<div class="actions">${
-    actions?.canLaunch
-      ? html`${buttons}<span class="hint">same as <code>${cmd} --from &lt;step&gt;</code></span>`
-      : html`<span class="hint">Start again with <code>${cmd}</code></span><button type="button" class="btn" data-copy="${cmd}">Copy command</button>`
-  }</div>
 </section>`;
+}
+
+/**
+ * «Redo from a step» (as `jarvis redo <run> <step> --note`): a run that waits, is paused or failed
+ * goes back to a step it went through, the note for that step; collapsed until asked for.
+ */
+function redoHtml(page: RunPage, redo: NonNullable<RunPage["redo"]>, actions: Actions): Html {
+  const short = shortRunId(page.run.id);
+  return html`<details class="panel redo" id="redo">
+<summary><b>Redo from a step…</b> <span class="muted">— back to a step this run went through, with what it should do differently</span></summary>
+${form(
+  actions,
+  `/runs/${short}/redo`,
+  html`<div class="redo-body">
+<label for="redo-step" class="muted" style="font-size:14px">Step</label>
+<select id="redo-step" name="step">${redo.targets.map((t) => html`<option value="${t}"${t === redo.current ? " selected" : ""}>${t}${t === redo.current ? " (now)" : ""}</option>`)}</select>
+<label for="redo-note" class="muted" style="font-size:14px">What should it do differently</label>
+<textarea id="redo-note" name="note" rows="3" placeholder="It goes to that step only; the steps after it run again as usual"></textarea>
+<div class="actions"><button type="submit" class="btn primary">Redo from this step</button><span class="hint">same as <code>jarvis redo ${short} &lt;step&gt; --note "…"</code>; the checkout keeps what the run wrote</span></div>
+</div>`,
+)}
+</details>`;
 }
 
 /**

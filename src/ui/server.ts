@@ -42,6 +42,7 @@ import {
 import { type McpProbe, mcpHealthOf } from "../app/mcpHealth.ts";
 import { modelsHealthOf } from "../app/modelHealth.ts";
 import { pauseRequested, requestPause } from "../app/pause.ts";
+import { requestRedo } from "../app/redo.ts";
 import { restartPlanOf } from "../app/restart.ts";
 import { resumableOf } from "../app/resumable.ts";
 import type { Runtime } from "../app/runtime.ts";
@@ -1399,7 +1400,7 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       });
     }
     const m =
-      /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|restart|clarify|eval|note|pause|cleanup|apply|restore-branch|subtask|scope)$/.exec(
+      /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|restart|redo|clarify|eval|note|pause|cleanup|apply|restore-branch|subtask|scope)$/.exec(
         r.url.pathname,
       );
     const run = m ? resolveRun(m[1] as string) : undefined;
@@ -1535,6 +1536,32 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       }
       return redirect(r, `/runs/${short}`);
     }
+    if (m[2] === "redo") {
+      // «Redo from a step»: back to a step with a note, in the same run (src/app/redo.ts)
+      const who = await actor();
+      if (!who) return redirect(r, `/runs/${short}?notice=actor`);
+      let workflow: ReturnType<typeof engine.workflow>;
+      try {
+        workflow = engine.workflow(run.workflow);
+      } catch {
+        return redirect(r, `/runs/${short}?notice=cannot-continue`);
+      }
+      try {
+        requestRedo(
+          runtime,
+          run,
+          workflow,
+          form.get("step") ?? "",
+          who,
+          "ui",
+          (form.get("note") ?? "").slice(0, 4000),
+        );
+      } catch {
+        return redirect(r, `/runs/${short}?notice=cannot-continue`);
+      }
+      goOn(runtime.runs.get(run.id) ?? run);
+      return redirect(r, `/runs/${short}?notice=resumed`);
+    }
     if (m[2] === "restart") {
       // «Start again from»: a cancelled or failed run as a new one from the step (src/app/restart.ts)
       if (!options.launcher) return redirect(r, `/runs/${short}?notice=no-launcher`);
@@ -1552,7 +1579,10 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       const step = form.get("step") ?? plan?.startAt ?? "";
       if (!plan?.steps.some((s) => s.id === step && s.startable))
         return redirect(r, `/runs/${short}?notice=cannot-continue`);
-      return redirect(r, `/launches/${options.launcher.restartRun(run, step).id}`);
+      return redirect(
+        r,
+        `/launches/${options.launcher.restartRun(run, step, (form.get("note") ?? "").slice(0, 4000)).id}`,
+      );
     }
     if (m[2] === "continue") {
       // "Continue to sdd (cross-repos)": a master in the knowledge repository from this run (ADR-0025 §7)
