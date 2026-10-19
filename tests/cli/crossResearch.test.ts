@@ -104,12 +104,10 @@ async function jarvis(cwd: string, args: readonly string[]) {
 async function runs() {
   const rt = createRuntime(await loadConfig({ cwd: meta, homeDir: sb.home, env: {} }), { env: {} });
   try {
-    return rt.runs
-      .list({ includeTerminal: true, limit: 50 })
-      .map((r) => ({
-        r,
-        artifacts: ["catalog", "research", "spec"].filter((t) => rt.artifacts.listLatest(r.id, t).length > 0),
-      }));
+    return rt.runs.list({ includeTerminal: true, limit: 50 }).map((r) => ({
+      r,
+      artifacts: ["catalog", "research", "spec"].filter((t) => rt.artifacts.listLatest(r.id, t).length > 0),
+    }));
   } finally {
     rt.close();
   }
@@ -124,7 +122,7 @@ describe("research in a knowledge repository", () => {
     expect(first?.r.workspace).toMatchObject({ mode: "cwd", path: meta });
     expect(first?.artifacts).toEqual(["catalog", "research"]);
 
-    const next = await jarvis(meta, ["continue", (first?.r.id as string).slice(4, 12)]);
+    const next = await jarvis(meta, ["continue", (first?.r.id ?? "").slice(4, 12)]);
     expect(next.code).toBe(0);
     expect(next.out).toContain("goes on as sdd-cross from spec");
     const master = (await runs()).find((x) => x.r.workflow === "sdd-cross");
