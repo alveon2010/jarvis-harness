@@ -372,6 +372,123 @@ steps:
     ]);
   });
 
+  it("project.checks says why JavaScript tests failed: the runner's JSON report, else its printed output", async () => {
+    sb.write(
+      "project/.jarvis/project.yaml",
+      [
+        "version: 1",
+        "workspace: { mode: cwd, allowWrites: true }",
+        "tools:",
+        "  local:",
+        '    test-app: "cd app && npm test"',
+        '    test-old: "cd old && npm test"',
+      ].join("\n"),
+    );
+    // jest behind `npm test`: writes its JSON report where --outputFile says
+    sb.write("project/app/package.json", JSON.stringify({ name: "app", scripts: { test: "jest" } }));
+    sb.write(
+      "project/app/node_modules/.bin/jest",
+      [
+        "#!/bin/sh",
+        'for a in "$@"; do case "$a" in --outputFile=*) out="${a#--outputFile=}";; esac; done',
+        'echo "Tests: 1 failed, 2 total"',
+        `printf '%s' '${JSON.stringify({
+          numTotalTests: 2,
+          testResults: [
+            {
+              name: "__APP__/src/a.test.js",
+              status: "failed",
+              assertionResults: [
+                {
+                  status: "failed",
+                  title: "adds",
+                  ancestorTitles: ["math"],
+                  failureMessages: [
+                    "Error: expect(received).toBe(expected)\n\nExpected: 3\nReceived: 4\n    at Object.<anonymous> (__APP__/src/a.test.js:4:15)",
+                  ],
+                },
+              ],
+            },
+          ],
+        })}' | sed "s#__APP__#$PWD#g" > "$out"`,
+        "exit 1",
+      ].join("\n"),
+    );
+    // an old jest that knows no --json: refuses it, then prints its failure
+    sb.write("project/old/package.json", JSON.stringify({ name: "old", scripts: { test: "jest" } }));
+    sb.write(
+      "project/old/node_modules/.bin/jest",
+      [
+        "#!/bin/sh",
+        'case "$*" in *--json*) echo "Unknown option: --json"; exit 1;; esac',
+        "printf 'FAIL src/b.test.js\\n  ● b › subtracts\\n\\n    Expected: 1\\n    Received: 2\\n\\n      at Object.<anonymous> (src/b.test.js:7:3)\\n\\nTests: 1 failed\\n'",
+        "exit 1",
+      ].join("\n"),
+    );
+    execFileSync("chmod", [
+      "+x",
+      join(sb.project, "app/node_modules/.bin/jest"),
+      join(sb.project, "old/node_modules/.bin/jest"),
+    ]);
+    sb.write("project/.gitignore", "node_modules/\n");
+    sb.write("project/app/src/a.js", "module.exports = 1;\n");
+    sb.write("project/old/src/b.js", "module.exports = 1;\n");
+    sb.write(
+      "project/.jarvis/workflows/chk.yaml",
+      `name: chk
+entry: a
+steps:
+  - id: a
+    kind: deterministic
+    tool: repo.write
+    args: { path: "app/src/a.js", content: "module.exports = 2;\\n" }
+    transitions: { onSuccess: b }
+  - id: b
+    kind: deterministic
+    tool: repo.write
+    args: { path: "old/src/b.js", content: "module.exports = 2;\\n" }
+    transitions: { onSuccess: checks }
+  - id: checks
+    kind: deterministic
+    tool: project.checks
+    outputs: [checks]
+    transitions: { onSuccess: DONE, onOutcome: { defects_found: { to: DONE } } }
+`,
+    );
+    sh(sb.project, ["add", "-A"]);
+    sh(sb.project, ["commit", "-q", "-m", "js"]);
+    await jarvis(["work", "T-9", "--workflow", "chk"]);
+    const loaded = await loadConfig({ cwd: sb.project, homeDir: sb.home, env: {} });
+    const rt = createRuntime(loaded, { env: {} });
+    const runId = rt.runs.list({ includeTerminal: true })[0]?.id as string;
+    const checks = JSON.parse(rt.artifacts.text(rt.artifacts.listLatest(runId, "checks")[0] as never)) as {
+      results: Array<{
+        check: string;
+        command: string;
+        ok: boolean;
+        failures?: Array<Record<string, unknown>>;
+        tests?: unknown;
+      }>;
+    };
+    rt.close();
+    const [app, old] = checks.results;
+    expect(app).toMatchObject({
+      check: "test-app",
+      command: "cd app && npm test",
+      ok: false,
+      tests: { failed: 1, total: 2 },
+    });
+    expect(app?.failures?.[0]).toMatchObject({
+      suite: "math",
+      name: "adds",
+      file: "app/src/a.test.js",
+      expected: "3",
+      actual: "4",
+    });
+    expect((app?.failures?.[0]?.stack as Array<{ file: string }>)[0]?.file).toBe("app/src/a.test.js");
+    expect(old?.failures?.[0]).toMatchObject({ suite: "b", name: "subtracts", expected: "1", actual: "2" });
+  });
+
   // a Gradle stand-in: runs the classes of `--tests` (or all of all.txt), fails those listed in fails.txt
   const FAKE_GRADLEW = [
     "#!/bin/sh",

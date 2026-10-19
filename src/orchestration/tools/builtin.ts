@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CapabilityRegistry } from "../../capabilities/registry.ts";
 import { collectSources } from "../../design/collect.ts";
@@ -13,7 +14,18 @@ import { failingOnBase, junitFailures } from "./baseline.ts";
 import { CROSS_TOOLS } from "./cross.ts";
 import { rebuildsFor } from "./rebuild.ts";
 import { classSelection, coveringTests, testRunnerOf } from "./relatedTests.ts";
-import { junitTestFailures, type TestFailure } from "./testReport.ts";
+import {
+  type JsRunner,
+  jsRunnerOf,
+  junitTestFailures,
+  parseJestJson,
+  parseJsText,
+  parseMochaJson,
+  reporterArgs,
+  type TestFailure,
+  type TestReport,
+  UNKNOWN_OPTION,
+} from "./testReport.ts";
 
 /**
  * Deterministic tools that need nothing but the stores. Repository, git, test and typecheck
@@ -92,6 +104,36 @@ async function preexistingOf(
     payload: { failing: failing.length, preexisting: classes.length, base: baseCommit.slice(0, 10) },
   });
   return { classes, excused: classes.length === failing.length };
+}
+
+/** Why JavaScript tests failed: the runner's JSON report, else its printed output. */
+function jsReportOf(
+  runner: JsRunner,
+  file: string | undefined,
+  output: string,
+  workspace: string,
+): TestReport | undefined {
+  if (file && existsSync(file)) {
+    try {
+      const json: unknown = JSON.parse(readFileSync(file, "utf8"));
+      const report = runner === "mocha" ? parseMochaJson(json, workspace) : parseJestJson(json, workspace);
+      if (report.failures.length > 0) return report;
+    } catch {
+      // a report cut short: the printed output below
+    }
+  }
+  // mocha's JSON on stdout when it would not write the file
+  if (runner === "mocha") {
+    const start = output.indexOf("{\n");
+    if (start >= 0)
+      try {
+        const body = output.slice(start).replace(/\n\[(?:stderr|exit)[\s\S]*$/, "");
+        return parseMochaJson(JSON.parse(body), workspace);
+      } catch {
+        // not JSON
+      }
+  }
+  return parseJsText(output, workspace);
 }
 
 export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
@@ -521,13 +563,30 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
         continue;
       }
       const started = Date.now() - 1000;
-      const r = await ctx.tools.invoke(`project.${name}`, related ? { args: related.trim() } : {});
+      // a JavaScript runner writes a JSON report besides its usual output: why the tests failed
+      const js = name.startsWith("test") ? jsRunnerOf(command, workspace) : undefined;
+      const reportFile = js
+        ? join(tmpdir(), `jarvis-${ctx.run.id}-${name.replace(/[^\w.-]+/g, "-")}-${Date.now()}.json`)
+        : undefined;
+      const argsWith = (extra: string) => {
+        const all = [related.trim(), extra].filter(Boolean).join(" ");
+        return all && js?.dashDash && !/(^|\s)--(\s|$)/.test(command) ? `-- ${all}` : all;
+      };
+      const firstArgs = argsWith(js && reportFile ? reporterArgs(js.runner, reportFile) : "");
+      let r = await ctx.tools.invoke(`project.${name}`, firstArgs ? { args: firstArgs } : {});
+      // a runner that does not know the reporter's options: once more as the command was
+      if (js && reportFile && !r.ok && !existsSync(reportFile) && UNKNOWN_OPTION.test(r.text ?? "")) {
+        const args = argsWith("");
+        r = await ctx.tools.invoke(`project.${name}`, args ? { args } : {});
+      }
+      const jsReport = js && !r.ok ? jsReportOf(js.runner, reportFile, r.text ?? "", workspace) : undefined;
+      if (reportFile) rmSync(reportFile, { force: true });
       // failing tests that fail on the base commit too are not this run's defects
       // why the tests failed, from the reports the runner wrote
       const report =
         !r.ok && (runner === "gradle" || runner === "maven")
           ? junitTestFailures(workspace, started)
-          : undefined;
+          : jsReport;
       const preexisting =
         !r.ok && (runner === "gradle" || runner === "maven")
           ? await preexistingOf(ctx, runner, command, junitFailures(workspace, started))

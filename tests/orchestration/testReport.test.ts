@@ -1,5 +1,17 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { expectedActualOf, javaFrames, parseJunitXml } from "../../src/orchestration/tools/testReport.ts";
+import {
+  expectedActualOf,
+  javaFrames,
+  jsExpectedActual,
+  jsRunnerOf,
+  parseJestJson,
+  parseJsText,
+  parseJunitXml,
+  parseMochaJson,
+} from "../../src/orchestration/tools/testReport.ts";
 
 /** Why tests failed, from the reports the runners write. */
 const GRADLE = `<?xml version="1.0" encoding="UTF-8"?>
@@ -56,5 +68,130 @@ describe("JUnit XML", () => {
       { file: "a.B", fn: "m", line: 7, raw: "at a.B$C.m(B.java:7)" },
       { file: "a.D", fn: "n", raw: "at a.D.n(Native Method)" },
     ]);
+  });
+});
+
+describe("JavaScript runners", () => {
+  const ws = "/w/app";
+
+  it("the runner: named in the command, or behind a package script", () => {
+    const dir = mkdtempSync(join(tmpdir(), "jr-"));
+    writeFileSync(
+      join(dir, "package.json"),
+      JSON.stringify({ scripts: { test: "vitest run", "test:e2e": "mocha e2e" } }),
+    );
+    expect(jsRunnerOf("npx jest --ci", dir)).toEqual({ runner: "jest", dashDash: false });
+    expect(jsRunnerOf("yarn test", dir)).toEqual({ runner: "vitest", dashDash: false });
+    expect(jsRunnerOf("npm run test:e2e", dir)).toEqual({ runner: "mocha", dashDash: true });
+    expect(jsRunnerOf("make test", dir)).toBeUndefined();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("a jest report: titles, file, expected and received, frames in the project only", () => {
+    const report = parseJestJson(
+      {
+        numTotalTests: 5,
+        testResults: [
+          {
+            name: "/w/app/src/onboarding.test.ts",
+            status: "failed",
+            assertionResults: [
+              { status: "passed", title: "works", ancestorTitles: ["onboarding"] },
+              {
+                status: "failed",
+                title: "allows a restart after REJECTED",
+                ancestorTitles: ["onboarding", "restart"],
+                failureMessages: [
+                  "Error: \u001b[2mexpect(\u001b[22mreceived\u001b[2m).\u001b[22mtoBe(expected)\n\nExpected: true\nReceived: false\n    at Object.<anonymous> (/w/app/src/onboarding.test.ts:12:31)\n    at Promise.then.completed (/w/app/node_modules/jest-circus/build/utils.js:298:28)\n    at canRestart (/w/app/src/onboarding.ts:2:10)",
+                ],
+              },
+            ],
+          },
+          {
+            name: "/w/app/src/broken.test.ts",
+            status: "failed",
+            message: "SyntaxError: Unexpected token (3:4)",
+            assertionResults: [],
+          },
+        ],
+      },
+      ws,
+    );
+    expect(report.total).toBe(5);
+    expect(report.failures).toHaveLength(2);
+    expect(report.failures[0]).toMatchObject({
+      suite: "onboarding › restart",
+      name: "allows a restart after REJECTED",
+      file: "src/onboarding.test.ts",
+      expected: "true",
+      actual: "false",
+    });
+    expect(report.failures[0]?.stack.map((f) => `${f.file}:${f.line}`)).toEqual([
+      "src/onboarding.test.ts:12",
+      "src/onboarding.ts:2",
+    ]);
+    expect(report.failures[1]).toMatchObject({
+      name: "the test file failed to run",
+      file: "src/broken.test.ts",
+    });
+  });
+
+  it("vitest's chai wording", () => {
+    expect(jsExpectedActual("AssertionError: expected false to be true // Object.is equality")).toEqual({
+      expected: "true",
+      actual: "false",
+    });
+  });
+
+  it("a mocha report", () => {
+    const r = parseMochaJson(
+      {
+        stats: { tests: 3 },
+        failures: [
+          {
+            title: "returns the slot",
+            fullTitle: "slots returns the slot",
+            file: "/w/app/test/slots.spec.js",
+            err: {
+              message: "expected 1 to equal 2",
+              stack:
+                "AssertionError: expected 1 to equal 2\n    at Context.<anonymous> (test/slots.spec.js:9:20)",
+              expected: 2,
+              actual: 1,
+            },
+          },
+        ],
+      },
+      ws,
+    );
+    expect(r.failures[0]).toMatchObject({
+      suite: "slots",
+      name: "returns the slot",
+      file: "test/slots.spec.js",
+      expected: "2",
+      actual: "1",
+    });
+    expect(r.failures[0]?.stack[0]).toMatchObject({ file: "test/slots.spec.js", line: 9 });
+  });
+
+  it("the printed output when no report came: jest and vitest", () => {
+    const jest = parseJsText(
+      "FAIL src/a.test.ts\n  ● a › adds\n\n    expect(received).toBe(expected)\n\n    Expected: 3\n    Received: 4\n\n      at Object.<anonymous> (src/a.test.ts:4:15)\n\nTest Suites: 1 failed, 1 total",
+      ws,
+    );
+    expect(jest?.failures[0]).toMatchObject({ suite: "a", name: "adds", expected: "3", actual: "4" });
+    expect(jest?.failures[0]?.stack[0]).toMatchObject({ file: "src/a.test.ts", line: 4 });
+    const vitest = parseJsText(
+      " FAIL  src/b.test.ts > b > subtracts\nAssertionError: expected 1 to be 2 // Object.is equality\n ❯ src/b.test.ts:7:14\n\n⎯⎯⎯⎯⎯⎯",
+      ws,
+    );
+    expect(vitest?.failures[0]).toMatchObject({
+      suite: "b",
+      name: "subtracts",
+      file: "src/b.test.ts",
+      expected: "2",
+      actual: "1",
+    });
+    expect(vitest?.failures[0]?.stack[0]).toMatchObject({ file: "src/b.test.ts", line: 7 });
   });
 });
