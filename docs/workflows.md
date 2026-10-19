@@ -21,6 +21,8 @@ Workflow — YAML-граф шагов. `LocalWorkflowEngine` исполняет 
     `onLimit: ask`.
 
   `jarvis resume`, `jarvis continue`, daemon или страница `jarvis ui` продолжают с checkpoint.
+  Закончившийся прогон (`CANCELLED`, `FAILED`, `COMPLETED`) не продолжается, но `jarvis restart <run> [--from <шаг>]`
+  начинает новый с его шага: пройденное до шага и подтверждения переносятся, код — нет (docs/cli.md).
 - **Loop reasons**: при возврате по обратному ребру следующая итерация шага получает причины (нарушения
   стандартов, дефекты, замечания ревью) в слое L2 контекста.
 

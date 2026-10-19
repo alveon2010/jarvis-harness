@@ -16,7 +16,7 @@ import {
   rejectCandidate,
   targetOf,
 } from "../app/candidates.ts";
-import { continuationOf, startPointOf } from "../app/continuation.ts";
+import { continuationOf, sameTask, startPointOf } from "../app/continuation.ts";
 import { crossContinuationOf, crossStartOf, goCross, goSingle } from "../app/crossScope.ts";
 import {
   awaitedArtifact,
@@ -42,6 +42,7 @@ import {
 import { type McpProbe, mcpHealthOf } from "../app/mcpHealth.ts";
 import { modelsHealthOf } from "../app/modelHealth.ts";
 import { pauseRequested, requestPause } from "../app/pause.ts";
+import { restartPlanOf } from "../app/restart.ts";
 import { resumableOf } from "../app/resumable.ts";
 import type { Runtime } from "../app/runtime.ts";
 import { isDone, resumeMaster, startSubtask, subtasksOf } from "../app/subtasks.ts";
@@ -121,6 +122,7 @@ import {
   modelsPopover,
   modelsSummary,
   repoPicker,
+  restartHintHtml,
   runContent,
   runsContent,
   startFromHtml,
@@ -1297,6 +1299,42 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
     return named.length >= 2 && linked ? crossHintHtml(named, meta.root) : "";
   };
 
+  /**
+   * Under "New task": the newest cancelled or failed run of the same task and workflow in this
+   * repository that can start again from a step and has not been started again yet (src/app/restart.ts).
+   */
+  const restartHintOf = (task: string, workflow: string, repo: string): Html | string => {
+    if (!actions || !options.launcher || !task.trim()) return "";
+    const restarted = new Set(
+      runtime.events
+        .list({ kind: "run.created", limit: 100_000 })
+        .map((e) => (e.payload as { restartOf?: string } | undefined)?.restartOf)
+        .filter((x): x is string => typeof x === "string"),
+    );
+    const stopped = runtime.runs
+      .list({ state: ["CANCELLED", "FAILED"], limit: 200 })
+      .filter(
+        (r) =>
+          r.workspace.repoRoot === repo &&
+          r.workflow === workflow &&
+          !r.options?.parent &&
+          !restarted.has(r.id) &&
+          sameTask(task, r.task),
+      )
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    for (const r of stopped) {
+      let def: ReturnType<typeof engine.workflow> | undefined;
+      try {
+        def = engine.workflow(r.workflow);
+      } catch {
+        def = undefined;
+      }
+      const plan = def ? restartPlanOf(runtime, r, def) : undefined;
+      if (plan) return restartHintHtml(r, plan, actions);
+    }
+    return "";
+  };
+
   /** `GET /runs/from?task=&workflow=&repo=`: the box under "New task" (src/app/continuation.ts). */
   const startFrom = async (r: Request): Promise<void> => {
     if (!options.launcher || !actions) return notFound(r, "Starting tasks is off here.");
@@ -1310,7 +1348,7 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
         ? await startPointOf(runtime, engine, { task, workflow, repoRoot: repo })
         : undefined;
     const body = known
-      ? html`${startFromHtml(point, { task, workflow, targets: targets() }, Date.now())}${crossHintOf(task, workflow)}`
+      ? html`${startFromHtml(point, { task, workflow, targets: targets() }, Date.now())}${restartHintOf(task, workflow, repo)}${crossHintOf(task, workflow)}`
       : "";
     return send(r, 200, String(body), "text/html; charset=utf-8", { "Cache-Control": "no-store" });
   };
@@ -1361,7 +1399,7 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       });
     }
     const m =
-      /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|clarify|eval|note|pause|cleanup|apply|restore-branch|subtask|scope)$/.exec(
+      /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|restart|clarify|eval|note|pause|cleanup|apply|restore-branch|subtask|scope)$/.exec(
         r.url.pathname,
       );
     const run = m ? resolveRun(m[1] as string) : undefined;
@@ -1496,6 +1534,25 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
         return redirect(r, `/runs/${short}?notice=clarified`);
       }
       return redirect(r, `/runs/${short}`);
+    }
+    if (m[2] === "restart") {
+      // «Start again from»: a cancelled or failed run as a new one from the step (src/app/restart.ts)
+      if (!options.launcher) return redirect(r, `/runs/${short}?notice=no-launcher`);
+      const workflow = (() => {
+        try {
+          return engine.workflow(run.workflow);
+        } catch {
+          return undefined;
+        }
+      })();
+      const plan =
+        (run.state === "CANCELLED" || run.state === "FAILED") && workflow && !run.options?.parent
+          ? restartPlanOf(runtime, run, workflow)
+          : undefined;
+      const step = form.get("step") ?? plan?.startAt ?? "";
+      if (!plan?.steps.some((s) => s.id === step && s.startable))
+        return redirect(r, `/runs/${short}?notice=cannot-continue`);
+      return redirect(r, `/launches/${options.launcher.restartRun(run, step).id}`);
     }
     if (m[2] === "continue") {
       // "Continue to sdd (cross-repos)": a master in the knowledge repository from this run (ADR-0025 §7)

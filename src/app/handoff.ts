@@ -38,14 +38,20 @@ export function continuedBy(runtime: Runtime, from: Run): string | undefined {
 }
 
 /**
- * Copies the artifacts of `from` (latest versions) into the CREATED run `to`, with their approvals,
- * and points `to` at `startAt`: the engine enters the run there.
+ * Copies the artifacts of `from` (latest versions; those `keep` takes) into the CREATED run `to`,
+ * with their approvals, and points `to` at `startAt`: the engine enters the run there.
  */
-export function handOff(runtime: Runtime, from: Run, to: Run, startAt: string): ArtifactVersion[] {
+export function handOff(
+  runtime: Runtime,
+  from: Run,
+  to: Run,
+  startAt: string,
+  keep: (a: ArtifactVersion) => boolean = () => true,
+): ArtifactVersion[] {
   const carried: ArtifactVersion[] = [];
   const latest = runtime.artifacts
     .listLatest(from.id)
-    .filter((a) => !NOT_CARRIED.has(a.type))
+    .filter((a) => !NOT_CARRIED.has(a.type) && keep(a))
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   for (const a of latest) {
     const copy = runtime.artifacts.put({

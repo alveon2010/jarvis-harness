@@ -45,6 +45,7 @@ import {
   runForget,
   runGc,
   runOpen,
+  runRestart,
   runResume,
   runShellIn,
   runShow,
@@ -388,6 +389,16 @@ export function buildProgram(options: RunOptions = {}): Command {
     .description("back to the run that waits for you (no id needed): decide right here and go on")
     .action(async (run: string | undefined) => {
       await runContinue(ctxFor(), run);
+    });
+  program
+    .command("restart <run>")
+    .description(
+      "a stopped run (cancelled, failed, finished) again from one of its steps, with what it did before it",
+    )
+    .option("--from <step>", "the step to start at (default: right after the last approval)")
+    .option("--no-run", "create the run, do not start it")
+    .action(async (run: string, opts: { from?: string; run: boolean }) => {
+      await runRestart(ctxFor(), run, { ...(opts.from ? { from: opts.from } : {}), noRun: !opts.run });
     });
   program
     .command("forget [runs...]")

@@ -72,7 +72,7 @@ export function issueKeyOf(task: string): string | undefined {
 }
 
 /** The same issue: by its key when the task names one, else by the very same words. */
-function sameTask(a: string, b: string): boolean {
+export function sameTask(a: string, b: string): boolean {
   const key = issueKeyOf(a);
   return key ? issueKeyOf(b) === key : a.trim() === b.trim();
 }
@@ -137,7 +137,10 @@ export async function startPointOf(
 }
 
 /** Commits on the repository's HEAD since the run's base, and which of the files it read they change. */
-async function changedSince(run: Run, read: ReadonlySet<string>): Promise<StartPoint["since"] | undefined> {
+export async function changedSince(
+  run: Run,
+  read: ReadonlySet<string>,
+): Promise<StartPoint["since"] | undefined> {
   const base = run.workspace.baseCommit;
   if (!base) return undefined;
   const root = run.workspace.repoRoot;

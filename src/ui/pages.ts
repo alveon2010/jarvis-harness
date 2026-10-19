@@ -6,6 +6,7 @@ import { duration } from "../app/journey.ts";
 import type { McpHealth, McpServerHealth } from "../app/mcpHealth.ts";
 import type { HealthState, ModelHealth, ModelPerf, ModelsHealth, Unlimited } from "../app/modelHealth.ts";
 import type { PlanProgress } from "../app/planProgress.ts";
+import type { RestartPlan } from "../app/restart.ts";
 import type { TimeItem, TimePart, TimeSplit } from "../app/timeSplit.ts";
 import { cdTo, type TryOut, tryCommand } from "../app/tryOut.ts";
 import type { Change } from "../cli/checkout.ts";
@@ -466,6 +467,24 @@ function whenShort(iso: string, now: number): string {
   return d.toDateString() === new Date(now).toDateString()
     ? hm
     : `${d.toLocaleString("en-US", { month: "short", day: "numeric" })}, ${hm}`;
+}
+
+/**
+ * Under "New task": a cancelled or failed run of the same task and workflow that can start again from
+ * a step (src/app/restart.ts) — offered, not picked: the new task starts from the beginning otherwise.
+ */
+export function restartHintHtml(run: Run, plan: RestartPlan, actions: Actions): Html {
+  const short = shortRunId(run.id);
+  const kept = plan.steps.slice(
+    0,
+    plan.steps.findIndex((s) => s.id === plan.startAt),
+  );
+  const approved = kept.filter((s) => s.approved && s.kind !== "approval").map((s) => s.id);
+  const gates = kept.filter((s) => s.kind === "approval" && s.approved).length;
+  const what = kept
+    .filter((s) => s.kind !== "approval")
+    .map((s) => (approved.includes(s.id) ? `${s.id} (approved)` : s.id));
+  return html`<div class="banner info"><b>${run.state === "FAILED" ? "A failed" : "A cancelled"} ${run.workflow} of this task</b> (<a href="/runs/${short}">${short}</a>${run.currentStep ? `, stopped at ${run.currentStep}` : ""}) can start again from <b>${plan.startAt}</b>: ${what.join(", ")} go in${gates > 0 ? `, ${plural(gates, "approval")} kept` : ""}. ${form(actions, `/runs/${short}/restart`, html`<input type="hidden" name="step" value="${plan.startAt}"><button type="submit" class="btn">Start again from ${plan.startAt}</button>`, ' style="display:inline"')}</div>`;
 }
 
 /**
@@ -1242,7 +1261,7 @@ ${cancelling(r) ? html`<div class="banner bad" data-live="cancelling" role="stat
 </section>
 <div class="mainc">
 ${review ?? ""}
-${card ? (card.kind === "loop" ? loopCardHtml(card, page, actions) : card.kind === "approval" ? approvalCardHtml(card, page, actions) : card.kind === "budget" ? budgetCardHtml(card, page, actions) : card.kind === "clarify" ? clarifyCardHtml(card, page, actions) : card.kind === "scope" ? scopeCardHtml(card, page, actions) : otherCardHtml(card.what, page)) : page.wait ? waitHtml(page, page.wait, now, actions) : page.next || page.continuedBy ? continuationHtml(page, actions) : page.evalReady || page.evalCase ? evalHtml(page, actions) : nowHtml(page, now, actions)}
+${card ? (card.kind === "loop" ? loopCardHtml(card, page, actions) : card.kind === "approval" ? approvalCardHtml(card, page, actions) : card.kind === "budget" ? budgetCardHtml(card, page, actions) : card.kind === "clarify" ? clarifyCardHtml(card, page, actions) : card.kind === "scope" ? scopeCardHtml(card, page, actions) : otherCardHtml(card.what, page)) : page.wait ? waitHtml(page, page.wait, now, actions) : page.next || page.continuedBy ? continuationHtml(page, actions) : page.restart && page.resumable !== "retry" ? restartHtml(page, page.restart, actions) : page.evalReady || page.evalCase ? evalHtml(page, actions) : nowHtml(page, now, actions)}
 ${page.subtasks ? subtasksHtml(page, actions) : ""}
 ${page.contractCheck ? contractCheckHtml(page.contractCheck) : ""}
 ${feedHtml(page.feed)}
@@ -1398,6 +1417,57 @@ ${
             : ""
         }${form(actions, `/runs/${shortRunId(r.id)}/continue`, html`<button type="submit" class="btn${page.nextCross ? "" : " primary"} big">Continue to ${next.workflow}</button>`)}<span class="hint">same as <code>${cmd}</code>${page.nextCross ? html` · <code>jarvis scope ${shortRunId(r.id)} --cross</code>` : ""}</span>`
       : html`<span class="hint">Go on with <code>${cmd}</code></span><button type="button" class="btn" data-copy="${cmd}">Copy command</button>`
+  }</div>
+</section>`;
+}
+
+/**
+ * A cancelled or failed run started again from one of its steps (as `jarvis restart <run> --from`):
+ * what it did before that step goes in with its approvals, the rest runs anew in a fresh checkout.
+ */
+function restartHtml(page: RunPage, restart: NonNullable<RunPage["restart"]>, actions?: Actions): Html {
+  const r = page.run;
+  const short = shortRunId(r.id);
+  const steps = restart.steps.filter((s) => s.startable);
+  const at = steps.findIndex((s) => s.id === restart.startAt);
+  const rows = steps.map((s, i) => {
+    const kept = i < at;
+    const mark =
+      s.id === restart.startAt
+        ? html`<span class="ok">→</span>`
+        : kept
+          ? html`<span class="ok">✓</span>`
+          : html`<span class="muted">·</span>`;
+    const note =
+      s.id === restart.startAt
+        ? "starts here (recommended)"
+        : kept
+          ? s.approved
+            ? "approved, taken on"
+            : "taken on"
+          : "";
+    return html`<li>${mark} <b>${s.id}</b> <span class="muted">${note}</span></li>`;
+  });
+  const cmd = `jarvis restart ${short}`;
+  const buttons = steps
+    .slice(1)
+    .map((s) =>
+      form(
+        actions as Actions,
+        `/runs/${short}/restart`,
+        html`<input type="hidden" name="step" value="${s.id}"><button type="submit" class="btn${s.id === restart.startAt ? " primary" : ""}">${s.id}</button>`,
+      ),
+    );
+  return html`<section class="panel decision" aria-labelledby="decision" data-live="card">
+<span class="${r.state === "FAILED" ? "bad" : "warn"}" style="font-size:13px;font-weight:500">${r.state === "FAILED" ? "The run failed" : "The run was cancelled"}${r.currentStep ? ` at ${r.currentStep}` : ""}</span>
+<h2 id="decision">Start again from</h2>
+<p>A new ${r.workflow} run in a fresh checkout of the current code: what was done before the step you pick goes in with its approvals and does not run again. Code the run wrote is not taken on.</p>
+<ul style="list-style:none;padding:0;margin:8px 0">${rows}</ul>
+${restart.restartedAs ? html`<p class="muted">started again as <a href="/runs/${shortRunId(restart.restartedAs.id)}">${restart.restartedAs.workflow} ${shortRunId(restart.restartedAs.id)}</a> · ${restart.restartedAs.state}</p>` : ""}
+<div class="actions">${
+    actions?.canLaunch
+      ? html`${buttons}<span class="hint">same as <code>${cmd} --from &lt;step&gt;</code></span>`
+      : html`<span class="hint">Start again with <code>${cmd}</code></span><button type="button" class="btn" data-copy="${cmd}">Copy command</button>`
   }</div>
 </section>`;
 }

@@ -10,6 +10,7 @@ import { continuedBy } from "../app/handoff.ts";
 import { Journey, type LoopReport, type StepReport } from "../app/journey.ts";
 import { pauseRequested } from "../app/pause.ts";
 import { type PlanProgress, planProgressOf } from "../app/planProgress.ts";
+import { type RestartPlan, restartPlanOf } from "../app/restart.ts";
 import { type Resumable, resumableOf } from "../app/resumable.ts";
 import type { Runtime } from "../app/runtime.ts";
 import type { RunTokens } from "../app/status.ts";
@@ -572,6 +573,8 @@ export interface RunPage {
   readonly next?: Continuation & { readonly contradictions: number };
   /** A finished research/spec of a service naming linked services: «Continue to sdd (cross-repos)» (ADR-0025 §7). */
   readonly nextCross?: readonly NamedService[];
+  /** A cancelled or failed run: the steps it can start again from (src/app/restart.ts). */
+  readonly restart?: RestartPlan & { readonly restartedAs?: RunLink };
   /** The run that went on from this one. */
   readonly continuedBy?: RunLink;
   /** The run this one went on from. */
@@ -967,6 +970,7 @@ export async function runPage(
     })(),
     ...((r) => (r ? { resumable: r } : {}))(resumableOf(runtime, run, now.getTime())),
     ...continuationLinks(runtime, engine, run),
+    ...restartOf(runtime, engine, run),
     ...evalOf(runtime, run),
     ...((n) => (n.length > 0 ? { notes: n } : {}))(notesOf(runtime, run.id)),
     ...((p) => (p ? { pausing: p.by ? { by: p.by } : {} } : {}))(
@@ -989,6 +993,23 @@ export async function runPage(
       run.state === "RUNNING" && implementing(activity) ? planProgressOf(runtime, run, events) : undefined,
     ),
   };
+}
+
+/**
+ * A cancelled or failed run that can start again from one of its steps (src/app/restart.ts), and the
+ * run it last started again as.
+ */
+function restartOf(runtime: Runtime, engine: LocalWorkflowEngine, run: Run): Pick<RunPage, "restart"> {
+  if ((run.state !== "CANCELLED" && run.state !== "FAILED") || run.options?.parent) return {};
+  const workflow = workflowOf(engine, run);
+  const plan = workflow ? restartPlanOf(runtime, run, workflow) : undefined;
+  if (!plan) return {};
+  let as: Run | undefined;
+  for (const e of runtime.events.list({ kind: "run.created", limit: 100_000 })) {
+    if ((e.payload as { restartOf?: string } | undefined)?.restartOf === run.id && e.runId)
+      as = runtime.runs.get(e.runId) ?? as;
+  }
+  return { restart: { ...plan, ...(as ? { restartedAs: linkOf(as) } : {}) } };
 }
 
 /** Where a run came from and where it went on (src/app/continuation.ts). */

@@ -2,13 +2,14 @@ import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } f
 import { dirname, join } from "node:path";
 import { clock } from "../../app/activity.ts";
 import { applyRun } from "../../app/applyRun.ts";
-import { nextWorkflowOf } from "../../app/continuation.ts";
+import { changedSince, filesReadIn, nextWorkflowOf } from "../../app/continuation.ts";
 import { awaitedArtifact, DecisionTakenError, recordDecision } from "../../app/decide.ts";
 import { createEngine } from "../../app/engine.ts";
 import { canForget, forgetRuns } from "../../app/forget.ts";
 import { continuationStep, continuedBy, handOff } from "../../app/handoff.ts";
 import { duration } from "../../app/journey.ts";
 import { preflightMcp } from "../../app/preflight.ts";
+import { carriedSteps, RESTARTABLE, restartPlanOf } from "../../app/restart.ts";
 import { createRuntime, type Runtime } from "../../app/runtime.ts";
 import { runDetail } from "../../app/status.ts";
 import { afterRunStops, MASTER_WORKFLOW } from "../../app/subtasks.ts";
@@ -527,6 +528,128 @@ async function startContinuation(
     );
   else ctx.out.line(st.warn("  works in your checkout: changes land in your working tree"));
   return runtime.runs.get(run.id);
+}
+
+/**
+ * `jarvis restart <run> [--from <step>]`: a stopped run started again from one of its steps, with the
+ * artifacts and approvals of the steps before it (src/app/restart.ts), in a fresh checkout.
+ */
+export async function runRestart(
+  ctx: CliContext,
+  ref: string,
+  options: { readonly from?: string; readonly noRun?: boolean },
+): Promise<void> {
+  let loaded = await loadForCli(ctx);
+  let runtime = createRuntime(loaded, { env: ctx.env });
+  let here = ctx;
+  try {
+    let from = requireRun(ctx, runtime, ref);
+    // the repository of the run, wherever the command is typed
+    if (loaded.project?.root !== from.workspace.repoRoot && existsSync(from.workspace.repoRoot)) {
+      runtime.close();
+      here = { ...ctx, cwd: from.workspace.repoRoot };
+      loaded = await loadForCli(here);
+      runtime = createRuntime(loaded, { env: ctx.env });
+      from = requireRun(here, runtime, ref);
+    }
+    const st = ctx.out.style;
+    if (from.options?.parent) {
+      ctx.out.error(
+        `${shortRunId(from.id)} is subtask ${from.options.parent.key} of ${shortRunId(from.options.parent.runId)}: \`jarvis subtask retry ${shortRunId(from.options.parent.runId)} ${from.options.parent.key}\``,
+      );
+      throw new CliExit(EXIT.error);
+    }
+    if (!RESTARTABLE.has(from.state)) {
+      ctx.out.error(
+        `${shortRunId(from.id)} is ${from.state}: it goes on with \`jarvis resume ${shortRunId(from.id)}\`, or \`jarvis cancel\` it first`,
+      );
+      throw new CliExit(EXIT.error);
+    }
+    const engine = createEngine(runtime);
+    const workflow = engine.workflow(from.workflow);
+    const plan = restartPlanOf(runtime, from, workflow);
+    if (!plan) {
+      ctx.out.error(`${shortRunId(from.id)} has nothing to take on: \`jarvis work\` starts it anew`);
+      throw new CliExit(EXIT.error);
+    }
+    const startable = plan.steps.filter((s) => s.startable).map((s) => s.id);
+    const startAt = options.from ?? plan.startAt;
+    if (!startable.includes(startAt)) {
+      ctx.out.error(
+        `it cannot start at "${startAt}": it can at ${startable.slice(1).join(", ")} (after a step that writes code, the code is not taken on)`,
+      );
+      throw new CliExit(EXIT.error);
+    }
+    const keepSteps = carriedSteps(plan, startAt);
+    ctx.out.line(
+      `${st.heading(`${shortRunId(from.id)} ${from.workflow}`)} ${st.muted(`· ${oneLine(from.task, 60)} · ${from.state}`)}`,
+    );
+    for (const s of plan.steps.filter((x) => x.startable)) {
+      const mark = s.id === startAt ? st.ok("→") : keepSteps.has(s.id) ? st.ok("✓") : st.muted("·");
+      const note =
+        s.id === startAt
+          ? "starts here"
+          : keepSteps.has(s.id)
+            ? s.approved
+              ? "approved, taken on"
+              : "taken on"
+            : "";
+      ctx.out.line(`  ${mark} ${s.id.padEnd(16)} ${st.muted(note)}`);
+    }
+    // the code it read may have changed since
+    const since = await changedSince(from, filesReadIn(runtime, from.id));
+    if (since && since.touched.length > 0)
+      ctx.out.line(
+        st.warn(
+          `  ${since.commits} commit${since.commits === 1 ? "" : "s"} since it looked changed ${since.touched.length} file${since.touched.length === 1 ? "" : "s"} it read: ${since.touched.slice(0, 5).join(", ")}${since.touched.length > 5 ? " …" : ""} — what it found may be out of date; --from an earlier step to look again`,
+        ),
+      );
+    const actor = await actorFor(here, runtime);
+    const runId = newRunId();
+    const prompt = promptFor(here, runtime);
+    const workspace: WorkspaceRef =
+      from.workflow === MASTER_WORKFLOW
+        ? { mode: "cwd", repoRoot: from.workspace.repoRoot, path: from.workspace.repoRoot, baseRef: "HEAD" }
+        : await prepareWorkspace(here, runtime, runId, from.task, undefined, prompt);
+    const run = runtime.runs.create({
+      id: runId,
+      task: from.task,
+      workflow: from.workflow,
+      owner: actor,
+      workspace,
+      dataClass: runtime.loaded.config.dataClass,
+      ...(runtime.loaded.config.profile ? { profile: runtime.loaded.config.profile } : {}),
+      ...(from.options?.fresh?.length ? { options: { fresh: [...from.options.fresh] } } : {}),
+    });
+    const carried = handOff(runtime, from, run, startAt, (a) => !a.stepId || keepSteps.has(a.stepId));
+    runtime.events.emit({
+      kind: "run.created",
+      runId: run.id,
+      actor: `${actor.kind}:${actor.id}`,
+      payload: {
+        task: from.task,
+        workflow: from.workflow,
+        continuedFrom: from.id,
+        restartOf: from.id,
+        startAt,
+        carried: carried.length,
+        inputs: await recordInputs(workspace.repoRoot, workspace.baseCommit),
+        ...(await knowledgeRepoInputsOf(workspace.repoRoot)),
+      },
+    });
+    ctx.out.line();
+    ctx.out.line(
+      `${st.ok("→")} ${st.name(shortRunId(run.id))} ${from.workflow} ${st.muted(`from ${startAt}, with ${carried.length} artifact${carried.length === 1 ? "" : "s"} of run ${shortRunId(from.id)}`)}`,
+    );
+    if (options.noRun) {
+      ctx.out.line(st.muted(`  not started: \`jarvis resume ${shortRunId(run.id)}\``));
+      return;
+    }
+    const created = runtime.runs.get(run.id) ?? run;
+    await executeAndReport(here, runtime, engine, created, false, {}, prompt);
+  } finally {
+    runtime.close();
+  }
 }
 
 /** What the rest of the work is, for the question. */

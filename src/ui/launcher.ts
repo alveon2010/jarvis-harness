@@ -73,6 +73,8 @@ export interface Launcher {
   start(input: { task: string; workflow: Workflow; repoRoot: string; freshDesign?: boolean }): Launch;
   /** A finished research/spec goes on as its next workflow: `jarvis continue <run>` in the background. */
   continueRun(from: Run, workflow: Workflow): Launch;
+  /** A cancelled or failed run again from a step: `jarvis restart <run> --from <step>` in the background. */
+  restartRun(from: Run, step: string): Launch;
   /** Research one module (or a folder): now, or after the research in front of it. */
   startModule(input: { module: string; note?: string; repoRoot: string }): Launch;
   /** Takes a research out of the queue; false when it has started already. */
@@ -245,6 +247,25 @@ export function createLauncher(options: LauncherOptions): Launcher {
       };
       launches.unshift(launch);
       spawnCli(["continue", from.id], from.workspace.repoRoot, launch.log, (code) => {
+        launch.exitCode = code ?? 1;
+        if (launch.runId) busy.delete(launch.runId);
+      });
+      return launch;
+    },
+    restartRun(from, step) {
+      const id = randomBytes(6).toString("hex");
+      const launch: Launch = {
+        id,
+        task: from.task,
+        workflow: from.workflow as Workflow,
+        from: from.id,
+        repoRoot: from.workspace.repoRoot,
+        startedAt: new Date().toISOString(),
+        log: join(options.logDir, `launch-${id}.log`),
+        exitCode: null,
+      };
+      launches.unshift(launch);
+      spawnCli(["restart", from.id, "--from", step], from.workspace.repoRoot, launch.log, (code) => {
         launch.exitCode = code ?? 1;
         if (launch.runId) busy.delete(launch.runId);
       });
