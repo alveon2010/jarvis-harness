@@ -17,18 +17,10 @@ import { classSelection, coveringTests, testRunnerOf } from "./relatedTests.ts";
 import {
   changedLinesOf,
   failureReasons,
-  type JsRunner,
-  jsRunnerOf,
   junitTestFailures,
   type PlacedFailure,
-  parseJestJson,
-  parseJsText,
-  parseMochaJson,
   placeFailure,
-  reporterArgs,
   type TestFailure,
-  type TestReport,
-  UNKNOWN_OPTION,
 } from "./testReport.ts";
 
 /**
@@ -108,36 +100,6 @@ async function preexistingOf(
     payload: { failing: failing.length, preexisting: classes.length, base: baseCommit.slice(0, 10) },
   });
   return { classes, excused: classes.length === failing.length };
-}
-
-/** Why JavaScript tests failed: the runner's JSON report, else its printed output. */
-function jsReportOf(
-  runner: JsRunner,
-  file: string | undefined,
-  output: string,
-  workspace: string,
-): TestReport | undefined {
-  if (file && existsSync(file)) {
-    try {
-      const json: unknown = JSON.parse(readFileSync(file, "utf8"));
-      const report = runner === "mocha" ? parseMochaJson(json, workspace) : parseJestJson(json, workspace);
-      if (report.failures.length > 0) return report;
-    } catch {
-      // a report cut short: the printed output below
-    }
-  }
-  // mocha's JSON on stdout when it would not write the file
-  if (runner === "mocha") {
-    const start = output.indexOf("{\n");
-    if (start >= 0)
-      try {
-        const body = output.slice(start).replace(/\n\[(?:stderr|exit)[\s\S]*$/, "");
-        return parseMochaJson(JSON.parse(body), workspace);
-      } catch {
-        // not JSON
-      }
-  }
-  return parseJsText(output, workspace);
 }
 
 export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
@@ -498,6 +460,18 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
       });
       if (r.ok) rebuilt.push(name);
     }
+    // the stacks' test runners that say why a run failed (an adapter's testReporter)
+    const reporters = (ctx.runtime.capabilities ?? new CapabilityRegistry())
+      .list()
+      .map((adapter) => adapter.testReporter?.())
+      .filter((r) => r !== undefined);
+    const reportingRunnerOf = (command: string) => {
+      for (const reporter of reporters) {
+        const found = reporter.runnerOf(command, workspace);
+        if (found) return { ...found, reporter };
+      }
+      return undefined;
+    };
     // the tests that cover the change (project graph), asked once and only by a runner that takes classes
     let coveringOnce: Promise<string[] | undefined> | undefined;
     const covering = () => {
@@ -568,7 +542,7 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
       }
       const started = Date.now() - 1000;
       // a JavaScript runner writes a JSON report besides its usual output: why the tests failed
-      const js = name.startsWith("test") ? jsRunnerOf(command, workspace) : undefined;
+      const js = name.startsWith("test") ? reportingRunnerOf(command) : undefined;
       const reportFile = js
         ? join(tmpdir(), `jarvis-${ctx.run.id}-${name.replace(/[^\w.-]+/g, "-")}-${Date.now()}.json`)
         : undefined;
@@ -576,14 +550,21 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
         const all = [related.trim(), extra].filter(Boolean).join(" ");
         return all && js?.dashDash && !/(^|\s)--(\s|$)/.test(command) ? `-- ${all}` : all;
       };
-      const firstArgs = argsWith(js && reportFile ? reporterArgs(js.runner, reportFile) : "");
+      const firstArgs = argsWith(js && reportFile ? js.reporter.reporterArgs(js.runner, reportFile) : "");
       let r = await ctx.tools.invoke(`project.${name}`, firstArgs ? { args: firstArgs } : {});
       // a runner that does not know the reporter's options: once more as the command was
-      if (js && reportFile && !r.ok && !existsSync(reportFile) && UNKNOWN_OPTION.test(r.text ?? "")) {
+      if (
+        js &&
+        reportFile &&
+        !r.ok &&
+        !existsSync(reportFile) &&
+        js.reporter.unknownOption.test(r.text ?? "")
+      ) {
         const args = argsWith("");
         r = await ctx.tools.invoke(`project.${name}`, args ? { args } : {});
       }
-      const jsReport = js && !r.ok ? jsReportOf(js.runner, reportFile, r.text ?? "", workspace) : undefined;
+      const jsReport =
+        js && !r.ok ? js.reporter.failures(js.runner, reportFile, r.text ?? "", workspace) : undefined;
       if (reportFile) rmSync(reportFile, { force: true });
       // failing tests that fail on the base commit too are not this run's defects
       // why the tests failed, from the reports the runner wrote

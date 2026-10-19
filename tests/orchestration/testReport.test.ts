@@ -3,16 +3,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  changedLinesOf,
-  expectedActualOf,
-  failureReasons,
-  javaFrames,
   jsExpectedActual,
   jsRunnerOf,
   parseJestJson,
   parseJsText,
-  parseJunitXml,
   parseMochaJson,
+} from "../../src/adapters/typescript/testReport.ts";
+import {
+  changedLinesOf,
+  expectedActualOf,
+  failureReasons,
+  javaFrames,
+  parseJunitXml,
   placeFailure,
 } from "../../src/orchestration/tools/testReport.ts";
 

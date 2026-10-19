@@ -5,10 +5,12 @@ import type {
   DetectionResult,
   LanguageAdapter,
   LanguageCapability,
+  TestReporter,
 } from "../../core/capabilities/contracts.ts";
 import type { Snapshot } from "../../knowledge/graph/store.ts";
 import { snapshotIntelligence } from "../snapshotIntelligence.ts";
 import { TypeScriptExtractor } from "./extractor.ts";
+import { JS_TEST_REPORTER } from "./testReport.ts";
 
 /**
  * TypeScript / JavaScript adapter (ADR-0021 §2, §8): detection, default commands, the ts-morph
@@ -56,6 +58,10 @@ export class TypeScriptAdapter implements LanguageAdapter {
 
   defaultCommands(): Partial<Record<"build" | "test" | "format" | "lint", string>> {
     return {};
+  }
+
+  testReporter(): TestReporter {
+    return JS_TEST_REPORTER;
   }
 
   graphExtractor(): TypeScriptExtractor {

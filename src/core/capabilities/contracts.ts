@@ -157,6 +157,60 @@ export type LanguageCapability =
   | "diagnostics"
   | "graph";
 
+/* ---- Why tests failed (src/orchestration/tools/testReport.ts) ---- */
+
+export interface StackFrame {
+  /** As the runner wrote it: a file (`src/a.ts`, `OrderService.java`) or a class (`a.b.OrderService`). */
+  readonly file: string;
+  readonly line?: number;
+  readonly fn?: string;
+  /** The frame's line as printed. */
+  readonly raw: string;
+}
+
+export interface TestFailure {
+  /** The suite or test class. */
+  readonly suite?: string;
+  readonly name: string;
+  /** The test's file, when the report names it. */
+  readonly file?: string;
+  /** The first lines of the failure: the assertion or the error. */
+  readonly message: string;
+  readonly expected?: string;
+  readonly actual?: string;
+  readonly stack: readonly StackFrame[];
+}
+
+export interface TestReport {
+  readonly source: "junit" | "json" | "text";
+  readonly failures: readonly TestFailure[];
+  /** Tests run, when the report says. */
+  readonly total?: number;
+}
+
+/**
+ * A test runner of an adapter's stack: how a failed run of it says why — the arguments that make it
+ * write a report, and the failures read from the report or from what it printed.
+ */
+export interface TestReporter {
+  /** The runner a test command ends in, and whether arguments reach it only after `--`. */
+  runnerOf(
+    command: string,
+    workspace: string,
+  ): { readonly runner: string; readonly dashDash: boolean } | undefined;
+  /** The runner's arguments that write its report to `file`, besides its usual output. */
+  reporterArgs(runner: string, file: string): string;
+  /** An option the runner does not know: the command runs once more as configured. */
+  readonly unknownOption: RegExp;
+  /** The failures: from the report when it was written, else from the printed output. */
+  failures(
+    runner: string,
+    file: string | undefined,
+    output: string,
+    workspace: string,
+  ): TestReport | undefined;
+}
+
 export interface LanguageAdapter {
   readonly id: string;
   readonly languages: readonly string[];
@@ -167,4 +221,6 @@ export interface LanguageAdapter {
   codeIntelligence?(workspacePath: string): CodeIntelligence;
   diagnostics?(workspacePath: string): DiagnosticsProvider;
   graphExtractor?(): ProjectGraphExtractor;
+  /** The test runners of the stack: why a failed run failed. */
+  testReporter?(): TestReporter;
 }
