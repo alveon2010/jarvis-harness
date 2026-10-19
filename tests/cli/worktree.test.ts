@@ -486,7 +486,9 @@ steps:
       expected: "3",
       actual: "4",
     });
-    expect((app?.failures?.[0]?.stack as Array<{ file: string }>)[0]?.file).toBe("app/src/a.test.js");
+    expect((app?.failures?.[0]?.stack as Array<{ file: string }> | undefined)?.[0]?.file).toBe(
+      "app/src/a.test.js",
+    );
     expect(old?.failures?.[0]).toMatchObject({ suite: "b", name: "subtracts", expected: "1", actual: "2" });
     // the reasons the implementation goes back with: the test, what was expected, where
     const reasons = (checks as unknown as { reasons: Array<{ summary: string; sourceRefs: string[] }> })
