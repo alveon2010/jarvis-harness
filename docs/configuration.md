@@ -167,6 +167,7 @@ tools:
     fix-web: "cd web && npx eslint --quiet --fix"
     services-check: "pnpm services:check"
     build-lib: "pnpm --filter @acme/ui-kit build"
+  required: [tests, lint]      # без каких команд проект не готов (по умолчанию [tests]); см. ниже
   rebuild:                     # перед project.checks: сборка того, что пакеты читают собранным
     - { when: ["packages/ui-kit/**"], run: build-lib }   # run — имя из tools.local
   fix:                         # на каждый файл, что пишет агент, и на изменённые перед project.checks
@@ -304,6 +305,13 @@ lockfile получает их до `setup`, и `setup` почти ничего 
 система умеет (APFS — `cp -c`, btrfs/xfs — `--reflink`), поэтому там она не стоит ни времени, ни места. Хранятся
 три последних ключа. Сломанный кэш стоит только времени полного `setup`. Строка прогресса пишет
 `◌ dependencies restored node_modules (key …)` или `kept … for the next run`.
+
+`tools.required` — какие проверки у проекта обязаны быть (по умолчанию только `tests`). `tests` закрывает любая
+команда `test*` из `tools.local` (`test`, `tests-unit`, `test:e2e`), `lint` — любая `lint*`, `typecheck` — `typecheck*`,
+другое имя — команда с этим именем. Чего не хватает, говорят `jarvis onboard`, `jarvis doctor` и страница Knowledge →
+Services; остальные из `tests`, `typecheck`, `lint` там показаны как необязательные. В репе знаний задаётся общим и
+переопределяется у сервиса (`services.web-app.tools.required: [tests, lint]`); у библиотеки к ним добавляется
+`publish-local`. На запуск задачи не влияет: проверки идут те, что есть.
 
 `tools.rebuild` — сборки, от которых зависят проверки. Пакет монорепо, который читает общую библиотеку
 собранной (`exports` в её папку публикации), проверяется против той сборки, что лежит на диске; `setup` собрал
@@ -530,6 +538,16 @@ services:
     kind: frontend
     tools:
       local: { tests: pnpm test, typecheck: pnpm typecheck, lint: pnpm lint }
+  common-lib:
+    kind: library                       # меняется первой в задаче на несколько сервисов
+    publishes: [com.example:common-lib] # под каким именем его берут сервисы
+    tools:
+      local:
+        tests: ./gradlew test
+        publish-local: ./gradlew publishToMavenLocal
+  payments-api:
+    kind: backend
+    uses: [common-lib]                  # ждёт её изменения в такой задаче
 ```
 
 ```
@@ -585,8 +603,14 @@ services:
   `kind` (`frontend` — react, vue, angular, svelte, next; `backend` — java, kotlin, go, dotnet, python, node без
   фронтового фреймворка) и команды `tools.local` (`tests`, `typecheck`, `lint`, `build` — из `package.json`,
   gradle, maven…). Пишет только пустое: ключ, уже заданный у сервиса или в общем `tools.local`, не трогает и
-  показывает, если найденное от него отличается («kept as set»). `kind` — справочный, на поведение пока не влияет.
-  `--dry-run` только показывает;
+  показывает, если найденное от него отличается («kept as set»). `--dry-run` только показывает;
+- библиотеки: `onboard` по файлам сборки, без модели, пишет `kind: library`, `publishes` и `tools.local.publish-local`
+  репе, которую публикуют для других (Gradle с `maven-publish` и без приложения — `group:name` и
+  `publishToMavenLocal`; Maven без Spring Boot и не war — `groupId:artifactId` и `mvn install`; npm-пакет не
+  `private` с точкой входа — имя пакета и `npm pack`), а сервисам, в чьей сборке есть эти имена, — `uses`. В задаче на
+  несколько сервисов сабтаск сервиса из `uses` библиотеки ждёт, пока её изменение примут и `publish-local` пройдёт в
+  её копии, и получает в задаче новую версию ([workflows.md](workflows.md#граф-sdd-cross-задача-по-нескольким-сервисам-adr-0025-6)).
+  `backend` и `frontend` — справочные, на поведение не влияют;
 - черновики знания на страницах `jarvis ui` коммитятся в репе знаний; дальше — ветка и PR;
 - прогон записывает коммит репы знаний и её изменённые файлы (`run.created` → `knowledgeRepo`);
 - eval-кейсы сервиса лежат в репе знаний (docs/evals.md).
