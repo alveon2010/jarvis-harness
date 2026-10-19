@@ -132,6 +132,10 @@ jarvis ci ABC-42 --bundle run.json.gz   # the same workflow in CI, handed over t
 
 ## Documentation
 
+The guide for people — what Jarvis does, how to set it up, how it works, its agents and prompts, with sequence
+diagrams — is published at **https://mxmvshnvsk.github.io/jarvis-harness/** (in Russian; sources in `site/`, built
+with VitePress by `.github/workflows/docs.yml`: `cd site && pnpm install && pnpm dev`). The reference is below.
+
 | Read this | To learn |
 |---|---|
 | [docs/QUICKSTART.md](docs/QUICKSTART.md) | the pilot walkthrough from an empty machine to an applied result |
