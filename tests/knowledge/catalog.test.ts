@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CodeContracts } from "../../src/design/codeContracts.ts";
 import {
+  catalogDoc,
   loadCatalog,
   neighboursDoc,
   resolvePlaceholders,
@@ -168,5 +169,20 @@ describe("the contract catalog", () => {
     expect(config["clients.slots.url"]).toBe("http://gw/slots");
     expect(config["clients.other"]).toBe("x");
     expect(config["feature.flag"]).toBe("true");
+  });
+});
+
+describe("the split agent's catalog", () => {
+  it("names the libraries of the map and who uses them; none, no section", () => {
+    const empty = { services: new Map(), links: [], unresolved: [] };
+    const doc = catalogDoc(
+      empty,
+      ["common-lib", "orders-api"],
+      [],
+      [{ service: "common-lib", publishes: ["com.example:common-lib"], usedBy: ["orders-api"] }],
+    );
+    expect(doc).toContain("## Libraries of the map");
+    expect(doc).toContain("- common-lib (com.example:common-lib) — used by orders-api");
+    expect(catalogDoc(empty, ["orders-api"], [])).not.toContain("Libraries");
   });
 });

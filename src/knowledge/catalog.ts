@@ -469,6 +469,12 @@ export function catalogDoc(
   catalog: Catalog,
   names: readonly string[],
   named: readonly NamedService[],
+  /** Libraries of the map (`kind: library`): they change first, who uses them starts after. */
+  libraries: ReadonlyArray<{
+    readonly service: string;
+    readonly publishes: readonly string[];
+    readonly usedBy: readonly string[];
+  }> = [],
 ): string {
   const without = names.filter((n) => !catalog.services.has(n));
   const linkLine = (l: CatalogLink) =>
@@ -491,6 +497,19 @@ export function catalogDoc(
     "",
     ...(catalog.links.length > 0 ? catalog.links.map(linkLine) : ["- none known"]),
     "",
+    ...(libraries.length > 0
+      ? [
+          "## Libraries of the map",
+          "",
+          "A library the change needs gets a subtask of its own, like a service: what changes in it, and its new version. The services that use it start once its change is accepted and published (Jarvis orders that from the map): put in each user's task that it moves to the new version and what it uses of it. A user that needs nothing new from it gets no subtask for that reason.",
+          "",
+          ...libraries.map(
+            (l) =>
+              `- ${l.service}${l.publishes.length > 0 ? ` (${l.publishes.join(", ")})` : ""} — used by ${l.usedBy.join(", ") || "no service of the map"}`,
+          ),
+          "",
+        ]
+      : []),
   ];
   for (const [service, c] of catalog.services) {
     lines.push(`## ${service}`, "");

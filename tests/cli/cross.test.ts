@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Writable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -253,5 +253,136 @@ describe("a task across services", () => {
     const r = await jarvis(join(repos, "orders-api"), ["work", "ABC-44", "--workflow", "sdd-cross"]);
     expect(r.code).toBe(1);
     expect(r.out).toContain("runs in the knowledge repository");
+  });
+});
+
+describe("a library in a task across services", () => {
+  const LIB_SPLIT = JSON.stringify({
+    summary: "round amounts once",
+    subtasks: [
+      { key: "1", service: "common-lib", task: "Add Money.round()", requirements: ["R1"] },
+      {
+        key: "2",
+        service: "orders-api",
+        task: "Round the total once",
+        requirements: ["R2"],
+        deliverAfter: ["1"],
+      },
+      { key: "3", service: "notify-api", task: "Say the amount", requirements: ["R3"] },
+    ],
+    contract: [],
+  });
+  const map = (publish: string) =>
+    [
+      "version: 1",
+      "workspace: { mode: cwd }",
+      "crossRepos: { maxParallel: 2 }",
+      "services:",
+      "  common-lib:",
+      "    kind: library",
+      "    publishes: [com.example:common-lib]",
+      `    tools: { local: { publish-local: "${publish}" } }`,
+      "  orders-api:",
+      "    uses: [common-lib]",
+      "  notify-api: {}",
+      "",
+    ].join("\n");
+
+  beforeEach(() => {
+    sb.write(
+      "repos/jarvis-knowledge/.jarvis/workflows/sdd-cross.yaml",
+      MASTER.replace(`'${SPLIT}'`, `'${LIB_SPLIT}'`),
+    );
+    repo("common-lib");
+    sb.write("repos/common-lib/gradle.properties", "version=2.15.0\n");
+  });
+
+  it("who uses it starts once its change is accepted and published, against that version", async () => {
+    sb.write("repos/jarvis-knowledge/.jarvis/project.yaml", map("echo published > published.txt"));
+    await jarvis(meta, ["work", "ABC-57 round amounts", "--workflow", "sdd-cross"]);
+    // the library and the service that does not use it start; orders-api waits
+    expect(launches.map((l) => [l.args[3], l.cwd])).toEqual([
+      ["1", join(repos, "common-lib")],
+      ["3", join(repos, "notify-api")],
+    ]);
+    const masterId = launches[0]?.args[2] as string;
+    const loaded = await loadConfig({ cwd: meta, homeDir: sb.home, env: {} });
+    const rt = createRuntime(loaded, { env: {} });
+    try {
+      const m = rt.runs.get(masterId);
+      const views = subtasksOf(rt, m as never);
+      expect(views.find((v) => v.subtask.key === "2")).toMatchObject({ state: "blocked", waitsFor: ["1"] });
+      // the master's page: who waits for what, and starting it anyway
+      const body = runContent(
+        await runPage(rt, createEngine(rt), m as never, { homeDir: sb.home }),
+        Date.now(),
+      ).value;
+      expect(body).toContain("waits for common-lib</span>");
+      expect(body).toContain("Starts when common-lib is accepted and published, against the new version.");
+    } finally {
+      rt.close();
+    }
+    const lib = await next();
+    expect(lib.result.code).toBe(0);
+    // accepted (its run completed): published in its checkout, then orders-api starts
+    expect(readFileSync(join(repos, "common-lib", "published.txt"), "utf8")).toBe("published\n");
+    expect(launches.map((l) => [l.args[3], l.cwd])).toEqual([
+      ["3", join(repos, "notify-api")],
+      ["2", join(repos, "orders-api")],
+    ]);
+    launches.shift();
+    const orders = await next();
+    expect(orders.result.code).toBe(0);
+    const rt2 = createRuntime(await loadConfig({ cwd: meta, homeDir: sb.home, env: {} }), { env: {} });
+    try {
+      const v = subtasksOf(rt2, rt2.runs.get(masterId) as never);
+      expect(v.find((x) => x.subtask.key === "1")?.published).toMatchObject({
+        ok: true,
+        version: "2.15.0",
+        command: "echo published > published.txt",
+      });
+      const task = v.find((x) => x.subtask.key === "2")?.run?.task ?? "";
+      expect(task).toContain("Libraries this service uses that the task changed first");
+      expect(task).toContain(
+        "- common-lib (subtask 1): Add Money.round() — version 2.15.0, published on this machine by `echo published > published.txt`",
+      );
+    } finally {
+      rt2.close();
+    }
+    const list = await jarvis(meta, ["subtask", "list", masterId.slice(4, 12)]);
+    expect(list.out).toMatch(/1\s+common-lib\s+COMPLETED.*published 2\.15\.0/);
+  });
+
+  it("publish-local failed: the services keep waiting; a person starts one anyway, or publishes again", async () => {
+    sb.write("repos/jarvis-knowledge/.jarvis/project.yaml", map("echo no network; exit 3"));
+    await jarvis(meta, ["work", "ABC-58 round amounts", "--workflow", "sdd-cross"]);
+    const masterId = launches[0]?.args[2] as string;
+    await next(); // the library completes, its publish fails
+    expect(launches.map((l) => l.args[3])).toEqual(["3"]);
+    const list = await jarvis(meta, ["subtask", "list", masterId.slice(4, 12)]);
+    expect(list.out).toMatch(/2\s+orders-api\s+blocked.*waits for 1 to be accepted and published/);
+    expect(list.out).toContain("publish-local failed");
+    const rt = createRuntime(await loadConfig({ cwd: meta, homeDir: sb.home, env: {} }), { env: {} });
+    try {
+      const m = rt.runs.get(masterId);
+      const body = runContent(
+        await runPage(rt, createEngine(rt), m as never, { homeDir: sb.home }),
+        Date.now(),
+      ).value;
+      expect(body).toContain("<b>publish-local failed</b>");
+      expect(body).toContain("no network");
+      expect(body).toContain("Start now anyway");
+    } finally {
+      rt.close();
+    }
+    // again, in the library's repository: still failing, said with its output
+    const again = await jarvis(join(repos, "common-lib"), ["subtask", "publish", masterId.slice(4, 12), "1"]);
+    expect(again.code).toBe(1);
+    expect(again.out).toContain("no network");
+    launches.length = 0;
+    const started = await jarvis(meta, ["subtask", "start", masterId.slice(4, 12), "orders-api"]);
+    expect(started.code).toBe(0);
+    expect(started.out).toContain("without waiting for its libraries");
+    expect(launches.map((l) => l.args[3])).toEqual(["2"]);
   });
 });

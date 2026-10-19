@@ -1,8 +1,12 @@
 import { spawn } from "node:child_process";
 import { closeSync, mkdirSync, openSync } from "node:fs";
 import { join } from "node:path";
+import { isPlainObject } from "../core/config/merge.ts";
+import { knowledgeConfigOf } from "../core/config/meta.ts";
 import { isTerminal, type Run, type RunState } from "../core/domain/run.ts";
+import { libraryVersionOf } from "../onboarding/library.ts";
 import { shortRunId } from "../storage/runStore.ts";
+import { runShell } from "../tools/local/exec.ts";
 import type { Runtime } from "./runtime.ts";
 
 /**
@@ -44,9 +48,13 @@ const strings = (v: unknown): string[] =>
 /** The master's approved split (the latest version, approved at its gate). */
 export function splitOf(runtime: Runtime, master: Run): Split | undefined {
   const a = runtime.artifacts.listLatest(master.id, SPLIT_TYPE)[0];
-  if (!a) return undefined;
+  return a ? parseSplit(runtime.artifacts.text(a)) : undefined;
+}
+
+/** A split document's subtasks, contract and what is not in scope. */
+export function parseSplit(text: string): Split | undefined {
   try {
-    const doc = JSON.parse(runtime.artifacts.text(a)) as Record<string, unknown>;
+    const doc = JSON.parse(text) as Record<string, unknown>;
     const subtasks = (Array.isArray(doc.subtasks) ? doc.subtasks : []).flatMap((x): Subtask[] => {
       const o = x as Record<string, unknown>;
       return typeof o.key === "string" && typeof o.service === "string" && typeof o.task === "string"
@@ -116,13 +124,90 @@ const keysOf = (runtime: Runtime, masterId: string, kind: string): Map<string, s
   return out;
 };
 
-/** A subtask's state for the master: queued, starting (its process prepares the checkout), its run's state, dropped. */
-export type SubtaskState = "queued" | "starting" | "dropped" | RunState;
+/**
+ * A subtask's state for the master: queued, blocked (it waits for a library of the task to be accepted
+ * and published), starting (its process prepares the checkout), its run's state, dropped.
+ */
+export type SubtaskState = "queued" | "blocked" | "starting" | "dropped" | RunState;
+
+/** A library subtask's `publish-local` after its change was accepted. */
+export interface Publication {
+  readonly ok: boolean;
+  readonly command?: string;
+  /** The version its checkout builds, as the services' builds will find it. */
+  readonly version?: string;
+  /** Published nothing: the library has no `publish-local` (the services build against what they have). */
+  readonly skipped?: string;
+  /** The command's last lines. */
+  readonly tail?: string;
+  /** Where it ran: the library subtask's checkout. */
+  readonly at?: string;
+  readonly ts: string;
+}
 
 export interface SubtaskView {
   readonly subtask: Subtask;
   readonly state: SubtaskState;
   readonly run?: Run;
+  /** Blocked: the keys of the library subtasks it waits for. */
+  readonly waitsFor?: readonly string[];
+  /** A library's subtask: its publish-local, once run. */
+  readonly published?: Publication;
+}
+
+export const PUBLISH_LOCAL = "publish-local";
+
+/** The map's kinds and `uses` (ADR-0025): which services are libraries, which use which. */
+export function libraryMapOf(runtime: Runtime): {
+  libraries: Set<string>;
+  uses: Map<string, string[]>;
+  publishes: Map<string, string[]>;
+} {
+  const meta = runtime.loaded.meta;
+  const config = meta ? knowledgeConfigOf(meta.root) : undefined;
+  const services = config && isPlainObject(config.services) ? config.services : {};
+  const libraries = new Set<string>();
+  const uses = new Map<string, string[]>();
+  const publishes = new Map<string, string[]>();
+  for (const [name, entry] of Object.entries(services)) {
+    if (!isPlainObject(entry)) continue;
+    if (entry.kind === "library") libraries.add(name);
+    uses.set(name, strings(entry.uses));
+    publishes.set(name, strings(entry.publishes));
+  }
+  return { libraries, uses, publishes };
+}
+
+/** The keys of the split's library subtasks this one waits for: libraries its service uses. */
+export function libraryBlockers(
+  sub: Subtask,
+  split: Split,
+  map: { libraries: ReadonlySet<string>; uses: ReadonlyMap<string, readonly string[]> },
+): string[] {
+  const used = map.uses.get(sub.service) ?? [];
+  return split.subtasks
+    .filter((s) => s.key !== sub.key && map.libraries.has(s.service) && used.includes(s.service))
+    .map((s) => s.key);
+}
+
+/** The latest publish-local of each library subtask of a master. */
+export function publicationsOf(runtime: Runtime, masterId: string): Map<string, Publication> {
+  const out = new Map<string, Publication>();
+  for (const e of runtime.events.list({ runId: masterId, kind: "subtask.published", limit: 1000 })) {
+    const p = (e.payload ?? {}) as Record<string, unknown>;
+    if (typeof p.key !== "string") continue;
+    const str = (k: string) => (typeof p[k] === "string" ? { [k]: p[k] as string } : {});
+    out.set(p.key, {
+      ok: p.ok === true,
+      ...str("command"),
+      ...str("version"),
+      ...str("skipped"),
+      ...str("tail"),
+      ...str("at"),
+      ts: e.ts,
+    });
+  }
+  return out;
 }
 
 /** A started subtask whose run does not exist yet counts as starting this long (the checkout's setup). */
@@ -134,7 +219,10 @@ export function subtasksOf(runtime: Runtime, master: Run, now = new Date()): Sub
   const children = childrenOf(runtime, master.id);
   const dropped = keysOf(runtime, master.id, "subtask.dropped");
   const started = keysOf(runtime, master.id, "subtask.started");
-  return split.subtasks.map((subtask) => {
+  const startNow = keysOf(runtime, master.id, "subtask.startNow");
+  const published = publicationsOf(runtime, master.id);
+  const map = libraryMapOf(runtime);
+  const base = split.subtasks.map((subtask) => {
     const run = children.get(subtask.key);
     if (dropped.has(subtask.key)) return { subtask, state: "dropped" as const, ...(run ? { run } : {}) };
     if (run) {
@@ -153,6 +241,18 @@ export function subtasksOf(runtime: Runtime, master: Run, now = new Date()): Sub
     return at && now.getTime() - Date.parse(at) < STARTING_MS
       ? { subtask, state: "starting" as const }
       : { subtask, state: "queued" as const };
+  });
+  // a library's change goes first: who uses it waits until it is accepted and published (or dropped)
+  const ready = (key: string) => {
+    const v = base.find((x) => x.subtask.key === key);
+    return v?.state === "dropped" || (v?.state === "COMPLETED" && published.get(key)?.ok === true);
+  };
+  return base.map((v): SubtaskView => {
+    const pub = published.get(v.subtask.key);
+    const withPub = pub ? { ...v, published: pub } : v;
+    if (v.state !== "queued" || startNow.has(v.subtask.key)) return withPub;
+    const waitsFor = libraryBlockers(v.subtask, split, map).filter((k) => !ready(k));
+    return waitsFor.length > 0 ? { ...withPub, state: "blocked", waitsFor } : withPub;
   });
 }
 
@@ -241,11 +341,14 @@ export function resumeMaster(runtime: Runtime, master: Run): void {
  * After a run stopped (any process): a subtask that ended frees its slot for the next one; when every
  * subtask is done, the waiting master goes on. Never throws: the run's own report comes first.
  */
-export function afterRunStops(runtime: Runtime, run: Run): void {
+export async function afterRunStops(runtime: Runtime, run: Run): Promise<void> {
   try {
     const of = masterOf(runtime, run);
     if (!of || isTerminal(of.master.state)) return;
     const master = of.master;
+    // a library's change accepted: published for the services that wait for it, then they start
+    if (run.state === "COMPLETED" && of.subtask && libraryMapOf(runtime).libraries.has(of.subtask.service))
+      await publishLibrary(runtime, master, of.subtask, run);
     scheduleSubtasks(runtime, master);
     const views = subtasksOf(runtime, master);
     if (views.length > 0 && views.every(isDone) && master.waitingFor?.kind === "children")
@@ -256,6 +359,67 @@ export function afterRunStops(runtime: Runtime, run: Run): void {
       message: error instanceof Error ? error.message : String(error),
     });
   }
+}
+
+/**
+ * `publish-local` of a library subtask, in its checkout, with the library service's configuration (the
+ * process runs in its repository): its version as the services' builds will find it. Recorded on the
+ * master; a failure keeps the services waiting, with the command's output to see.
+ */
+export async function publishLibrary(
+  runtime: Runtime,
+  master: Run,
+  sub: Subtask,
+  run: Run,
+): Promise<Publication> {
+  const command = runtime.loaded.config.tools.local[PUBLISH_LOCAL];
+  const at = run.workspace.path;
+  const emit = (p: Omit<Publication, "ts">) => {
+    runtime.events.emit({
+      kind: "subtask.published",
+      runId: master.id,
+      payload: { key: sub.key, service: sub.service, run: run.id, ...p },
+    });
+    return { ...p, ts: new Date().toISOString() };
+  };
+  if (!command)
+    return emit({
+      ok: true,
+      skipped: `${sub.service} has no tools.local.${PUBLISH_LOCAL}: the services build against the version they have`,
+      at,
+    });
+  const r = await runShell(command, { cwd: at, timeoutMs: runtime.loaded.config.tools.commandTimeoutMs });
+  const tail = `${r.stdout}\n${r.stderr}`
+    .split(/\r?\n/)
+    .filter((l) => l.trim().length > 0)
+    .slice(-20)
+    .join("\n");
+  const version = libraryVersionOf(at);
+  return emit({
+    ok: r.code === 0 && !r.timedOut,
+    command,
+    ...(version ? { version } : {}),
+    ...(tail ? { tail: tail.slice(-4000) } : {}),
+    at,
+  });
+}
+
+/** `jarvis subtask publish <master> <key>` in the library's repository: publish-local again. */
+export function republishSubtask(
+  runtime: Runtime,
+  master: Run,
+  key: string,
+): { ok: true } | { ok: false; why: string } {
+  const sub = splitOf(runtime, master)?.subtasks.find((s) => s.key === key);
+  if (!sub) return { ok: false, why: `no subtask ${key} in the split` };
+  const repo = runtime.loaded.meta?.repos[sub.service];
+  if (!repo) return { ok: false, why: `${sub.service} is not a service of the knowledge repository's map` };
+  launcher({
+    args: ["subtask", "publish", master.id, key],
+    cwd: repo,
+    log: launchLog(runtime, `publish-${shortRunId(master.id)}-${key}`),
+  });
+  return { ok: true };
 }
 
 /** Delivery order: a subtask after the keys it is delivered after (a cycle keeps the split's order). */

@@ -5,6 +5,7 @@ import {
   type ContractItem,
   deliveryOrder,
   isDone,
+  libraryMapOf,
   scheduleSubtasks,
   splitOf,
   subtasksOf,
@@ -62,9 +63,15 @@ const catalogStep: DeterministicTool = async (ctx) => {
   const catalog = catalogOf(m.root);
   const names = Object.keys(m.repos).sort();
   const named = namedServices(catalog, taskText(ctx), names);
+  const map = libraryMapOf(ctx.runtime);
+  const libraries = [...map.libraries].sort().map((service) => ({
+    service,
+    publishes: map.publishes.get(service) ?? [],
+    usedBy: names.filter((n) => (map.uses.get(n) ?? []).includes(service)),
+  }));
   return {
     status: "success",
-    outputs: [put(ctx, "catalog", "catalog.md", catalogDoc(catalog, names, named))],
+    outputs: [put(ctx, "catalog", "catalog.md", catalogDoc(catalog, names, named, libraries))],
   };
 };
 

@@ -7,6 +7,7 @@ import type { McpHealth, McpServerHealth } from "../app/mcpHealth.ts";
 import type { HealthState, ModelHealth, ModelPerf, ModelsHealth, Unlimited } from "../app/modelHealth.ts";
 import type { PlanProgress } from "../app/planProgress.ts";
 import type { RestartPlan } from "../app/restart.ts";
+import type { SubtaskView } from "../app/subtasks.ts";
 import type { TimeItem, TimePart, TimeSplit } from "../app/timeSplit.ts";
 import { cdTo, type TryOut, tryCommand } from "../app/tryOut.ts";
 import type { Change } from "../cli/checkout.ts";
@@ -1320,9 +1321,12 @@ function subtasksHtml(page: RunPage, actions?: Actions): Html {
   const r = page.run;
   const views = page.subtasks ?? [];
   const done = views.filter((v) => v.state === "COMPLETED" || v.state === "dropped").length;
-  const pill = (state: string) =>
-    html`<span class="pill ${state === "COMPLETED" ? "ok" : state === "FAILED" || state === "CANCELLED" ? "bad" : state === "WAITING_HUMAN" ? "wait" : state === "dropped" || state === "queued" ? "plain" : "info"}">${state === "WAITING_HUMAN" ? "waits for you" : state}</span>`;
-  const act = (key: string, what: "start" | "retry" | "drop", label: string, primary = false) =>
+  const serviceOf = (key: string) => views.find((v) => v.subtask.key === key)?.subtask.service ?? key;
+  const pill = (v: SubtaskView) =>
+    v.state === "blocked"
+      ? html`<span class="pill plain sub-wait" title="a library of this task is changed first">waits for ${(v.waitsFor ?? []).map(serviceOf).join(", ")}</span>`
+      : html`<span class="pill ${v.state === "COMPLETED" ? "ok" : v.state === "FAILED" || v.state === "CANCELLED" ? "bad" : v.state === "WAITING_HUMAN" ? "wait" : v.state === "dropped" || v.state === "queued" ? "plain" : "info"}">${v.state === "WAITING_HUMAN" ? "waits for you" : v.state}</span>`;
+  const act = (key: string, what: "start" | "retry" | "drop" | "publish", label: string, primary = false) =>
     actions
       ? form(
           actions,
@@ -1330,6 +1334,15 @@ function subtasksHtml(page: RunPage, actions?: Actions): Html {
           html`<input type="hidden" name="key" value="${key}"><input type="hidden" name="act" value="${what}"><button type="submit" class="btn small${primary ? " primary" : ""}">${label}</button>`,
         )
       : "";
+  const published = (v: SubtaskView) => {
+    const p = v.published;
+    if (!p) return "";
+    if (p.skipped)
+      return html`<p class="hint sub-pub">Not published: no publish-local — the services build against the version they have.</p>`;
+    return p.ok
+      ? html`<p class="hint sub-pub">✓ published${p.version ? html` <code>${p.version}</code>` : ""} by <code>${p.command ?? ""}</code></p>`
+      : html`<div class="banner bad sub-pub"><b>publish-local failed</b> — <code>${p.command ?? ""}</code>; the services that use it keep waiting.${p.tail ? html`<pre class="tf-tail">${p.tail}</pre>` : ""}</div>`;
+  };
   return html`<section class="panel" aria-labelledby="subtasks" data-live="subtasks">
 <h2 id="subtasks">Subtasks <span class="meta">${done} of ${views.length} done</span></h2>
 <ul style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:8px">${views.map(
@@ -1338,8 +1351,9 @@ function subtasksHtml(page: RunPage, actions?: Actions): Html {
     ) => html`<li class="row" style="flex-wrap:wrap;gap:8px 14px;padding:8px 0;border-top:1px solid var(--line-soft)">
 <span class="meta">${v.subtask.key}</span>${v.run ? html`<a href="/runs/${shortRunId(v.run.id)}" style="font-weight:600">${v.subtask.service}</a>` : html`<b>${v.subtask.service}</b>`}
 <span class="muted" style="flex:1 1 260px;min-width:0">${firstLine(v.subtask.task, 140)}${v.run?.currentStep && v.state !== "COMPLETED" ? html` · <span class="meta">${v.run.currentStep}</span>` : ""}</span>
-${pill(v.state)}
-${v.state === "queued" ? act(v.subtask.key, "start", "Start now") : ""}${v.state === "CANCELLED" || v.state === "FAILED" ? act(v.subtask.key, "retry", "Retry") : ""}${v.state !== "COMPLETED" && v.state !== "dropped" ? act(v.subtask.key, "drop", "Drop") : ""}
+${pill(v)}
+${v.state === "queued" ? act(v.subtask.key, "start", "Start now") : ""}${v.state === "blocked" ? act(v.subtask.key, "start", "Start now anyway") : ""}${v.published && !v.published.ok ? act(v.subtask.key, "publish", "Run publish-local again", true) : ""}${v.state === "CANCELLED" || v.state === "FAILED" ? act(v.subtask.key, "retry", "Retry") : ""}${v.state !== "COMPLETED" && v.state !== "dropped" ? act(v.subtask.key, "drop", "Drop") : ""}
+${v.state === "blocked" ? html`<p class="hint sub-pub">Starts when ${(v.waitsFor ?? []).map(serviceOf).join(", ")} is accepted and published, against the new version. «Start now anyway» — against the version it has.</p>` : ""}${published(v)}
 </li>`,
   )}</ul>
 </section>`;
@@ -1646,6 +1660,25 @@ export interface ArtifactExtras {
   readonly preparing?: boolean;
   /** The implementation: how to try it before deciding (src/app/tryOut.ts). */
   readonly tryOut?: TryOut;
+  /** The split of a task across services: which subtasks wait for a library of the task. */
+  readonly startOrder?: ReadonlyArray<{
+    readonly service: string;
+    readonly library: boolean;
+    readonly after: readonly string[];
+  }>;
+}
+
+/** The split's start order when a library of the map changes: it first, who uses it after its change is accepted. */
+export function startOrderHtml(order: NonNullable<ArtifactExtras["startOrder"]>): Html {
+  const libs = order.filter((x) => x.library).map((x) => x.service);
+  return html`<section class="panel start-order" aria-labelledby="start-h"><h2 id="start-h">How the subtasks start</h2>
+<p class="hint">${libs.join(", ")} ${libs.length === 1 ? "is a library" : "are libraries"} of the map (<code>kind: library</code>): ${libs.length === 1 ? "it changes" : "they change"} first. The services that use ${libs.length === 1 ? "it" : "them"} (<code>uses</code>) start once ${libs.length === 1 ? "its change is" : "their changes are"} accepted and published by <code>publish-local</code>, against the new version.</p>
+<ol class="start-list">${order.map(
+    (x) =>
+      html`<li><b>${x.service}</b>${x.library ? html` <span class="pill lib">library</span>` : ""} <span class="muted">${x.after.length > 0 ? `starts after ${x.after.join(", ")} is accepted` : "starts at once"}</span></li>`,
+  )}</ol>
+<p class="hint">Started anyway, a service builds against the version it has: «Start now anyway» on the master's page.</p>
+</section>`;
 }
 
 /** A source chip; one that ends with a link (a Figma frame by its name) opens it. */
@@ -1840,6 +1873,7 @@ ${
 <div class="mainc">
 ${questionsHtml(page, extras)}
 ${extras.tryOut ? tryHtml(extras.tryOut, page, extras) : ""}
+${extras.startOrder?.some((x) => x.library) ? startOrderHtml(extras.startOrder) : ""}
 <section id="document" class="panel doc" aria-label="Document">${((checks) => (checks ? checksHtml(page.run, checks) : documentHtml(a.name, page.text, f?.doc)))(a.type === "checks" ? checksOf(parseJson(page.text)) : undefined)}</section>
 ${
   diff

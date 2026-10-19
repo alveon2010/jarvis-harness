@@ -5,9 +5,15 @@ import {
   type ContractItem,
   childrenOf,
   isDone,
+  libraryBlockers,
+  libraryMapOf,
+  type Publication,
+  publicationsOf,
+  publishLibrary,
   resumeMaster,
   type Split,
   type Subtask,
+  scheduleSubtasks,
   splitOf,
   startSubtask,
   subtasksOf,
@@ -47,7 +53,20 @@ function subtaskOrExit(ctx: CliContext, split: Split, which: string): Subtask {
 }
 
 /** What the subtask's own run is told: its part, the requirements it covers, the contract it keeps. */
-export function subtaskTask(master: Run, sub: Subtask, split: Split): string {
+/** A library of the task the subtask's service uses: changed first, published for its build. */
+export interface UsedLibrary {
+  readonly service: string;
+  readonly key: string;
+  readonly task: string;
+  readonly publication?: Publication;
+}
+
+export function subtaskTask(
+  master: Run,
+  sub: Subtask,
+  split: Split,
+  libraries: readonly UsedLibrary[] = [],
+): string {
   const first = (master.task.split("\n")[0] ?? master.task).trim();
   const contract = split.contract.filter(
     (c) => c.producer === sub.service || c.consumers.includes(sub.service),
@@ -67,7 +86,35 @@ export function subtaskTask(master: Run, sub: Subtask, split: Split): string {
           ...contract.map(line),
         ]
       : []),
+    ...(libraries.length > 0
+      ? [
+          "Libraries this service uses that the task changed first (their change is accepted): build against the new version — bump the dependency to it as the impact's first change.",
+          ...libraries.map(
+            (l) =>
+              `- ${l.service} (subtask ${l.key}): ${l.task}${
+                l.publication?.version ? ` — version ${l.publication.version}` : ""
+              }${
+                l.publication?.command
+                  ? `, published on this machine by \`${l.publication.command}\` (Maven: the local repository, mavenLocal(); npm: the packed .tgz in ${l.publication.at ?? "its checkout"})`
+                  : l.publication?.skipped
+                    ? ` — not published: ${l.publication.skipped}`
+                    : ""
+              }`,
+          ),
+        ]
+      : []),
   ].join("\n");
+}
+
+/** The library subtasks a subtask waits for, with their publications. */
+export function usedLibraries(runtime: Runtime, master: Run, sub: Subtask, split: Split): UsedLibrary[] {
+  const published = publicationsOf(runtime, master.id);
+  return libraryBlockers(sub, split, libraryMapOf(runtime)).flatMap((key) => {
+    const lib = split.subtasks.find((s) => s.key === key);
+    if (!lib) return [];
+    const publication = published.get(key);
+    return [{ service: lib.service, key, task: lib.task, ...(publication ? { publication } : {}) }];
+  });
 }
 
 /** `jarvis subtask run <master> <key>` — the subtask's process in its service's repository. */
@@ -93,7 +140,7 @@ export async function runSubtaskRun(ctx: CliContext, masterRef: string, which: s
     const actor = await actorFor(ctx, runtime);
     const engine = createEngine(runtime);
     const runId = newRunId();
-    const task = subtaskTask(master, sub, split);
+    const task = subtaskTask(master, sub, split, usedLibraries(runtime, master, sub, split));
     const workspace = await prepareWorkspace(ctx, runtime, runId, task, undefined);
     const run = runtime.runs.create({
       id: runId,
@@ -145,6 +192,8 @@ export async function runSubtaskList(ctx: CliContext, masterRef: string): Promis
         service: v.subtask.service,
         state: v.state,
         ...(v.run ? { run: v.run.id, step: v.run.currentStep } : {}),
+        ...(v.waitsFor ? { waitsFor: v.waitsFor } : {}),
+        ...(v.published ? { published: v.published } : {}),
       })),
       () => {
         ctx.out.line(
@@ -152,7 +201,7 @@ export async function runSubtaskList(ctx: CliContext, masterRef: string): Promis
         );
         for (const v of views)
           ctx.out.line(
-            `  ${v.subtask.key.padEnd(3)} ${v.subtask.service.padEnd(24)} ${v.state.padEnd(14)} ${v.run ? `${shortRunId(v.run.id)}${v.run.currentStep ? ` · ${v.run.currentStep}` : ""}` : ""}`,
+            `  ${v.subtask.key.padEnd(3)} ${v.subtask.service.padEnd(24)} ${v.state.padEnd(14)} ${v.run ? `${shortRunId(v.run.id)}${v.run.currentStep ? ` · ${v.run.currentStep}` : ""}` : ""}${v.waitsFor ? `waits for ${v.waitsFor.join(", ")} to be accepted and published` : ""}${v.published ? `${v.published.ok ? "published" : "publish-local failed"}${v.published.version ? ` ${v.published.version}` : ""}` : ""}`,
           );
       },
     );
@@ -169,11 +218,21 @@ export async function runSubtaskStart(ctx: CliContext, masterRef: string, which:
     const { master, split } = masterOrExit(ctx, runtime, masterRef);
     const sub = subtaskOrExit(ctx, split, which);
     const view = subtasksOf(runtime, master).find((v) => v.subtask.key === sub.key);
-    if (view && view.state !== "queued") {
+    if (view && view.state !== "queued" && view.state !== "blocked") {
       ctx.out.error(
         `subtask ${sub.key} is ${view.state}${view.run ? ` (${shortRunId(view.run.id)})` : ""}: nothing to start`,
       );
       throw new CliExit(EXIT.error);
+    }
+    if (view?.state === "blocked") {
+      // a person starts it without waiting for its libraries: against the version it has
+      const actor = await actorFor(ctx, runtime);
+      runtime.events.emit({
+        kind: "subtask.startNow",
+        runId: master.id,
+        actor: `${actor.kind}:${actor.id}`,
+        payload: { key: sub.key, service: sub.service, waitedFor: view.waitsFor ?? [], channel: "cli" },
+      });
     }
     const started = startSubtask(runtime, master, sub.key);
     if (!started.ok) {
@@ -182,7 +241,7 @@ export async function runSubtaskStart(ctx: CliContext, masterRef: string, which:
     }
     ctx.out.result({ key: sub.key, service: sub.service, started: true }, () =>
       ctx.out.line(
-        `subtask ${sub.key} (${sub.service}) starts in its repository; \`jarvis subtask list ${shortRunId(master.id)}\``,
+        `subtask ${sub.key} (${sub.service}) starts in its repository${view?.state === "blocked" ? ", without waiting for its libraries" : ""}; \`jarvis subtask list ${shortRunId(master.id)}\``,
       ),
     );
   } finally {
@@ -246,6 +305,40 @@ export async function runSubtaskDrop(ctx: CliContext, masterRef: string, which: 
         `subtask ${sub.key} (${sub.service}) dropped from the task${all ? "; every other subtask is done — the master goes on" : ""}`,
       ),
     );
+  } finally {
+    await runtime.close();
+  }
+}
+
+/** `jarvis subtask publish <master> <key|service>` — in the library's repository: publish-local again. */
+export async function runSubtaskPublish(ctx: CliContext, masterRef: string, which: string): Promise<void> {
+  const loaded = await loadForCli(ctx);
+  const runtime = createRuntime(loaded, { env: ctx.env });
+  try {
+    const { master, split } = masterOrExit(ctx, runtime, masterRef);
+    const sub = subtaskOrExit(ctx, split, which);
+    if (loaded.meta?.service !== sub.service) {
+      ctx.out.error(`subtask ${sub.key} is ${sub.service}'s: run this in its repository`);
+      throw new CliExit(EXIT.error);
+    }
+    const run = childrenOf(runtime, master.id).get(sub.key);
+    if (run?.state !== "COMPLETED") {
+      ctx.out.error(
+        `subtask ${sub.key} is ${run?.state ?? "not started"}: it publishes once its change is accepted`,
+      );
+      throw new CliExit(EXIT.error);
+    }
+    const p = await publishLibrary(runtime, master, sub, run);
+    const started = p.ok ? scheduleSubtasks(runtime, master) : [];
+    ctx.out.result({ key: sub.key, ...p, started }, () => {
+      ctx.out.line(
+        p.ok
+          ? `${sub.service} ${p.skipped ? "not published: no publish-local" : `published${p.version ? ` ${p.version}` : ""}`}${started.length > 0 ? `; started ${started.join(", ")}` : ""}`
+          : `publish-local failed: ${p.command}`,
+      );
+      if (!p.ok && p.tail) ctx.out.line(p.tail);
+    });
+    if (!p.ok) throw new CliExit(EXIT.error);
   } finally {
     await runtime.close();
   }

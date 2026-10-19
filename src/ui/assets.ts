@@ -551,6 +551,12 @@ a.kr:hover{background:var(--sunken)}
 .sv-miss{color:var(--wait);font-size:13px}
 p.sv-miss{font-size:14px}
 .sv-opt{font-size:13px}
+.sub-pub{flex:1 1 100%;margin:0}
+.start-order{padding:18px 20px;display:flex;flex-direction:column;gap:8px}
+.start-order h2{margin:0;font-size:16px}
+.start-list{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px;font-size:14px}
+.pill.lib{background:var(--chip);color:var(--held)}
+.sub-wait{border:1px dashed var(--line)}
 .sv-links{font-size:13px;display:flex;flex-direction:column;gap:2px;min-width:0;overflow-wrap:anywhere}
 .sv-legend{padding:12px 20px;margin:0;border-top:1px solid var(--line-soft)}
 .pill.front{background:transparent;border:1px solid var(--line);color:var(--ink-2);padding:2px 9px}
@@ -563,6 +569,9 @@ p.sv-miss{font-size:14px}
 .sg a:hover .sg-node{stroke:var(--accent)}
 .sg-edge{fill:none;stroke:var(--muted);stroke-width:1.3}
 .sg-edge.topic{stroke-dasharray:4 4}
+.sg-edge.uses{stroke:var(--held);stroke-dasharray:1 3;stroke-linecap:round}
+.sg-node.library{fill:var(--panel);stroke:var(--held)}
+p.sv-pair{margin:0;font-size:14px}
 .sg-head{fill:var(--muted)}
 .sv-pair summary{cursor:pointer;font-size:14px}
 .sv-pair ul{margin:6px 0 0;padding-left:18px;font-size:13px}

@@ -61,7 +61,8 @@ function openButton(actions: Actions | undefined, file: string, back: string, la
 }
 
 function kindPill(s: ServiceView): Html {
-  if (s.kind) return html`<span class="pill ${s.kind === "frontend" ? "front" : "info"}">${s.kind}</span>`;
+  if (s.kind)
+    return html`<span class="pill ${s.kind === "frontend" ? "front" : s.kind === "library" ? "lib" : "info"}"${s.kind === "library" ? html` title="changes first in a task across services; who uses it waits for its change"` : ""}>${s.kind}</span>`;
   return html`<span class="pill plain" title="set services.${s.name}.kind, or run jarvis onboard">kind ?</span>`;
 }
 
@@ -70,7 +71,8 @@ function kindPill(s: ServiceView): Html {
 interface Pair {
   readonly from: string;
   readonly to: string;
-  readonly kind: CatalogLink["kind"];
+  /** `uses`: a service depends on a library of the map (drawn from the library). */
+  readonly kind: CatalogLink["kind"] | "uses";
   readonly what: string[];
 }
 
@@ -107,7 +109,7 @@ export function graphSvg(
   // layers by the calls only: a caller above what it calls (a cycle stops at the last layer); a
   // service with no calls either way goes under the services that send to it
   const layer = new Map(names.map((n) => [n, 0]));
-  const calls = pairs.filter((p) => p.kind === "http");
+  const calls = pairs.filter((p) => p.kind === "http" || p.kind === "uses");
   for (let i = 0; i < names.length; i++)
     for (const p of calls) {
       const next = (layer.get(p.from) ?? 0) + 1;
@@ -147,14 +149,20 @@ export function graphSvg(
     const d = down
       ? `M${x1} ${y1} L${x2} ${y2 - 2}`
       : `M${x1 + (x2 > x1 ? W / 2 : -W / 2)} ${y1} C${x1} ${y1 - GAP_Y / 2} ${x2} ${y2 - GAP_Y / 2} ${x2 + (x2 > x1 ? -W / 2 : W / 2)} ${y2}`;
-    return `<path d="${d}" class="sg-edge${p.kind === "topic" ? " topic" : ""}" marker-end="url(#sg-arrow)"><title>${esc(p.from)} ${p.kind === "http" ? "calls" : "sends to"} ${esc(p.to)}: ${esc(p.what.join(", "))}</title></path>`;
+    return `<path d="${d}" class="sg-edge${p.kind === "topic" ? " topic" : p.kind === "uses" ? " uses" : ""}" marker-end="url(#sg-arrow)"><title>${p.kind === "uses" ? `${esc(p.to)} uses ${esc(p.from)}` : `${esc(p.from)} ${p.kind === "http" ? "calls" : "sends to"} ${esc(p.to)}: ${esc(p.what.join(", "))}`}</title></path>`;
   });
   const nodes = names.map((n) => {
     const p = at.get(n) as { x: number; y: number };
     const label = n.length > 22 ? `${n.slice(0, 21)}…` : n;
     return `<a href="${serviceHref(n)}"><rect x="${p.x}" y="${p.y}" width="${W}" height="${H}" rx="8" class="sg-node ${kinds.get(n) ?? "none"}"/><text x="${p.x + W / 2}" y="${p.y + H / 2 + 4}" text-anchor="middle">${esc(label)}<title>${esc(n)}</title></text></a>`;
   });
-  const label = pairs.map((p) => `${p.from} ${p.kind === "http" ? "calls" : "sends to"} ${p.to}`).join("; ");
+  const label = pairs
+    .map((p) =>
+      p.kind === "uses"
+        ? `${p.to} uses ${p.from}`
+        : `${p.from} ${p.kind === "http" ? "calls" : "sends to"} ${p.to}`,
+    )
+    .join("; ");
   return raw(
     `<svg class="sg" viewBox="-2 -2 ${width + 4} ${height + 4}" role="img" aria-label="${esc(label)}" style="max-width:${width + 4}px"><defs><marker id="sg-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="sg-head"/></marker></defs>${edges.join("")}${nodes.join("")}</svg>`,
   );
@@ -167,9 +175,9 @@ function esc(s: string): string {
   );
 }
 
-function talksTo(s: ServiceView): Html {
+function talksTo(s: ServiceView, other = false): Html {
   const pairs = pairsOf(s.links);
-  if (pairs.length === 0) return html`<span class="muted">—</span>`;
+  if (pairs.length === 0) return other ? html`` : html`<span class="muted">—</span>`;
   const lines = pairs.slice(0, 4).map((p) => {
     const out = p.from === s.name;
     const other = out ? p.to : p.from;
@@ -198,7 +206,13 @@ export function servicesContent(page: ServicesPage, actions?: Actions, notice?: 
   const absent = view.services.filter((s) => !s.present).length;
   const left = todo.length + noAbout + absent;
   const kinds = new Map(view.services.map((s) => [s.name, s.kind ?? "none"]));
-  const pairs = pairsOf(view.links);
+  // a library above the services that use it, a caller above what it calls
+  const pairs: Pair[] = [
+    ...view.services.flatMap((s) =>
+      s.uses.map((lib) => ({ from: lib, to: s.name, kind: "uses" as const, what: [] })),
+    ),
+    ...pairsOf(view.links),
+  ];
   return html`${knowledgeTabs("services", page.counts)}
 ${notice ?? ""}
 ${
@@ -229,7 +243,7 @@ ${view.services.map(
 <span role="cell" class="sv-name"><a href="${serviceHref(s.name)}"><b>${s.name}</b></a><span class="sv-sub">${kindPill(s)}${s.stack ? html` <span class="muted">${s.stack}</span>` : ""}</span>${s.present ? "" : html`<span class="pill bad">not on this machine</span>`}</span>
 <span role="cell">${s.about ? html`<span class="sv-about">${s.about}</span>` : html`<span class="sv-miss">No description yet</span>`}<span class="sv-sub muted">${s.present ? "" : html`expected at <code>${home(s.repo, page.homeDir)}</code> · <code>repos.${s.name}</code> in the personal config · `}${plural(s.docs, "document")}${s.modules > 0 ? ` · ${plural(s.modules, "module")} described` : ""}</span></span>
 <span role="cell">${checksCell(s, page, actions)}</span>
-<span role="cell" class="sv-links">${talksTo(s)}</span>
+<span role="cell" class="sv-links">${s.usedBy.length > 0 ? html`<div>used by ${s.usedBy.join(", ")}</div>` : ""}${s.uses.length > 0 ? html`<div>uses ${s.uses.join(", ")}</div>` : ""}${talksTo(s, s.usedBy.length + s.uses.length > 0)}</span>
 </div>`,
 )}
 </div>
@@ -243,9 +257,10 @@ ${graphSvg(
   pairs,
   kinds,
 )}
-${pairs.map(
-  (p) =>
-    html`<details class="sv-pair"><summary><b>${p.from} ${p.kind === "http" ? "→" : "⇢"} ${p.to}</b> <span class="muted">${p.kind === "http" ? plural(p.what.length, "endpoint") : plural(p.what.length, "topic")}</span></summary><ul>${p.what.map((w) => html`<li><code>${w}</code></li>`)}</ul></details>`,
+${pairs.map((p) =>
+  p.kind === "uses"
+    ? html`<p class="sv-pair"><b>${p.to}</b> uses <b>${p.from}</b> <span class="pill lib">library</span></p>`
+    : html`<details class="sv-pair"><summary><b>${p.from} ${p.kind === "http" ? "→" : "⇢"} ${p.to}</b> <span class="muted">${p.kind === "http" ? plural(p.what.length, "endpoint") : plural(p.what.length, "topic")}</span></summary><ul>${p.what.map((w) => html`<li><code>${w}</code></li>`)}</ul></details>`,
 )}
 ${pairs.length > 0 ? html`<p class="hint">From the contracts catalog. A task that names two linked services is offered as a task across services.</p>` : ""}
 </section>
@@ -315,6 +330,20 @@ ${s.missing.length > 0 && s.tools.length > 0 ? html`<p class="sv-miss">Required,
 ${s.optional.length > 0 ? html`<p class="hint">Not set, optional: ${s.optional.join(", ")}.</p>` : ""}
 <p class="hint">Required: ${s.required.join(", ")} (<code>tools.required</code>). From <code>services.${s.name}.tools.local</code> over the shared <code>tools.local</code> of <code>${page.configPath}</code>.</p>
 </section>
+${
+  s.kind === "library" || s.uses.length > 0
+    ? html`<section class="panel kbox" aria-labelledby="lib-h"><h2 id="lib-h">${s.kind === "library" ? "A library" : "Libraries it uses"}</h2>
+${
+  s.kind === "library"
+    ? html`<p>Changes first in a task across services: ${s.usedBy.length > 0 ? html`${s.usedBy.join(", ")} start once its change is accepted and published` : "no service of the map uses it yet"}.</p>
+<dl class="sv-kv"><dt>published as</dt><dd>${s.publishes.length > 0 ? s.publishes.map((x, i) => html`${i > 0 ? ", " : ""}<code>${x}</code>`) : html`<span class="sv-miss">not set — publishes in the map</span>`}</dd>
+<dt>publish-local</dt><dd>${((t) => (t ? html`<code>${t.command}</code>` : html`<span class="sv-miss">not set — the services build against the version they have</span>`))(s.tools.find((t) => t.name === "publish-local"))}</dd></dl>`
+    : ""
+}${s.uses.length > 0 ? html`<p>Uses ${s.uses.map((n, i) => html`${i > 0 ? ", " : ""}<a href="${serviceHref(n)}">${n}</a>`)}: in a task that changes ${s.uses.length === 1 ? "it" : "them"}, this service waits for that change.</p>` : ""}
+<p class="hint"><code>kind</code>, <code>publishes</code>, <code>uses</code> of <code>services.${s.name}</code>; <code>jarvis onboard</code> fills them from the build files.</p>
+</section>`
+    : ""
+}
 <section class="panel kbox" aria-labelledby="ct-h"><h2 id="ct-h">Contracts</h2>
 ${
   !c

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ServicesView, ServiceView } from "../../src/app/servicesView.ts";
 import type { CatalogLink } from "../../src/knowledge/catalog.ts";
+import { startOrderHtml } from "../../src/ui/pages.ts";
 import {
   graphSvg,
   pairsOf,
@@ -175,5 +176,48 @@ describe("Services", () => {
     const bare = String(serviceContent(page, view.services[1] as ServiceView, actions));
     expect(bare).toContain("No description yet: the architecture has only the facts");
     expect(bare).toContain("No commands: the agents change notifications-worker without running its tests.");
+  });
+});
+
+describe("a library in the map", () => {
+  const lib = service("common-lib", {
+    kind: "library",
+    publishes: ["com.example:common-lib"],
+    usedBy: ["orders-api"],
+    tools: [{ name: "publish-local", command: "./gradlew publishToMavenLocal", from: "service" }],
+    required: ["tests", "publish-local"],
+    missing: ["tests"],
+  });
+  const user = service("orders-api", { kind: "backend", uses: ["common-lib"] });
+  const libPage: ServicesPage = { ...page, view: { ...view, services: [lib, user], links: [] } };
+
+  it("the map: its pill, who uses it, the graph from it to its users", () => {
+    const out = String(servicesContent(libPage, actions));
+    expect(out).toContain('<span class="pill lib"');
+    expect(out).toContain("<div>used by orders-api</div>");
+    expect(out).toContain("<div>uses common-lib</div>");
+    expect(out).toContain('aria-label="orders-api uses common-lib"');
+    expect(out).toContain("<b>orders-api</b> uses <b>common-lib</b>");
+  });
+
+  it("its page: published as, publish-local, who starts after it", () => {
+    const out = String(serviceContent(libPage, lib, actions));
+    expect(out).toContain("orders-api start once its change is accepted and published");
+    expect(out).toContain("<code>com.example:common-lib</code>");
+    expect(out).toContain("<code>./gradlew publishToMavenLocal</code>");
+    expect(String(serviceContent(libPage, user, actions))).toContain("this service waits for that change");
+  });
+
+  it("the split's page: the library first, who uses it after", () => {
+    const out = String(
+      startOrderHtml([
+        { service: "common-lib", library: true, after: [] },
+        { service: "orders-api", library: false, after: ["common-lib"] },
+        { service: "notify-api", library: false, after: [] },
+      ]),
+    );
+    expect(out).toContain("common-lib is a library of the map");
+    expect(out).toContain('<b>orders-api</b> <span class="muted">starts after common-lib is accepted</span>');
+    expect(out).toContain('<b>notify-api</b> <span class="muted">starts at once</span>');
   });
 });

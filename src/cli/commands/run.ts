@@ -146,7 +146,7 @@ export async function executeAndReport(
         );
       }
       // a subtask that stopped frees its slot for the next; all done, the master goes on (ADR-0025 §6)
-      afterRunStops(runtime, runtime.runs.get(result.run.id) ?? result.run);
+      await afterRunStops(runtime, runtime.runs.get(result.run.id) ?? result.run);
       const detail = runDetail(runtime, result.run);
       const goOn =
         result.run.state === "COMPLETED" && !continuedBy(runtime, result.run)

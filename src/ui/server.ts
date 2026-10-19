@@ -47,7 +47,17 @@ import { restartPlanOf } from "../app/restart.ts";
 import { resumableOf } from "../app/resumable.ts";
 import type { Runtime } from "../app/runtime.ts";
 import { servicesOf } from "../app/servicesView.ts";
-import { isDone, resumeMaster, startSubtask, subtasksOf } from "../app/subtasks.ts";
+import {
+  isDone,
+  libraryBlockers,
+  libraryMapOf,
+  parseSplit,
+  republishSubtask,
+  resumeMaster,
+  SPLIT_TYPE,
+  startSubtask,
+  subtasksOf,
+} from "../app/subtasks.ts";
 import { tryOutOf } from "../app/tryOut.ts";
 import { type OpenChecked, type OpenIn, type OpenResult, reviewFiles } from "../cli/checkout.ts";
 import { humanMove } from "../cli/commands/human.ts";
@@ -459,6 +469,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       applied: html`<div class="banner ok">Applied: ${r.url.searchParams.get("files") ?? "?"} file(s) as <code>${r.url.searchParams.get("commit") ?? ""}</code> on the branch checked out in the repository — not pushed</div>`,
       "went-cross": html`<div class="banner ok">Going on as a task across services: the research and the spec are here — next, the split to approve</div>`,
       "subtask-started": html`<div class="banner ok">The subtask starts in its service's repository — it shows up here in a moment</div>`,
+      "subtask-publishing": html`<div class="banner ok">publish-local runs again in the library's checkout — the services waiting for it start when it passes</div>`,
       "subtask-dropped": html`<div class="banner ok">Dropped from the task; once the others are done the master goes on without it</div>`,
       "no-subtask": html`<div class="banner bad">No such subtask, or its service has no repository on this machine</div>`,
       "apply-failed": html`<div class="banner bad">Not applied: ${r.url.searchParams.get("why") ?? "see jarvis logs"}</div>`,
@@ -1508,6 +1519,22 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
         options.launcher?.adopt(view.run);
         return redirect(r, `/runs/${short}?notice=subtask-started`);
       }
+      if (act === "publish") {
+        // a library's publish-local again, in its repository with its configuration
+        if (view.state !== "COMPLETED") return redirect(r, `/runs/${short}?notice=no-subtask`);
+        const again = republishSubtask(runtime, run, key);
+        return redirect(r, `/runs/${short}?notice=${again.ok ? "subtask-publishing" : "no-subtask"}`);
+      }
+      if (view.state === "blocked") {
+        // started without waiting for its libraries: against the version it has
+        const who = await actor();
+        runtime.events.emit({
+          kind: "subtask.startNow",
+          runId: run.id,
+          ...(who ? { actor: `${who.kind}:${who.id}` } : {}),
+          payload: { key, service: view.subtask.service, waitedFor: view.waitsFor ?? [], channel: "ui" },
+        });
+      }
       const started = startSubtask(runtime, run, key);
       return redirect(r, `/runs/${short}?notice=${started.ok ? "subtask-started" : "no-subtask"}`);
     }
@@ -1988,6 +2015,21 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
         ...(notice ? { banner: notice } : {}),
         ...(preparing ? { preparing } : {}),
       };
+      if (type === SPLIT_TYPE) {
+        // a library of the map changes first: who uses it starts after its change is accepted
+        const split = parseSplit(model.text);
+        const map = libraryMapOf(runtime);
+        if (split)
+          Object.assign(extras, {
+            startOrder: split.subtasks.map((sub) => ({
+              service: sub.service,
+              library: map.libraries.has(sub.service),
+              after: libraryBlockers(sub, split, map).map(
+                (k) => split.subtasks.find((x) => x.key === k)?.service ?? k,
+              ),
+            })),
+          });
+      }
       if (type === "implementation") {
         let workflow: ReturnType<LocalWorkflowEngine["workflow"]> | undefined;
         try {

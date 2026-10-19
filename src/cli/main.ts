@@ -57,6 +57,7 @@ import { runCancel, runStatus } from "./commands/status.ts";
 import {
   runSubtaskDrop,
   runSubtaskList,
+  runSubtaskPublish,
   runSubtaskRetry,
   runSubtaskRun,
   runSubtaskStart,
@@ -802,7 +803,9 @@ export function buildProgram(options: RunOptions = {}): Command {
     });
   subtask
     .command("start <master> <subtask>")
-    .description("start a queued subtask now (by its number or service), past the parallel limit")
+    .description(
+      "start a queued subtask now (by its number or service), past the parallel limit — or one that waits for a library, without its new version",
+    )
     .action(async (master: string, which: string) => {
       await runSubtaskStart(ctxFor(), master, which);
     });
@@ -817,6 +820,12 @@ export function buildProgram(options: RunOptions = {}): Command {
     .description("take a subtask out of the task; the master goes on without it")
     .action(async (master: string, which: string) => {
       await runSubtaskDrop(ctxFor(), master, which);
+    });
+  subtask
+    .command("publish <master> <subtask>")
+    .description("publish-local of an accepted library subtask again; the services waiting for it start")
+    .action(async (master: string, which: string) => {
+      await runSubtaskPublish(ctxFor(), master, which);
     });
   subtask
     .command("run <master> <subtask>")

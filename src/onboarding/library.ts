@@ -183,3 +183,26 @@ export function declaredPublishes(mapText: string): Record<string, readonly stri
   }
   return out;
 }
+
+/** The version a library's checkout builds now: Gradle's `version`, its pom's own, package.json's. */
+export function libraryVersionOf(root: string): string | undefined {
+  const gradle =
+    first(read(join(root, "gradle.properties")), /^\s*version\s*=\s*(\S+)\s*$/m) ??
+    first(
+      read(join(root, "build.gradle.kts")) ?? read(join(root, "build.gradle")),
+      /^\s*version\s*=\s*["']([^"']+)["']/m,
+    );
+  if (gradle) return gradle;
+  const pom = read(join(root, "pom.xml"));
+  const own = pom
+    ?.replace(/<parent>[\s\S]*?<\/parent>/, "")
+    .replace(/<dependencies>[\s\S]*<\/dependencies>/, "");
+  const maven = first(own, /<version>\s*([^<\s]+)\s*<\/version>/);
+  if (maven) return maven;
+  try {
+    const pkg = JSON.parse(read(join(root, "package.json")) ?? "") as { version?: unknown };
+    return typeof pkg.version === "string" ? pkg.version : undefined;
+  } catch {
+    return undefined;
+  }
+}
