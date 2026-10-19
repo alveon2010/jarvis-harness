@@ -13,6 +13,7 @@ import { failingOnBase, junitFailures } from "./baseline.ts";
 import { CROSS_TOOLS } from "./cross.ts";
 import { rebuildsFor } from "./rebuild.ts";
 import { classSelection, coveringTests, testRunnerOf } from "./relatedTests.ts";
+import { junitTestFailures, type TestFailure } from "./testReport.ts";
 
 /**
  * Deterministic tools that need nothing but the stores. Repository, git, test and typecheck
@@ -27,6 +28,8 @@ const CODE_FILE = /\.(tsx?|jsx?|mjs|cjs|vue|svelte|py|go|rs|java|kt|kts|groovy|s
 const TEST_FILE = /(\.|_)(test|spec)\.[a-z]+$|(^|\/)(__tests__|tests?)\//;
 /** The whole output of a failed check (`project.checks`), for a person; not carried to a run that goes on. */
 export const CHECK_LOG = "check-log";
+/** Failed tests kept on a check result: enough to see why, not a report of a broken suite. */
+const MAX_FAILURES = 20;
 
 /** Repository files named in a text: `src/a.ts`, `src/a.ts:89`, `apps/web/src/x.tsx:12-20`. */
 export function filesNamedIn(text: string, workspace: string): string[] {
@@ -376,6 +379,9 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
       preexisting?: string[];
       /** The failed command's whole output: a `check-log` artifact (`artifactId@version`). */
       log?: string;
+      /** Why the tests failed, from the runner's reports (src/orchestration/tools/testReport.ts). */
+      failures?: Array<TestFailure & { preexisting?: boolean }>;
+      tests?: { failed: number; total?: number };
     }> = [];
     const tools = ctx.runtime.loaded.config.tools;
     const tail = (r: { text?: string; denied?: string }): string =>
@@ -517,16 +523,34 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
       const started = Date.now() - 1000;
       const r = await ctx.tools.invoke(`project.${name}`, related ? { args: related.trim() } : {});
       // failing tests that fail on the base commit too are not this run's defects
+      // why the tests failed, from the reports the runner wrote
+      const report =
+        !r.ok && (runner === "gradle" || runner === "maven")
+          ? junitTestFailures(workspace, started)
+          : undefined;
       const preexisting =
         !r.ok && (runner === "gradle" || runner === "maven")
           ? await preexistingOf(ctx, runner, command, junitFailures(workspace, started))
           : undefined;
+      const excused = new Set(preexisting?.classes ?? []);
+      const failures = (report?.failures ?? [])
+        .map((f) => (f.suite && excused.has(f.suite) ? { ...f, preexisting: true } : f))
+        .slice(0, MAX_FAILURES);
       results.push({
         check: name,
         command: `${command}${related}`,
         ok: r.ok || preexisting?.excused === true,
         ...(r.ok || preexisting?.excused ? {} : { tail: tail(r), ...logOf(name, r) }),
         ...(preexisting && preexisting.classes.length > 0 ? { preexisting: preexisting.classes } : {}),
+        ...(failures.length > 0 && !(r.ok || preexisting?.excused)
+          ? {
+              failures,
+              tests: {
+                failed: report?.failures.length ?? failures.length,
+                ...(report?.total ? { total: report.total } : {}),
+              },
+            }
+          : {}),
       });
     }
     // tools.checks: a command of its own when the run changed what it checks

@@ -383,7 +383,8 @@ steps:
     "code=0",
     "for c in $classes; do",
     '  f=0; grep -qx "$c" fails.txt && f=1 && code=1',
-    '  echo "<testsuite name=\\"$c\\" tests=\\"1\\" failures=\\"$f\\" errors=\\"0\\"></testsuite>" > "build/test-results/test/TEST-$c.xml"',
+    '  if [ $f = 1 ]; then tc="<testcase classname=\\"$c\\" name=\\"works()\\"><failure message=\\"expected: &lt;1&gt; but was: &lt;2&gt;\\">expected: &lt;1&gt; but was: &lt;2&gt;&#10;	at $c.works(T.java:12)</failure></testcase>"; else tc="<testcase classname=\\"$c\\" name=\\"works()\\"/>"; fi',
+    '  echo "<testsuite name=\\"$c\\" tests=\\"1\\" failures=\\"$f\\" errors=\\"0\\">$tc</testsuite>" > "build/test-results/test/TEST-$c.xml"',
     '  [ $f = 1 ] && echo "$c > works() FAILED"',
     "done",
     "exit $code",
@@ -392,7 +393,9 @@ steps:
   async function baselineRun(
     task: string,
     fails: string,
-  ): Promise<Array<{ check: string; ok: boolean; preexisting?: string[]; tail?: string }>> {
+  ): Promise<
+    Array<{ check: string; ok: boolean; preexisting?: string[]; tail?: string; failures?: unknown[] }>
+  > {
     sb.write(
       "project/.jarvis/project.yaml",
       [
@@ -458,6 +461,13 @@ steps:
     const [test] = await baselineRun("T-7", "a.OldTest\\na.NewTest\\n");
     expect(test).toMatchObject({ check: "test", ok: false, preexisting: ["a.OldTest"] });
     expect(test?.tail).toContain("a.NewTest > works() FAILED");
+    // why: each failed test from the reports, the one failing on the base too marked so
+    const failures = (test as { failures?: Array<Record<string, unknown>> }).failures ?? [];
+    expect(failures.map((f) => [f.suite, f.name, f.expected, f.actual, f.preexisting ?? false])).toEqual([
+      ["a.NewTest", "works()", "1", "2", false],
+      ["a.OldTest", "works()", "1", "2", true],
+    ]);
+    expect((test as { tests?: unknown }).tests).toEqual({ failed: 2, total: 2 });
   });
 
   it("project.checks fixes first, lints the changed files and runs a check its files call for (tools.fix, tools.checks)", async () => {
