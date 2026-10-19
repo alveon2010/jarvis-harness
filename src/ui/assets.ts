@@ -543,6 +543,7 @@ a.kr:hover{background:var(--sunken)}
 .banner.wait{background:var(--wait-bg);color:var(--wait)}
 .sv-todo{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px}
 .kr.sv{grid-template-columns:minmax(0,1fr) minmax(0,1.5fr) minmax(0,1fr) minmax(0,1.1fr);align-items:start;padding:12px 20px}
+.kr.sv>span{min-width:0;overflow-wrap:anywhere}
 .sv-name{display:flex;flex-direction:column;gap:4px;align-items:flex-start;min-width:0}
 .sv-name a{text-decoration:none;overflow-wrap:anywhere}
 .sv-sub{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline;font-size:13px;margin-top:4px}
