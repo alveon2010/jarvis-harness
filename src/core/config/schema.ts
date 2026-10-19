@@ -227,6 +227,13 @@ export const ToolsConfigSchema = z.strictObject({
   /** Project commands exposed as `project.<name>` capabilities (tests, typecheck, lint, …). */
   local: z.record(z.string(), z.string().min(1)).prefault({}),
   /**
+   * The checks a project (or a service of a knowledge repository) must have a command for: `tests`
+   * is met by any `test*` command of `tools.local`, `lint` by `lint*`, any other name by itself.
+   * What is missing is said by `onboard`, `doctor` and the Services page; the rest is optional.
+   * Pilot: every service without `typecheck` was listed as unfinished, a JavaScript one has none.
+   */
+  required: z.array(z.string().min(1)).default(["tests"]),
+  /**
    * Builds the checks depend on: before `project.checks`, the `tools.local` command `run` when a changed
    * file matches `when` (globs), and then every `typecheck*` check, whatever its scope — its package
    * reads the built output (a monorepo's shared library in its publish folder). Pilot: the app was

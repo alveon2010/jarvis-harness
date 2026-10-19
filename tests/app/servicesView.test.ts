@@ -117,7 +117,13 @@ describe("services of a knowledge repository", () => {
       { name: "lint", command: "make lint", from: "shared" },
     ]);
     const worker = view.services.find((s) => s.name === "notifications-worker");
-    expect(worker).toMatchObject({ stack: "node", missing: ["tests", "typecheck"], hasArchitecture: true });
+    expect(worker).toMatchObject({
+      stack: "node",
+      required: ["tests"],
+      missing: ["tests"],
+      optional: ["typecheck"],
+      hasArchitecture: true,
+    });
     expect(worker?.about).toBeUndefined();
     expect(view.services.find((s) => s.name === "address-service")).toMatchObject({
       present: false,

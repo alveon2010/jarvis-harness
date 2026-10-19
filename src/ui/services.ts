@@ -1,4 +1,5 @@
 import type { ServicesView, ServiceView } from "../app/servicesView.ts";
+import { hasCheck, USUAL_CHECKS } from "../core/config/requiredChecks.ts";
 import { isTerminal } from "../core/domain/run.ts";
 import type { CatalogLink } from "../knowledge/catalog.ts";
 import { shortRunId } from "../storage/runStore.ts";
@@ -181,12 +182,12 @@ function talksTo(s: ServiceView): Html {
 
 function checksCell(s: ServiceView, page: ServicesPage, actions: Actions | undefined): Html {
   if (!s.present && s.tools.length === 0) return html`<span class="muted">—</span>`;
-  const have = s.tools.filter((t) => ["tests", "typecheck", "lint"].includes(t.name));
-  return html`${have.map((t) => html`<span class="sv-check" title="${t.command}${t.from === "shared" ? " (shared)" : ""}">✓ ${t.name}</span> `)}${
+  const shown = s.tools.filter((t) => [...USUAL_CHECKS, ...s.required].some((c) => hasCheck(c, [t.name])));
+  return html`${shown.map((t) => html`<span class="sv-check" title="${t.command}${t.from === "shared" ? " (shared)" : ""}">✓ ${t.name}</span> `)}${
     s.missing.length > 0
-      ? html`<div class="sv-miss">no ${s.missing.join(", ")}${page.canOnboard && s.present ? html` · ${onboardButton(actions, [s.name], "Onboard", "/knowledge/services", "linkbtn")}` : ""}</div>`
+      ? html`<div class="sv-miss" title="tools.required">no ${s.missing.join(", ")}${page.canOnboard && s.present ? html` · ${onboardButton(actions, [s.name], "Onboard", "/knowledge/services", "linkbtn")}` : ""}</div>`
       : ""
-  }`;
+  }${s.optional.length > 0 ? html`<div class="muted sv-opt" title="not in tools.required">optional: ${s.optional.join(", ")}</div>` : ""}`;
 }
 
 /** The map: a row per service, what is left to do above, the links beside. */
@@ -203,7 +204,7 @@ ${notice ?? ""}
 ${
   left > 0
     ? html`<div class="banner wait sv-todo" role="status"><span><b>${plural(left, "thing")} to finish</b> — ${[
-        todo.length > 0 ? `${plural(todo.length, "service")} without commands for the checks` : "",
+        todo.length > 0 ? `${plural(todo.length, "service")} without a required check` : "",
         noAbout > 0 ? `${plural(noAbout, "service")} without a description` : "",
         absent > 0 ? `${absent} not on this machine` : "",
       ]
@@ -310,8 +311,9 @@ ${
     ? html`<p class="sv-miss">No commands: the agents change ${s.name} without running its tests.</p>`
     : html`<dl class="sv-kv">${s.tools.map((t) => html`<dt>${t.name}</dt><dd><code>${t.command}</code>${t.from === "shared" ? html` <span class="muted">shared</span>` : ""}</dd>`)}</dl>`
 }
-${s.missing.length > 0 && s.tools.length > 0 ? html`<p class="sv-miss">No ${s.missing.join(", ")}.</p>` : ""}
-<p class="hint">From <code>services.${s.name}.tools.local</code> over the shared <code>tools.local</code> of <code>${page.configPath}</code>.</p>
+${s.missing.length > 0 && s.tools.length > 0 ? html`<p class="sv-miss">Required, no command: ${s.missing.join(", ")}.</p>` : ""}
+${s.optional.length > 0 ? html`<p class="hint">Not set, optional: ${s.optional.join(", ")}.</p>` : ""}
+<p class="hint">Required: ${s.required.join(", ")} (<code>tools.required</code>). From <code>services.${s.name}.tools.local</code> over the shared <code>tools.local</code> of <code>${page.configPath}</code>.</p>
 </section>
 <section class="panel kbox" aria-labelledby="ct-h"><h2 id="ct-h">Contracts</h2>
 ${

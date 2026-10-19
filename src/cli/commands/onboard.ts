@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createRuntime } from "../../app/runtime.ts";
 import type { GraphEdge, GraphNode } from "../../core/capabilities/contracts.ts";
+import { missingChecks } from "../../core/config/requiredChecks.ts";
 import { layoutOf, rootRelative } from "../../core/paths.ts";
 import { codeContractsOf } from "../../design/codeContracts.ts";
 import { CONTRACTS_FILE, serviceContractsOf, springConfigOf } from "../../knowledge/catalog.ts";
@@ -160,8 +161,19 @@ export async function runOnboard(ctx: CliContext, options: OnboardOptions): Prom
     if (entry.added.length > 0 && !options.dryRun) writeFileSync(configPath, entry.text, "utf8");
   }
 
+  // the checks the service must have (tools.required) that neither its configuration nor the scan has
+  const unmet = missingChecks(loaded.config.tools.required, [
+    ...Object.keys(loaded.config.tools.local),
+    ...report.commands.map((c) => c.name),
+  ]);
   ctx.out.result(
-    { ...report, files, configApplied, ...(entry ? { map: { added: entry.added, kept: entry.kept } } : {}) },
+    {
+      ...report,
+      files,
+      configApplied,
+      ...(entry ? { map: { added: entry.added, kept: entry.kept } } : {}),
+      ...(unmet.length > 0 ? { unmet } : {}),
+    },
     () => {
       ctx.out.line(
         `${report.files} files, ~${report.lines} lines; stacks: ${report.stacks.join(", ") || "none detected"}${report.packageManager ? `; ${report.packageManager}` : ""}`,
@@ -191,9 +203,9 @@ export async function runOnboard(ctx: CliContext, options: OnboardOptions): Prom
         for (const c of report.commands)
           ctx.out.line(`  ${c.name}: ${JSON.stringify(c.command)}   # ${c.source}`);
         if (entry.kept.length > 0) ctx.out.line(`  kept as set: ${entry.kept.join(", ")}`);
-        if (report.commands.length === 0)
+        if (unmet.length > 0)
           ctx.out.line(
-            `  no commands found: set services.${service}.tools.local by hand (tests, typecheck, lint)`,
+            `  required with no command: ${unmet.join(", ")} — set services.${service}.tools.local by hand, or drop it from tools.required`,
           );
       } else if (report.commands.length > 0) {
         ctx.out.line(
@@ -203,7 +215,10 @@ export async function runOnboard(ctx: CliContext, options: OnboardOptions): Prom
         );
         for (const c of report.commands)
           ctx.out.line(`  ${c.name}: ${JSON.stringify(c.command)}   # ${c.source}`);
-      } else ctx.out.line("no project commands detected: set tools.local by hand (tests, typecheck, lint)");
+      } else
+        ctx.out.line(
+          `no project commands detected: set tools.local by hand (${loaded.config.tools.required.join(", ")})`,
+        );
       if (report.sensitivePaths.length > 0) {
         ctx.out.line();
         ctx.out.line("sensitive-looking paths — consider security.deniedPaths:");

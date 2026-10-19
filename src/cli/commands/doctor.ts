@@ -3,6 +3,7 @@ import { basename, delimiter, dirname, isAbsolute, join } from "node:path";
 import { createKeychain } from "../../app/runtime.ts";
 import { resolveActor } from "../../core/actor/resolve.ts";
 import { ConfigError, isSecretRef, type LoadedConfig, parseSecretRef } from "../../core/config/index.ts";
+import { missingChecks } from "../../core/config/requiredChecks.ts";
 import { EnvSecretResolver } from "../../core/config/secrets.ts";
 import { jarvisHome } from "../../core/paths.ts";
 import { McpPool, ToolsCache } from "../../mcp/client/pool.ts";
@@ -342,6 +343,24 @@ export async function runDoctor(ctx: CliContext): Promise<DoctorReport> {
             ),
       );
     }
+
+    // the checks the project said it must have (tools.required): what is missing is a warning, the rest optional
+    const missingTools = missingChecks(loaded.config.tools.required, Object.keys(loaded.config.tools.local));
+    checks.push(
+      missingTools.length === 0
+        ? check(
+            "tools:required",
+            "ok",
+            "local tool",
+            `required checks set: ${loaded.config.tools.required.join(", ")}`,
+          )
+        : check(
+            "tools:required",
+            "warn",
+            "local tool",
+            `no command for ${missingTools.join(", ")} (tools.required) — set tools.local, or jarvis onboard`,
+          ),
+    );
 
     const probes = new ProbeStore(home.cacheDir);
     for (const [id, model] of Object.entries(loaded.config.models)) {

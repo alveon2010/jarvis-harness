@@ -2,6 +2,7 @@ import { type Dirent, existsSync, readdirSync, readFileSync, realpathSync } from
 import { join, resolve } from "node:path";
 import { isPlainObject } from "../core/config/merge.ts";
 import { knowledgeConfigOf } from "../core/config/meta.ts";
+import { DEFAULT_REQUIRED, missingChecks, optionalUnset } from "../core/config/requiredChecks.ts";
 import type { Run } from "../core/domain/run.ts";
 import { metaConfigFile } from "../core/paths.ts";
 import { type Catalog, type CatalogLink, catalogOf, type ServiceContracts } from "../knowledge/catalog.ts";
@@ -15,8 +16,6 @@ import { type FoundRepo, findServiceRepos, stackOf } from "../onboarding/service
  * same files the agents read, no model. What is missing is said: a service without commands is
  * changed with no tests run, one without a description is guessed at.
  */
-export const SERVICE_CHECKS = ["tests", "typecheck", "lint"] as const;
-
 export interface ServiceTool {
   readonly name: string;
   readonly command: string;
@@ -41,8 +40,18 @@ export interface ServiceView {
   readonly present: boolean;
   /** The service's commands: `tools.local` of its entry over the shared one. */
   readonly tools: readonly ServiceTool[];
-  /** Of tests, typecheck and lint, the ones with no command. */
+  /** The checks it must have (`tools.required`, and `publish-local` for a library). */
+  readonly required: readonly string[];
+  /** Of those, the ones with no command: what is left to do. */
   readonly missing: readonly string[];
+  /** Of tests, typecheck and lint, the ones neither required nor set: optional. */
+  readonly optional: readonly string[];
+  /** A library: the names services depend on it by. */
+  readonly publishes: readonly string[];
+  /** The libraries of the map it depends on. */
+  readonly uses: readonly string[];
+  /** The services of the map that depend on it. */
+  readonly usedBy: readonly string[];
   /** `knowledge/services/<name>/architecture.md`, relative to the knowledge repository. */
   readonly architecture: string;
   readonly hasArchitecture: boolean;
@@ -154,6 +163,14 @@ function docsIn(dir: string): { docs: number; modules: number } {
   return { docs, modules };
 }
 
+const strings = (v: unknown): string[] =>
+  Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x.length > 0) : [];
+
+const requiredOf = (o: unknown): string[] | undefined => {
+  const tools = isPlainObject(o) ? o.tools : undefined;
+  return isPlainObject(tools) && Array.isArray(tools.required) ? strings(tools.required) : undefined;
+};
+
 const localTools = (o: unknown): Record<string, string> => {
   const tools = isPlainObject(o) ? o.tools : undefined;
   const local = isPlainObject(tools) ? tools.local : undefined;
@@ -174,6 +191,8 @@ export function servicesOf(input: {
   const config = knowledgeConfigOf(metaRoot) ?? {};
   const entries = isPlainObject(config.services) ? config.services : {};
   const shared = localTools(config);
+  const sharedRequired = requiredOf(config) ?? [...DEFAULT_REQUIRED];
+  const usesOf = (name: string) => strings(isPlainObject(entries[name]) ? entries[name].uses : undefined);
   const catalog = input.catalog ?? catalogOf(metaRoot);
   const names = Object.keys(repos).sort((a, b) => a.localeCompare(b));
   const byRepo = new Map<string, Run[]>();
@@ -197,6 +216,11 @@ export function servicesOf(input: {
     const text = read(join(metaRoot, architecture));
     const [about, ...more] = text ? descriptionOf(text) : [];
     const kind = isPlainObject(entry) && typeof entry.kind === "string" ? entry.kind : undefined;
+    const required = [
+      ...(requiredOf(entry) ?? sharedRequired),
+      ...(kind === "library" ? ["publish-local"] : []),
+    ];
+    const names = tools.map((t) => t.name);
     const stack = (text ? stacksLineOf(text) : undefined) ?? (present ? stackOf(repo) : undefined);
     const runs = (byRepo.get(real(repo)) ?? [])
       .slice()
@@ -211,7 +235,14 @@ export function servicesOf(input: {
       repo,
       present,
       tools,
-      missing: SERVICE_CHECKS.filter((c) => !tools.some((t) => t.name === c)),
+      required,
+      missing: missingChecks(required, names),
+      optional: optionalUnset(required, names),
+      publishes: strings(isPlainObject(entry) ? entry.publishes : undefined),
+      uses: usesOf(name),
+      usedBy: Object.keys(repos)
+        .filter((other) => other !== name && usesOf(other).includes(name))
+        .sort(),
       architecture,
       hasArchitecture: text !== undefined,
       ...(about ? { about } : {}),

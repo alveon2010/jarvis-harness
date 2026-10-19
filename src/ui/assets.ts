@@ -550,6 +550,7 @@ a.kr:hover{background:var(--sunken)}
 .sv-check{white-space:nowrap;font-size:13px;color:var(--ok-ink)}
 .sv-miss{color:var(--wait);font-size:13px}
 p.sv-miss{font-size:14px}
+.sv-opt{font-size:13px}
 .sv-links{font-size:13px;display:flex;flex-direction:column;gap:2px;min-width:0;overflow-wrap:anywhere}
 .sv-legend{padding:12px 20px;margin:0;border-top:1px solid var(--line-soft)}
 .pill.front{background:transparent;border:1px solid var(--line);color:var(--ink-2);padding:2px 9px}

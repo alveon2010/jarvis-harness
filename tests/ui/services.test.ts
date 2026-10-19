@@ -40,7 +40,12 @@ const service = (name: string, extra: Partial<ServiceView>): ServiceView => ({
   repo: `/home/me/code/${name}`,
   present: true,
   tools: [],
-  missing: ["tests", "typecheck", "lint"],
+  required: ["tests"],
+  missing: ["tests"],
+  optional: ["typecheck", "lint"],
+  publishes: [],
+  uses: [],
+  usedBy: [],
   architecture: `knowledge/services/${name}/architecture.md`,
   hasArchitecture: false,
   more: [],
@@ -132,7 +137,7 @@ describe("Services", () => {
     expect(out).toContain(">Services <span");
     expect(out).toContain("<b>4 things to finish</b>");
     expect(out).toContain(
-      "1 service without commands for the checks, 2 services without a description, 1 not on this machine",
+      "1 service without a required check, 2 services without a description, 1 not on this machine",
     );
     // only the services on this machine are onboarded
     expect(out).toContain(
@@ -142,6 +147,8 @@ describe("Services", () => {
     expect(out).toContain("Onboard 1 service");
     expect(out).toContain("Takes and tracks orders.");
     expect(out).toContain('title="make lint (shared)">✓ lint');
+    // what is not in tools.required is optional, not left to do
+    expect(out).toContain("optional: typecheck, lint</div>");
     expect(out).toContain('→ payments-service <span class="muted">2 endpoints</span>');
     expect(out).toContain("⇢ <code>order.created</code>");
     expect(out).toContain("expected at <code>~/code/address-service</code>");
