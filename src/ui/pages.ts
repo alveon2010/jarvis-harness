@@ -15,7 +15,6 @@ import { toolMix } from "../cli/progress.ts";
 import { documentToMarkdown } from "../cli/render.ts";
 import { incompleteOf } from "../cli/style.ts";
 import { isTerminal, type Run } from "../core/domain/run.ts";
-import type { NamedService } from "../knowledge/catalog.ts";
 import type { EgressNotice } from "../security/policy/egress.ts";
 import { shortRunId } from "../storage/runStore.ts";
 import { checksHtml, checksOf } from "./checks.ts";
@@ -36,6 +35,7 @@ import type {
   WaitingRun,
 } from "./model.ts";
 import { RECENT_PAGE, RECENT_SIZES } from "./model.ts";
+import { newTaskHtml, type StartForm } from "./newTask.ts";
 import { fileRefHtml, fileRefOf, openHref } from "./refs.ts";
 
 /**
@@ -418,49 +418,10 @@ export interface LaunchView {
   readonly tail?: string;
 }
 
-export interface StartForm {
-  readonly workflows: ReadonlyArray<{ readonly id: string; readonly label: string; readonly about: string }>;
-  readonly repos: readonly string[];
-  readonly current?: string;
-  readonly launches: readonly LaunchView[];
-  readonly homeDir: string;
-  readonly notice?: Html;
-}
+export type { StartForm } from "./newTask.ts";
 
 const home = (path: string, dir: string) =>
   dir && path.startsWith(`${dir}/`) ? `~${path.slice(dir.length)}` : path;
-
-/** "New task": what to do, which workflow (research first), which repository — started as the CLI would be. */
-function startHtml(start: StartForm, actions: Actions): Html {
-  const repoField =
-    start.repos.length > 1
-      ? html`<label class="field">Repository<select name="repo">${start.repos.map((r) => html`<option value="${r}"${r === start.current ? " selected" : ""}>${home(r, start.homeDir)}</option>`)}</select></label>`
-      : html`<input type="hidden" name="repo" value="${start.repos[0] ?? ""}"><span class="meta">in ${home(start.repos[0] ?? "", start.homeDir)}</span>`;
-  return html`<section class="panel newtask" aria-labelledby="new-title" id="new">
-${form(
-  actions,
-  "/runs/new",
-  html`<h2 id="new-title">New task</h2>
-<label class="field grow">What to do<textarea name="task" rows="3" required maxlength="4000" placeholder="ABC-123 — or in words: what to find out, or the bug to fix"></textarea></label>
-<div class="row">
-<label class="field">Workflow<select name="workflow">${start.workflows.map((w) => html`<option value="${w.id}"${w.id === start.workflows[0]?.id ? " selected" : ""}>${w.label} — ${w.about}</option>`)}</select></label>
-${repoField}
-<button type="submit" class="btn primary">Start</button>
-</div>
-<div class="startfrom" data-from aria-live="polite"></div>
-<label class="check"><input type="checkbox" name="fresh" value="design"> Read the Figma frames again <span class="meta">— the design changed at the same link; past Jarvis's one-day cache, each frame is a Figma API call</span></label>
-<p class="hint">Runs in the background, as <code>jarvis research "…"</code> (or the workflow chosen) would without a terminal; where it needs you, it waits here — decide on the page and it goes on.</p>`,
-)}
-</section>`;
-}
-
-/** "Looks like this task spans N services" under "New task" (ADR-0025 §7), with the switch. */
-export function crossHintHtml(named: readonly NamedService[], metaRoot: string): Html {
-  return html`<div class="from" style="background:var(--accent-soft);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:6px">
-<div class="row" style="flex-wrap:wrap;gap:8px 14px"><b>Looks like this task spans ${named.length} services</b><button type="button" class="btn small primary" data-cross data-repo="${metaRoot}">Switch to sdd (cross-repos)</button></div>
-<p class="sub hint">${named.map((n, i) => html`${i > 0 ? " · " : ""}<b>${n.service}</b> ${n.by}`)} — from the contract catalog and the names in the task, before any model. Nothing switches by itself; sdd asks again after its impact if the code says so.</p>
-</div>`;
-}
 
 /** `20:35` today, `Oct 3, 14:10` before. */
 function whenShort(iso: string, now: number): string {
@@ -556,7 +517,7 @@ export function runsContent(page: RunsPage, now: number, actions?: Actions, star
   const launches = start?.launches ?? [];
   return html`<div class="lede" data-live="lede"><h1>Runs</h1><span class="muted">${sum}</span></div>
 ${start?.notice ?? ""}
-${start && actions ? startHtml(start, actions) : ""}
+${start && actions ? newTaskHtml(start, actions) : ""}
 <section class="group" aria-labelledby="waits" data-live="waiting">
 <h2 id="waits">Waits for you</h2>
 ${

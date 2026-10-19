@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { request } from "node:http";
 import { hostname } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createEngine } from "../../src/app/engine.ts";
 import { resumableOf } from "../../src/app/resumable.ts";
@@ -219,9 +219,11 @@ describe("New task on the page", () => {
     const runs = await page("/");
     expect(runs).toContain('<a class="btn primary small" href="/#new">New task</a>');
     expect(runs).toContain('action="/runs/new"');
-    // research first and chosen: find out before changing anything
-    expect(runs).toContain('<option value="research" selected>research — find out and write it down');
-    expect(runs).toContain('<option value="fix">fix — a short way for a bug');
+    // research first and chosen: find out before changing anything; the button names it and the place
+    expect(runs).toContain('<input type="radio" name="workflow" value="research" data-label="Research"');
+    expect(runs).toMatch(/value="research"[^>]* checked><span>Research<\/span>/);
+    expect(runs).toMatch(/value="fix"[^>]* data-one-only><span>Fix a bug<\/span>/);
+    expect(runs).toContain(`data-go>Research in ${basename(sb.project)}</button>`);
     expect((await post("/runs/new", { task: "x", workflow: "fix" })).status).toBe(403); // no token
     const token = ui.token;
     expect((await post("/runs/new", { t: token, task: " ", workflow: "fix" })).location).toContain(

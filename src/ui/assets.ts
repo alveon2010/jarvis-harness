@@ -368,8 +368,48 @@ a.ref{text-decoration:none}a.ref code{color:var(--accent)}a.ref:hover code{text-
 .check{display:flex;align-items:baseline;gap:8px;margin-top:10px;font-size:14px;cursor:pointer}
 .check input{margin:0;accent-color:var(--accent)}
 .field select{height:44px;width:100%;text-overflow:ellipsis}
-.newtask .row{align-items:flex-end}
-.newtask .row .field{flex:1 1 240px;max-width:520px}
+.newtask .composer{border:1px solid var(--field-line);border-radius:10px;background:var(--panel)}
+.newtask .composer:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.newtask .composer textarea{display:block;width:100%;box-sizing:border-box;min-height:76px;border:0;outline:0;resize:vertical;padding:12px 14px 6px;font:inherit;font-size:15px;line-height:1.45;background:transparent;color:var(--ink)}
+.newtask .cbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 10px;border-top:1px solid var(--line-soft)}
+.newtask .grow{flex:1 1 auto}
+.newtask .pick{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 10px 0 8px;border:1px solid var(--field-line);border-radius:8px;background:var(--sunken);font-size:14px;color:var(--ink);cursor:pointer;white-space:nowrap;list-style:none;max-width:100%}
+.newtask .pick::-webkit-details-marker{display:none}
+.newtask .pick:hover{border-color:var(--faint)}
+.newtask .pick.still{cursor:default}
+.newtask .where[open]>.pick{border-color:var(--accent);background:var(--panel)}
+.newtask .pick .ic{width:18px;height:18px;border-radius:5px;background:var(--accent-soft);color:var(--accent-dark);display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;flex:none}
+.newtask .pick .ic.all{background:var(--chip);color:var(--held)}
+.newtask .pick .car{color:var(--muted);font-size:11px}
+.newtask .badge{font-size:11px;padding:1px 7px;border-radius:999px;background:var(--line-soft);color:var(--muted);white-space:nowrap}
+.newtask .badge.lib{background:var(--chip);color:var(--held)}
+.newtask .where{position:relative}
+.newtask .pop{position:absolute;z-index:5;left:0;top:calc(100% + 6px);width:min(380px,calc(100vw - 48px));max-height:420px;overflow:auto;background:var(--panel);border:1px solid var(--field-line);border-radius:12px;box-shadow:0 12px 32px rgba(20,20,18,.16);padding:8px;display:flex;flex-direction:column;gap:2px}
+.newtask .pop .find{height:36px;border:1px solid var(--field-line);border-radius:8px;padding:0 10px;font-size:14px;margin-bottom:6px}
+.newtask .grp{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--faint-2);padding:8px 8px 4px}
+.newtask .opt{position:relative;display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:2px 8px;align-items:center;padding:7px 8px;border-radius:8px;font-size:14px;cursor:pointer}
+.newtask .opt[hidden]{display:none}
+.newtask .opt:hover{background:var(--sunken)}
+.newtask .opt input{position:absolute;opacity:0;pointer-events:none}
+.newtask .opt .ck{visibility:hidden;color:var(--accent);font-weight:700}
+.newtask .opt:has(input:checked){background:var(--accent-soft)}
+.newtask .opt:has(input:checked) .ck{visibility:visible}
+.newtask .opt:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:-2px}
+.newtask .opt .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.newtask .opt .p{grid-column:2/4;font-family:var(--mono);font-size:11px;color:var(--faint-2);overflow-wrap:anywhere}
+.newtask .pop .none{margin:6px 8px;font-size:13px;color:var(--muted)}
+.newtask .seg{display:inline-flex;flex-wrap:wrap;padding:3px;border-radius:9px;background:var(--line-soft);gap:2px}
+.newtask .seg label{position:relative;display:inline-flex}
+.newtask .seg input{position:absolute;opacity:0;pointer-events:none}
+.newtask .seg span{display:inline-flex;align-items:center;height:30px;padding:0 12px;border-radius:7px;font-size:14px;color:var(--ink-2);cursor:pointer;white-space:nowrap}
+.newtask .seg input:checked+span{background:var(--panel);color:var(--ink);font-weight:600;box-shadow:0 1px 2px rgba(20,20,18,.14)}
+.newtask .seg input:focus-visible+span{outline:2px solid var(--accent);outline-offset:1px}
+.newtask .seg input:disabled+span{color:var(--faint);cursor:not-allowed}
+.newtask .what{font-size:13px;color:var(--muted);margin:0}
+.newtask .cnote{display:flex;gap:8px;align-items:baseline;font-size:13px;color:var(--ink-2);padding:8px 10px;border-radius:8px;background:var(--accent-soft)}
+.newtask .linkish{border:0;background:none;padding:0;font:inherit;color:var(--accent);text-decoration:underline;cursor:pointer}
+.newtask .more{font-size:13px}
+.newtask .more summary{cursor:pointer;color:var(--muted)}
 .convo{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
 .convo .msg{display:flex;flex-direction:column;gap:4px;padding:10px 14px;border-radius:8px;border:1px solid var(--line);max-width:860px}
 .convo .msg.jarvis{background:var(--ground)}
@@ -733,19 +773,67 @@ export const SCRIPT = `
     });
   }
 
-  // "New task" for a workflow a research goes on as (sdd): the finished research of the same issue
-  // to start from, looked up as the task is typed (GET /runs/from)
-  const startFrom = document.querySelector('[data-from]');
-  const newForm = startFrom && startFrom.closest('form');
+  // "New task": Where (a list of places in a popover) and How far (four segments); the line under the box,
+  // the button and what cannot run in the place follow the choice. The research to start from, the
+  // restart and the note on linked services are looked up as the task is typed (GET /runs/from)
+  const newForm = document.querySelector('form[data-newtask]');
   if (newForm) {
+    const startFrom = newForm.querySelector('[data-from]');
+    const where = newForm.querySelector('[data-where]');
+    const goBtn = newForm.querySelector('[data-go]');
+    const whatLine = newForm.querySelector('[data-said]');
+    const taskField = newForm.elements.namedItem('task');
+    const LAST = 'jarvis.newtask.repo';
+    const radios = (name) => [...newForm.querySelectorAll('input[name="' + name + '"]')];
+    const place = () => radios('repo').find((r) => r.checked) || newForm.querySelector('input[name="repo"]');
+    const how = () => radios('workflow').find((r) => r.checked);
+    const keyOf = (text) => (text.match(/\\b[A-Z][A-Z0-9]+-\\d+\\b/) || [])[0];
+    const sync = () => {
+      const p = place();
+      const across = !!(p && p.hasAttribute('data-across'));
+      const name = p ? p.dataset.name || '' : '';
+      for (const r of radios('workflow')) {
+        const off = across && r.hasAttribute('data-one-only');
+        r.disabled = off;
+        const label = r.closest('label');
+        if (off) label.title = 'In one service only — pick it in Where';
+        else label.removeAttribute('title');
+      }
+      let h = how();
+      if (!h || h.disabled) {
+        h = radios('workflow').find((r) => r.value === 'sdd' && !r.disabled) || radios('workflow').find((r) => !r.disabled);
+        if (h) h.checked = true;
+      }
+      if (!h) return;
+      const acrossHere = across && h.dataset.acrossGo;
+      goBtn.textContent = acrossHere ? h.dataset.acrossGo : h.dataset.verb + ' in ' + (name || 'this repository');
+      const b = document.createElement('b');
+      b.textContent = h.dataset.label;
+      const key = keyOf(taskField.value || '');
+      whatLine.replaceChildren(
+        b,
+        (acrossHere ? ' across services — ' + h.dataset.acrossWhat : ' — ' + h.dataset.what) +
+          '.' +
+          (key ? ' Reads ' + key + ' at the start, with its pages and frames.' : ''),
+      );
+      if (where && p) {
+        const summary = where.querySelector('summary');
+        const icon = document.createElement('span');
+        icon.className = across ? 'ic all' : 'ic';
+        icon.setAttribute('aria-hidden', 'true');
+        icon.textContent = across ? '◎' : (name[0] || '?').toUpperCase();
+        const nm = document.createElement('span');
+        nm.textContent = name;
+        const badge = p.closest('label').querySelector('.badge');
+        summary.replaceChildren(icon, nm, ...(badge ? [badge.cloneNode(true)] : []), summary.querySelector('.car'));
+      }
+    };
     let timer;
     let asked = '';
     const look = () => {
-      const field = (name) => {
-        const el = newForm.elements.namedItem(name);
-        return el && 'value' in el ? el.value : '';
-      };
-      const q = new URLSearchParams({ task: field('task'), workflow: field('workflow'), repo: field('repo') }).toString();
+      const p = place();
+      const h = how();
+      const q = new URLSearchParams({ task: taskField.value, workflow: h ? h.value : '', repo: p ? p.value : '' }).toString();
       if (q === asked) return;
       asked = q;
       fetch('/runs/from?' + q, { headers: { Accept: 'text/html' } })
@@ -755,25 +843,91 @@ export const SCRIPT = `
         })
         .catch(() => {});
     };
+    const choosePlace = (radio, close) => {
+      radio.checked = true;
+      try {
+        localStorage.setItem(LAST, radio.value);
+      } catch {}
+      if (where && close) {
+        where.open = false;
+        where.querySelector('summary').focus();
+      }
+      sync();
+      look();
+    };
+    // the place chosen last time, unless the page is of one repository's runs
+    if (!new URL(location.href).searchParams.get('repo')) {
+      let last = null;
+      try {
+        last = localStorage.getItem(LAST);
+      } catch {}
+      const r = last && radios('repo').find((x) => x.value === last);
+      if (r) r.checked = true;
+    }
     newForm.addEventListener('input', (e) => {
-      const name = e.target && e.target.name;
-      if (name !== 'task' && name !== 'workflow' && name !== 'repo') return;
+      const t = e.target;
+      if (t && t.hasAttribute && t.hasAttribute('data-where-find')) {
+        const q = t.value.trim().toLowerCase();
+        let shown = 0;
+        for (const opt of where.querySelectorAll('.opt')) {
+          const hit = !q || (opt.dataset.find || '').includes(q);
+          opt.hidden = !hit;
+          if (hit) shown++;
+        }
+        where.querySelector('[data-where-none]').hidden = shown > 0;
+        return;
+      }
+      if (!t || t.name !== 'task') return;
+      sync();
       clearTimeout(timer);
-      timer = setTimeout(look, name === 'task' ? 300 : 0);
+      timer = setTimeout(look, 300);
     });
     newForm.addEventListener('change', (e) => {
-      if (e.target && (e.target.name === 'workflow' || e.target.name === 'repo')) look();
+      const t = e.target;
+      if (!t) return;
+      // arrows move the choice and keep the list open; a click or Enter closes it
+      if (t.name === 'repo') choosePlace(t, false);
+      else if (t.name === 'workflow') {
+        sync();
+        look();
+      }
     });
-    // "Switch to sdd (cross-repos)" under the task (ADR-0025 §7): the workflow and the knowledge repository
+    if (where) {
+      where.addEventListener('click', (e) => {
+        const opt = e.target.closest('.opt');
+        if (opt && e.target.tagName === 'INPUT') choosePlace(e.target, true);
+      });
+      where.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && e.target.name === 'repo') {
+          e.preventDefault();
+          choosePlace(e.target, true);
+        } else if (e.key === 'Enter' && e.target.hasAttribute('data-where-find')) {
+          e.preventDefault();
+          const first = [...where.querySelectorAll('.opt')].find((o) => !o.hidden);
+          if (first) choosePlace(first.querySelector('input'), true);
+        } else if (e.key === 'Escape' && where.open) {
+          where.open = false;
+          where.querySelector('summary').focus();
+        }
+      });
+      where.addEventListener('toggle', () => {
+        if (!where.open) return;
+        const find = where.querySelector('[data-where-find]');
+        const on = place();
+        (find || on).focus();
+      });
+      document.addEventListener('click', (e) => {
+        if (where.open && !where.contains(e.target)) where.open = false;
+      });
+    }
+    // the note on linked services: its link changes only Where
     newForm.addEventListener('click', (e) => {
       const cross = e.target.closest('[data-cross]');
       if (!cross) return;
-      const workflow = newForm.elements.namedItem('workflow');
-      const repo = newForm.elements.namedItem('repo');
-      if (workflow) workflow.value = 'sdd-cross';
-      if (repo && cross.dataset.repo) repo.value = cross.dataset.repo;
-      look();
+      const r = radios('repo').find((x) => x.value === cross.dataset.repo);
+      if (r) choosePlace(r, false);
     });
+    sync();
     look();
   }
 

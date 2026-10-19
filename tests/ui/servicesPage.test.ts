@@ -14,6 +14,7 @@ let sb: Sandbox;
 let rt: Runtime;
 let ui: UiServer;
 const execs: Array<{ args: readonly string[]; cwd: string }> = [];
+const starts: Array<{ workflow: string; repoRoot: string }> = [];
 let exitCode = 0;
 const meta = () => join(sb.root, "shop-knowledge");
 
@@ -22,7 +23,18 @@ function launcher(): Launcher {
     throw new Error("not here");
   };
   return {
-    start: no,
+    start: (o) => {
+      starts.push({ workflow: o.workflow, repoRoot: o.repoRoot });
+      return {
+        id: "0123456789ab",
+        task: o.task,
+        workflow: o.workflow,
+        repoRoot: o.repoRoot,
+        startedAt: new Date().toISOString(),
+        exitCode: null,
+        log: "",
+      } as unknown as ReturnType<Launcher["start"]>;
+    },
     continueRun: no,
     restartRun: no,
     startModule: no,
@@ -44,6 +56,7 @@ function launcher(): Launcher {
 beforeEach(async () => {
   sb = sandbox();
   execs.length = 0;
+  starts.length = 0;
   exitCode = 0;
   sb.write("home/.jarvis/config.yaml", "version: 1\nactor: { id: dev@example.com }\n");
   sb.write(
@@ -136,13 +149,41 @@ describe("Services in jarvis ui", () => {
 });
 
 describe("New task in a knowledge repository", () => {
-  it("sdd and fix are refused there: no code to change", async () => {
+  it("Where: all services first and chosen, then the services with their kind; Fix is disabled with why", async () => {
+    const runs = (await page("/")).text;
+    expect(runs).toMatch(new RegExp(`value="${meta()}" data-name="All services" data-across checked`));
+    expect(runs).toContain('<span class="badge">knowledge repo</span>');
+    expect(runs).toContain("· 2 services");
+    expect(runs).toContain('<span class="nm">orders-api</span><span class="badge">backend</span>');
+    expect(runs).toContain('<span class="nm">notifications-worker</span><span class="p">');
+    expect(runs).toMatch(
+      /title="In one service only — pick it in Where"><input[^>]*value="fix"[^>]* disabled>/,
+    );
+    expect(runs).toContain("data-go>Research across services</button>");
+  });
+
+  it("Fix is refused there; Implement there is the task across services", async () => {
     const r = await post("/runs/new", [
       ["task", "ABC-64"],
       ["workflow", "fix"],
       ["repo", meta()],
     ]);
     expect(r.location).toBe("/?notice=knowledge-no-code#new");
-    expect((await page(r.location)).text).toContain("The knowledge repository has no code to change");
+    expect((await page(r.location)).text).toContain("Fix a bug runs in one service: pick it in Where");
+    const go = await post("/runs/new", [
+      ["task", "Partial refunds"],
+      ["workflow", "sdd"],
+      ["repo", meta()],
+    ]);
+    expect(go.location).toBe("/launches/0123456789ab");
+    expect(starts).toEqual([{ workflow: "sdd-cross", repoRoot: meta() }]);
+    // sdd (cross-repos) in a service: refused, Where is to change
+    const svc = join(sb.root, "orders-api");
+    const elsewhere = await post("/runs/new", [
+      ["task", "Partial refunds"],
+      ["workflow", "sdd-cross"],
+      ["repo", svc],
+    ]);
+    expect(elsewhere.location).toBe("/?notice=cross-elsewhere#new");
   });
 });

@@ -62,6 +62,8 @@ import {
 import { tryOutOf } from "../app/tryOut.ts";
 import { type OpenChecked, type OpenIn, type OpenResult, reviewFiles } from "../cli/checkout.ts";
 import { humanMove } from "../cli/commands/human.ts";
+import { isPlainObject } from "../core/config/merge.ts";
+import { knowledgeConfigOf } from "../core/config/meta.ts";
 import type { Actor } from "../core/domain/actor.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import { isTerminal, type Run } from "../core/domain/run.ts";
@@ -117,12 +119,12 @@ import {
   researchFirst,
   researchOf,
 } from "./modules.ts";
+import { crossNoteHtml, placesOf, workflowOfChoice } from "./newTask.ts";
 import {
   type Actions,
   type ArtifactExtras,
   artifactContent,
   type Chrome,
-  crossHintHtml,
   errorContent,
   forbiddenPage,
   launchContent,
@@ -469,8 +471,8 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       cleaned: html`<div class="banner ok">Checkout removed — the files go in the background; the branch stays</div>`,
       applied: html`<div class="banner ok">Applied: ${r.url.searchParams.get("files") ?? "?"} file(s) as <code>${r.url.searchParams.get("commit") ?? ""}</code> on the branch checked out in the repository — not pushed</div>`,
       "went-cross": html`<div class="banner ok">Going on as a task across services: the research and the spec are here — next, the split to approve</div>`,
-      "knowledge-no-code": html`<div class="banner bad">The knowledge repository has no code to change: pick sdd (cross-repos) for a task across services, or the service's repository for a task in one</div>`,
-      "cross-elsewhere": html`<div class="banner bad">sdd (cross-repos) runs in the knowledge repository of the services: pick it as the repository</div>`,
+      "knowledge-no-code": html`<div class="banner bad">Fix a bug runs in one service: pick it in Where — or Implement across services</div>`,
+      "cross-elsewhere": html`<div class="banner bad">A task across services runs in All services: pick it in Where</div>`,
       "subtask-started": html`<div class="banner ok">The subtask starts in its service's repository — it shows up here in a moment</div>`,
       "subtask-publishing": html`<div class="banner ok">publish-local runs again in the library's checkout — the services waiting for it start when it passes</div>`,
       "subtask-dropped": html`<div class="banner ok">Dropped from the task; once the others are done the master goes on without it</div>`,
@@ -1359,17 +1361,38 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
     );
 
   /**
-   * Under "New task": the task names two services or more that the contract catalog links — likely a
-   * task across services (ADR-0025 §7). A hint with a switch; nothing switches by itself.
+   * Under "New task" in one service: the task names two services or more that the contract catalog
+   * links — likely a task across services (ADR-0025 §7). A note whose link changes only Where.
    */
-  const crossHintOf = (task: string, workflow: string): Html | string => {
+  const crossNoteOf = (task: string, repo: string): Html | string => {
     const meta = runtime.loaded.meta;
-    if (!meta || workflow === "sdd-cross" || task.trim().length < 8) return "";
+    if (!meta || inKnowledgeRepo(repo) || task.trim().length < 8) return "";
     const catalog = catalogOf(meta.root);
     const named = namedServices(catalog, task, Object.keys(meta.repos));
     const names = new Set(named.map((n) => n.service));
-    const linked = catalog.links.some((l) => names.has(l.producer) && names.has(l.consumer));
-    return named.length >= 2 && linked ? crossHintHtml(named, meta.root) : "";
+    const link = catalog.links.find((l) => names.has(l.producer) && names.has(l.consumer));
+    return named.length >= 2 && link ? crossNoteHtml(named, link, meta.root) : "";
+  };
+
+  const inKnowledgeRepo = (repo: string): boolean => {
+    const meta = runtime.loaded.meta;
+    return meta !== undefined && resolvePath(repo) === resolvePath(meta.root);
+  };
+
+  /** The places of "New task": all services, the services of the map, other repositories with runs. */
+  const startPlaces = () => {
+    const meta = runtime.loaded.meta;
+    const config = meta ? (knowledgeConfigOf(meta.root) ?? {}) : {};
+    const entries = isPlainObject(config.services) ? config.services : {};
+    const kinds = Object.fromEntries(
+      Object.entries(entries).flatMap(([name, e]) =>
+        isPlainObject(e) && typeof e.kind === "string" ? [[name, e.kind]] : [],
+      ),
+    );
+    return placesOf({
+      repos: knownRepos(),
+      ...(meta ? { meta: { root: meta.root, repos: meta.repos, kinds } } : {}),
+    });
   };
 
   /**
@@ -1413,15 +1436,15 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
     if (!options.launcher || !actions) return notFound(r, "Starting tasks is off here.");
     const q = r.url.searchParams;
     const task = (q.get("task") ?? "").slice(0, 4000);
-    const workflow = q.get("workflow") ?? "";
     const repo = q.get("repo") || options.projectRoot || "";
+    const workflow = workflowOfChoice(q.get("workflow") ?? "", inKnowledgeRepo(repo)) ?? "";
     const known = knownRepos().includes(repo);
     const point =
       known && task.trim()
         ? await startPointOf(runtime, engine, { task, workflow, repoRoot: repo })
         : undefined;
     const body = known
-      ? html`${startFromHtml(point, { task, workflow, targets: targets() }, Date.now())}${restartHintOf(task, workflow, repo)}${crossHintOf(task, workflow)}`
+      ? html`${startFromHtml(point, { task, workflow, targets: targets() }, Date.now())}${restartHintOf(task, workflow, repo)}${crossNoteOf(task, repo)}`
       : "";
     return send(r, 200, String(body), "text/html; charset=utf-8", { "Cache-Control": "no-store" });
   };
@@ -1434,16 +1457,15 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
     const sent = form.get("t");
     if (!sent || !same(sent, token)) return send(r, 403, forbiddenPage());
     const task = (form.get("task") ?? "").trim().slice(0, 4000);
-    const workflow = WORKFLOWS.find((w) => w.id === form.get("workflow"))?.id;
     const repo = form.get("repo") ?? options.projectRoot ?? "";
+    // the knowledge repository has no code: research and spec there are across services, Implement is
+    // the task across services, Fix is in one service; sdd (cross-repos) runs nowhere else
+    const inKnowledge = inKnowledgeRepo(repo);
+    const chosen = form.get("workflow") ?? "";
+    const workflow = WORKFLOWS.find((w) => w.id === workflowOfChoice(chosen, inKnowledge))?.id;
+    if (inKnowledge && chosen === "fix") return redirect(r, "/?notice=knowledge-no-code#new");
     if (!task || !workflow) return redirect(r, "/?notice=no-task#new");
     if (!knownRepos().includes(repo) || !existsSync(repo)) return redirect(r, "/?notice=no-repo#new");
-    // the knowledge repository has no code: research and spec there are across services, sdd and fix
-    // are not; sdd (cross-repos) runs nowhere else
-    const meta = runtime.loaded.meta;
-    const inKnowledge = meta !== undefined && resolvePath(repo) === resolvePath(meta.root);
-    if (inKnowledge && (workflow === "sdd" || workflow === "fix"))
-      return redirect(r, "/?notice=knowledge-no-code#new");
     if (!inKnowledge && workflow === "sdd-cross") return redirect(r, "/?notice=cross-elsewhere#new");
     const fromRef = form.get("from");
     if (fromRef) {
@@ -1945,8 +1967,7 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
           actions,
           options.launcher && actions
             ? {
-                workflows: WORKFLOWS.filter((w) => w.id !== "sdd-cross" || runtime.loaded.meta !== undefined),
-                repos: knownRepos(),
+                places: startPlaces(),
                 ...(noticeOf(r) ? { notice: noticeOf(r) as Html } : {}),
                 ...((repo ?? options.projectRoot)
                   ? { current: (repo ?? options.projectRoot) as string }
