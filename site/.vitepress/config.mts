@@ -94,7 +94,20 @@ export default withMermaid(
       sequence: { wrap: true, width: 120, actorMargin: 28, boxMargin: 8, messageFontSize: 15, actorFontSize: 15, noteFontSize: 14 },
       flowchart: { nodeSpacing: 28, rankSpacing: 36 },
     },
-    // mermaid is one large chunk, loaded only on pages with a diagram
-    vite: { build: { chunkSizeWarningLimit: 4000 } },
+    vite: {
+      // mermaid is one large chunk, loaded only on pages with a diagram
+      build: { chunkSizeWarningLimit: 4000 },
+      // the dev server: mermaid's CommonJS dependencies, nested where pnpm keeps them, bundled up front —
+      // served as they are, dayjs has no default export and no page opens
+      optimizeDeps: {
+        include: [
+          "mermaid",
+          "vitepress-plugin-mermaid > mermaid > dayjs",
+          "vitepress-plugin-mermaid > mermaid > @braintree/sanitize-url",
+          "vitepress-plugin-mermaid > mermaid > cytoscape",
+          "vitepress-plugin-mermaid > mermaid > cytoscape-cose-bilkent",
+        ],
+      },
+    },
   }),
 );
