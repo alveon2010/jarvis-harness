@@ -344,7 +344,7 @@ describe("a library in a task across services", () => {
       const task = v.find((x) => x.subtask.key === "2")?.run?.task ?? "";
       expect(task).toContain("Libraries this service uses that the task changed first");
       expect(task).toContain(
-        "- common-lib (subtask 1): Add Money.round() — version 2.15.0, published on this machine by `echo published > published.txt`",
+        "- common-lib (subtask 1): Add Money.round() — the dependency to move: com.example:common-lib — version 2.15.0, published on this machine by `echo published > published.txt`",
       );
     } finally {
       rt2.close();

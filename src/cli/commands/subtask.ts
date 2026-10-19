@@ -58,6 +58,8 @@ export interface UsedLibrary {
   readonly service: string;
   readonly key: string;
   readonly task: string;
+  /** The names the service's build depends on it by (`services.<lib>.publishes`). */
+  readonly publishes: readonly string[];
   readonly publication?: Publication;
 }
 
@@ -92,8 +94,8 @@ export function subtaskTask(
           ...libraries.map(
             (l) =>
               `- ${l.service} (subtask ${l.key}): ${l.task}${
-                l.publication?.version ? ` — version ${l.publication.version}` : ""
-              }${
+                l.publishes.length > 0 ? ` — the dependency to move: ${l.publishes.join(", ")}` : ""
+              }${l.publication?.version ? ` — version ${l.publication.version}` : ""}${
                 l.publication?.command
                   ? `, published on this machine by \`${l.publication.command}\` (Maven: the local repository, mavenLocal(); npm: the packed .tgz in ${l.publication.at ?? "its checkout"})`
                   : l.publication?.skipped
@@ -109,11 +111,20 @@ export function subtaskTask(
 /** The library subtasks a subtask waits for, with their publications. */
 export function usedLibraries(runtime: Runtime, master: Run, sub: Subtask, split: Split): UsedLibrary[] {
   const published = publicationsOf(runtime, master.id);
-  return libraryBlockers(sub, split, libraryMapOf(runtime)).flatMap((key) => {
+  const map = libraryMapOf(runtime);
+  return libraryBlockers(sub, split, map).flatMap((key) => {
     const lib = split.subtasks.find((s) => s.key === key);
     if (!lib) return [];
     const publication = published.get(key);
-    return [{ service: lib.service, key, task: lib.task, ...(publication ? { publication } : {}) }];
+    return [
+      {
+        service: lib.service,
+        key,
+        task: lib.task,
+        publishes: map.publishes.get(lib.service) ?? [],
+        ...(publication ? { publication } : {}),
+      },
+    ];
   });
 }
 
