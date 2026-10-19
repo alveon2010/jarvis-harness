@@ -17,6 +17,7 @@ import { isTerminal, type Run } from "../core/domain/run.ts";
 import type { NamedService } from "../knowledge/catalog.ts";
 import type { EgressNotice } from "../security/policy/egress.ts";
 import { shortRunId } from "../storage/runStore.ts";
+import { checksHtml, checksOf } from "./checks.ts";
 import { type DiffFile, escapeHtml, type Html, html, join, markdownToHtml, type Part, raw } from "./html.ts";
 import type {
   ApprovalCard,
@@ -1829,7 +1830,7 @@ ${
 <div class="mainc">
 ${questionsHtml(page, extras)}
 ${extras.tryOut ? tryHtml(extras.tryOut, page, extras) : ""}
-<section id="document" class="panel doc" aria-label="Document">${documentHtml(a.name, page.text, f?.doc)}</section>
+<section id="document" class="panel doc" aria-label="Document">${((checks) => (checks ? checksHtml(page.run, checks) : documentHtml(a.name, page.text, f?.doc)))(a.type === "checks" ? checksOf(parseJson(page.text)) : undefined)}</section>
 ${
   diff
     ? html`<section id="files" class="group" aria-labelledby="files-h"><h2 id="files-h">Files changed <span class="muted" style="font-weight:400">${diff.length}</span></h2>${

@@ -137,6 +137,19 @@ section.group{display:flex;flex-direction:column;gap:14px}
 .pill.ok{background:var(--ok-bg);color:var(--ok-ink)}
 .pill.bad{background:var(--bad-bg);color:var(--bad)}
 .pill.plain{background:var(--chip);color:var(--ink-2)}
+.tf-all{display:flex;flex-direction:column;gap:16px}
+.tf-check{padding:18px 20px;display:flex;flex-direction:column;gap:14px}
+.tf-check h2{margin:0;font-size:17px}
+.tf{border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.tf-head{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;min-width:0}
+.tf-head h3{margin:0;font-size:16px;overflow-wrap:anywhere}
+.tf-head .grow{flex:1 1 auto}
+.tf-facts{display:grid;grid-template-columns:96px minmax(0,1fr);gap:8px 14px;margin:0}
+.tf-facts dt{color:var(--muted);font-size:14px}
+.tf-facts dd{margin:0;min-width:0}
+.tf-facts pre,.tf-tail{margin:0;padding:8px 10px;border-radius:8px;background:var(--chip);font-family:var(--mono);font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere}
+.tf-facts code.ok{color:var(--ok-ink)}.tf-facts code.bad{color:var(--bad)}
+.tf-frames{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
 .chip{display:inline-block;padding:2px 8px;border-radius:6px;background:var(--chip);font-family:var(--mono);font-size:12px;font-weight:600}
 p{margin:0}
 .card p,.decision p{font-size:14px;line-height:21px;color:var(--ink-2)}
