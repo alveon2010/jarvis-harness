@@ -222,7 +222,8 @@ Preflight (все MCP-серверы, до которых могут дотян�
 `tools/list`), создание run, рабочая копия по `workspace.mode`: worktree от `--base` (по умолчанию `HEAD`) или
 ваша копия (`cwd`; тогда `diff`/`apply` не нужны), исполнение в foreground до
 завершения или остановки. Коды выхода — [overview.md](overview.md#коды-выхода). Workflow по умолчанию
-`sdd`; `smoke` проверяет сам движок.
+`sdd`; `smoke` проверяет сам движок. В репе знаний кода нет: `work` без `--workflow sdd-cross` (и `fix`) отказывает
+с подсказкой, а `sdd-cross`, `research-cross`, `spec-cross` вне неё — тоже.
 
 ### `jarvis fix <task> [--base <ref>] [--fresh design]`
 
@@ -260,7 +261,9 @@ vitest). Implementation возвращается с причиной на каж
 Частичные прогоны: `research` выполняет только `discover → sources → research`; `spec` — исследование, анализ
 требований и спецификацию до её утверждения (выход 10 на гейте; `jarvis approve <run> --resume` завершает run).
 Это встроенные workflow `research` и `spec`; их можно заменить файлами `.jarvis/workflows/research.yaml` и
-`spec.yaml`. Остальное — как у `work`.
+`spec.yaml`. Остальное — как у `work`. В репе знаний они идут как `research-cross` и `spec-cross`: сначала каталог
+сервисов, исследование — по знаниям сервисов, в рабочей копии репы знаний; `jarvis continue` ведёт их в `sdd-cross`
+([workflows.md](workflows.md#граф-sdd-cross-задача-по-нескольким-сервисам-adr-0025-6)).
 
 Шаг `sources` модель не вызывает: читает задачу из Jira по ключу (`ABC-123`) и связанные страницы Confluence и
 пишет артефакт `sources`; с `contracts` в конфиге проекта сверяет упомянутые методы API (`GET /path`) с картой и

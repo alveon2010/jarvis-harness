@@ -37,6 +37,8 @@ Workflow — YAML-граф шагов. `LocalWorkflowEngine` исполняет 
 | `fix` | `jarvis fix` | discover → sources → research → spec → approve-spec → implementation → verify → review → approve-impl |
 | `spec` | `jarvis spec` | discover → sources → research → requirements → spec → approve-spec; одобренная spec продолжается в `sdd` (`next:`) |
 | `research` | `jarvis research` | discover → sources → research; продолжается в `sdd` (`next:`) |
+| `research-cross` | `jarvis research` в репе знаний | sources → catalog → research; продолжается в `sdd-cross` |
+| `spec-cross` | `jarvis spec` в репе знаний | sources → catalog → research → spec → approve-spec; продолжается в `sdd-cross` |
 | `onboard-module` | `jarvis onboard --module` | map (агент `onboard-mapper`) → verify (`onboard.verify`: утверждения сверяются с кодом, выжившее — `candidate`) |
 | `ask` | `jarvis ask` | answer (агент `knowledge-answerer`) |
 | `review-diff` | `jarvis prepush` | review (семантическое ревью диапазона) |
@@ -111,12 +113,19 @@ flowchart LR
 работает в рабочей копии репы знаний (`cwd`) и кода не меняет:
 
 ```
-sources → research → spec → approve-spec → catalog → split → approve-split → spawn → wait
+sources → catalog → research → spec → approve-spec → split → approve-split → spawn → wait
         → contract-check → approve-delivery → deliver → DONE
 ```
 
-- `catalog` (`cross.catalog`, без модели) — сервисы карты, связи из каталога контрактов и то, что называют задача
-  и спека (имя сервиса, топик, эндпоинт); вход агента `split`.
+- `catalog` (`cross.catalog`, без модели) — сервисы карты, связи из каталога контрактов, библиотеки и то, что
+  называют задача и спека (имя сервиса, топик, эндпоинт); вход агентов `research` и `split`. Он идёт до
+  исследования: агент сразу видит карту и читает знания тех сервисов, которых касается задача. Мастер, пришедший из
+  прогона сервиса («Continue as sdd (cross-repos)»), начинает со `split` (или `spec` после одного исследования), а
+  каталог для него собирается сразу.
+- В репе знаний `jarvis research` и `jarvis spec` — это `research-cross` (`sources → catalog → research`) и
+  `spec-cross` (то же и `spec → approve-spec`): исследование по нескольким сервисам в рабочей копии репы знаний. Их
+  продолжение (`jarvis continue`, «Continue» на странице) — `sdd-cross`, со `spec` или со `split`, без повторного
+  исследования. `jarvis work` и `jarvis fix` в репе знаний отказывают: кода в ней нет.
 - `split` (агент `split`) — сабтаски `{ key, service, task, requirements, deliverAfter }` и контракт
   `{ kind: endpoint | topic | dto, id, change, producer, consumers }`; на гейте `approve-split` их утверждает
   человек (или возвращает с комментарием).
