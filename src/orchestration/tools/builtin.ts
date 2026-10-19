@@ -15,12 +15,16 @@ import { CROSS_TOOLS } from "./cross.ts";
 import { rebuildsFor } from "./rebuild.ts";
 import { classSelection, coveringTests, testRunnerOf } from "./relatedTests.ts";
 import {
+  changedLinesOf,
+  failureReasons,
   type JsRunner,
   jsRunnerOf,
   junitTestFailures,
+  type PlacedFailure,
   parseJestJson,
   parseJsText,
   parseMochaJson,
+  placeFailure,
   reporterArgs,
   type TestFailure,
   type TestReport,
@@ -623,12 +627,29 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
       const r = await ctx.tools.invoke(`project.${run}`, {});
       results.push({ check: run, command, ok: r.ok, ...(r.ok ? {} : { tail: tail(r), ...logOf(run, r) }) });
     }
+    // failed tests placed in the project: their frames in its files, the lines the run changed
+    if (results.some((r) => r.failures && r.failures.length > 0)) {
+      const tracked = await git(["ls-files", "--cached", "--others", "--exclude-standard"], workspace);
+      const files = tracked.stdout.split("\n").filter(Boolean);
+      const diff = await git(["diff", "-U0", "--no-color", base, "--"], workspace);
+      const lines = changedLinesOf(diff.stdout);
+      for (const r of results)
+        if (r.failures) r.failures = r.failures.map((f) => placeFailure(f, files, lines) as never);
+    }
     const failed = results.filter((r) => !r.ok);
-    const reasons = failed.map((r) => ({
-      kind: "defects_found",
-      summary: `${r.check} failed: ${(r.tail ?? "").split("\n").filter(Boolean).slice(-3).join(" | ").slice(0, 400)}`,
-      sourceRefs: [`check:${r.check}`],
-    }));
+    const reasons = failed.flatMap((r) => {
+      const placed = (r.failures ?? []) as unknown as PlacedFailure[];
+      const own = placed.length > 0 ? failureReasons(r.check, placed) : [];
+      return own.length > 0
+        ? own
+        : [
+            {
+              kind: "defects_found",
+              summary: `${r.check} failed: ${(r.tail ?? "").split("\n").filter(Boolean).slice(-3).join(" | ").slice(0, 400)}`,
+              sourceRefs: [`check:${r.check}`],
+            },
+          ];
+    });
     const artifact = ctx.runtime.artifacts.put({
       runId: ctx.run.id,
       type: "checks",

@@ -432,6 +432,7 @@ steps:
     ]);
     sb.write("project/.gitignore", "node_modules/\n");
     sb.write("project/app/src/a.js", "module.exports = 1;\n");
+    sb.write("project/app/src/a.test.js", "test('adds', () => {});\n");
     sb.write("project/old/src/b.js", "module.exports = 1;\n");
     sb.write(
       "project/.jarvis/workflows/chk.yaml",
@@ -487,6 +488,13 @@ steps:
     });
     expect((app?.failures?.[0]?.stack as Array<{ file: string }>)[0]?.file).toBe("app/src/a.test.js");
     expect(old?.failures?.[0]).toMatchObject({ suite: "b", name: "subtracts", expected: "1", actual: "2" });
+    // the reasons the implementation goes back with: the test, what was expected, where
+    const reasons = (checks as unknown as { reasons: Array<{ summary: string; sourceRefs: string[] }> })
+      .reasons;
+    expect(reasons[0]?.summary).toBe(
+      'test-app: test "math › adds" failed: Error: expect(received).toBe(expected); expected 3, got 4 — at app/src/a.test.js:4',
+    );
+    expect(reasons[0]?.sourceRefs).toEqual(["check:test-app", "app/src/a.test.js:4"]);
   });
 
   // a Gradle stand-in: runs the classes of `--tests` (or all of all.txt), fails those listed in fails.txt

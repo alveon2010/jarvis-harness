@@ -360,3 +360,125 @@ export function parseJsText(output: string, workspace: string): TestReport | und
   flush();
   return failures.length > 0 ? { source: "text", failures } : undefined;
 }
+
+/* ---- In the project: frames, the lines the run changed, the reasons ---- */
+
+export interface ProjectFrame extends StackFrame {
+  /** The line is one the run added or changed. */
+  readonly changed?: boolean;
+}
+
+export interface PlacedFailure extends Omit<TestFailure, "stack"> {
+  /** Frames in the project's own files, the runner's and libraries' left out. */
+  readonly stack: readonly ProjectFrame[];
+  /** How many frames were left out. */
+  readonly hidden: number;
+  readonly preexisting?: boolean;
+}
+
+/** Lines the run added or changed, per file: `git diff -U0` hunks, new side. */
+export function changedLinesOf(diff: string): Map<string, Array<[number, number]>> {
+  const out = new Map<string, Array<[number, number]>>();
+  let file: string | undefined;
+  for (const line of diff.split("\n")) {
+    const f = /^\+\+\+ b\/(.+)$/.exec(line);
+    if (f) {
+      file = f[1] as string;
+      continue;
+    }
+    if (/^\+\+\+ \/dev\/null/.test(line)) {
+      file = undefined;
+      continue;
+    }
+    const h = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(line);
+    if (h && file) {
+      const start = Number(h[1]);
+      const count = h[2] === undefined ? 1 : Number(h[2]);
+      if (count === 0) continue;
+      const ranges = out.get(file) ?? [];
+      ranges.push([start, start + count - 1]);
+      out.set(file, ranges);
+    }
+  }
+  return out;
+}
+
+/**
+ * A failure's frames in the project: a Java class to its source file (`a.b.Service` →
+ * `src/main/java/a/b/Service.java`), a JavaScript file as it is when the checkout has it; each
+ * marked when its line is one the run changed.
+ */
+export function placeFailure(
+  f: TestFailure & { preexisting?: boolean },
+  files: readonly string[],
+  changed: ReadonlyMap<string, ReadonlyArray<readonly [number, number]>>,
+): PlacedFailure {
+  const known = new Set(files);
+  const bySuffix = (cls: string): string | undefined => {
+    const stem = `/${cls.split(".").join("/")}.`;
+    return files.find((p) => `/${p}`.includes(stem) && /\.(java|kt|groovy|scala)$/.test(p));
+  };
+  const stack: ProjectFrame[] = [];
+  for (const fr of f.stack) {
+    const file = known.has(fr.file)
+      ? fr.file
+      : /^[\w$]+(\.[\w$]+)+$/.test(fr.file)
+        ? bySuffix(fr.file)
+        : undefined;
+    if (!file) continue;
+    const hit =
+      fr.line !== undefined &&
+      (changed.get(file) ?? []).some(([a, b]) => (fr.line as number) >= a && (fr.line as number) <= b);
+    if (stack.some((s) => s.file === file && s.line === fr.line)) continue;
+    stack.push({ ...fr, file, ...(hit ? { changed: true } : {}) });
+  }
+  const { stack: all, ...rest } = f;
+  return { ...rest, stack, hidden: all.length - stack.length };
+}
+
+const oneLine = (s: string, max: number) => {
+  const t = s.replace(/\s+/g, " ").trim();
+  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
+};
+
+/**
+ * The reasons a failed test check sends the implementation back with: one per failed test of this
+ * run (up to `max`), with its message, what was expected and what came, and where — the line the run
+ * changed first. Pre-existing failures are not the run's to fix.
+ */
+export function failureReasons(
+  check: string,
+  failures: readonly PlacedFailure[],
+  max = 5,
+): Array<{ kind: string; summary: string; sourceRefs: string[] }> {
+  const own = failures.filter((f) => !f.preexisting);
+  const reasons = own.slice(0, max).map((f) => {
+    const at = f.stack.find((s) => s.changed) ?? f.stack[0];
+    const where = at
+      ? `${at.file}${at.line ? `:${at.line}` : ""}${at.changed ? " (changed by this run)" : ""}`
+      : f.file;
+    const title = [f.suite, f.name].filter(Boolean).join(" › ");
+    const ea =
+      f.expected !== undefined && f.actual !== undefined
+        ? `; expected ${oneLine(f.expected, 80)}, got ${oneLine(f.actual, 80)}`
+        : "";
+    return {
+      kind: "defects_found",
+      summary: `${check}: test "${oneLine(title, 160)}" failed: ${oneLine(f.message.split("\n")[0] ?? "", 200)}${ea}${where ? ` — at ${where}` : ""}`,
+      sourceRefs: [
+        `check:${check}`,
+        ...f.stack.slice(0, 3).map((s) => (s.line ? `${s.file}:${s.line}` : s.file)),
+      ],
+    };
+  });
+  if (own.length > max)
+    reasons.push({
+      kind: "defects_found",
+      summary: `${check}: ${own.length - max} more failed: ${own
+        .slice(max, max + 8)
+        .map((f) => oneLine(f.name, 60))
+        .join(", ")}`,
+      sourceRefs: [`check:${check}`],
+    });
+  return reasons;
+}

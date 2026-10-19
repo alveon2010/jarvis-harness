@@ -3,7 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  changedLinesOf,
   expectedActualOf,
+  failureReasons,
   javaFrames,
   jsExpectedActual,
   jsRunnerOf,
@@ -11,6 +13,7 @@ import {
   parseJsText,
   parseJunitXml,
   parseMochaJson,
+  placeFailure,
 } from "../../src/orchestration/tools/testReport.ts";
 
 /** Why tests failed, from the reports the runners write. */
@@ -193,5 +196,54 @@ describe("JavaScript runners", () => {
       actual: "1",
     });
     expect(vitest?.failures[0]?.stack[0]).toMatchObject({ file: "src/b.test.ts", line: 7 });
+  });
+});
+
+describe("failures in the project", () => {
+  const files = [
+    "src/main/java/com/example/OnboardingService.java",
+    "src/test/java/com/example/OnboardingRestartTest.java",
+  ];
+  const diff = [
+    "diff --git a/src/main/java/com/example/OnboardingService.java b/src/main/java/com/example/OnboardingService.java",
+    "--- a/src/main/java/com/example/OnboardingService.java",
+    "+++ b/src/main/java/com/example/OnboardingService.java",
+    "@@ -116,2 +116,4 @@ class OnboardingService {",
+    "+  a",
+    "@@ -200 +202,0 @@",
+  ].join("\n");
+
+  it("the lines the run changed, from the diff", () => {
+    expect([...changedLinesOf(diff)]).toEqual([
+      ["src/main/java/com/example/OnboardingService.java", [[116, 119]]],
+    ]);
+  });
+
+  it("frames in the project's files, the changed line marked; the reasons name it first", () => {
+    const [f] = parseJunitXml(GRADLE).failures;
+    const placed = placeFailure(f as never, files, changedLinesOf(diff));
+    expect(placed.stack.map((s) => [s.file, s.line, s.changed ?? false])).toEqual([
+      ["src/test/java/com/example/OnboardingRestartTest.java", 42, false],
+      ["src/main/java/com/example/OnboardingService.java", 118, true],
+    ]);
+    expect(placed.hidden).toBe(1);
+    const [reason] = failureReasons("test", [placed]);
+    expect(reason?.summary).toBe(
+      'test: test "com.example.OnboardingRestartTest › restartAllowedOnceAfterRejected()" failed: org.opentest4j.AssertionFailedError: expected: <true> but was: <false>; expected true, got false — at src/main/java/com/example/OnboardingService.java:118 (changed by this run)',
+    );
+    expect(reason?.sourceRefs).toEqual([
+      "check:test",
+      "src/test/java/com/example/OnboardingRestartTest.java:42",
+      "src/main/java/com/example/OnboardingService.java:118",
+    ]);
+  });
+
+  it("pre-existing failures give no reason; past five, one line for the rest", () => {
+    const base = { name: "t", message: "m", stack: [], hidden: 0 };
+    expect(failureReasons("test", [{ ...base, preexisting: true }])).toEqual([]);
+    const many = Array.from({ length: 7 }, (_, i) => ({ ...base, name: `t${i}` }));
+    const reasons = failureReasons("test", many);
+    expect(reasons).toHaveLength(6);
+    expect(reasons[5]?.summary).toBe("test: 2 more failed: t5, t6");
   });
 });
