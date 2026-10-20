@@ -10,6 +10,7 @@ import { requestPause } from "../../src/app/pause.ts";
 import type { Runtime } from "../../src/app/runtime.ts";
 import { recordGiven } from "../../src/interaction/answers.ts";
 import { addNote, notesOf } from "../../src/interaction/notes.ts";
+import { afterAnalysis, seedComments } from "../../src/interaction/review/lifecycle.ts";
 import { AgenticExecutor, DeterministicExecutor } from "../../src/orchestration/executors.ts";
 import { LocalWorkflowEngine } from "../../src/orchestration/runtime.ts";
 import { BUILTIN_TOOLS } from "../../src/orchestration/tools/builtin.ts";
@@ -1014,6 +1015,50 @@ context: { maxContext: 8000 }
     expect(text).toContain("Keep the slots for 3 days.");
     expect(text).toContain("A: Use the local schedule");
     expect(text).toContain("open, for the analyst");
+  });
+
+  it("requirements corrected in a review are binding for every later agent (ADR-0019 §5)", async () => {
+    sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
+    rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
+    const wf = workflowOf({
+      name: "rc",
+      entry: "impact",
+      steps: [
+        {
+          id: "impact",
+          kind: "agentic",
+          agent: "impact",
+          outputs: ["impact"],
+          transitions: { onSuccess: "DONE" },
+        },
+      ],
+    });
+    const engine = engineWith(rt, wf);
+    server.respond(() => completion("not a document"));
+    const run = createRun(rt, "rc");
+    rt.interactions.open({
+      runId: run.id,
+      kind: "review",
+      stepId: "approve-impl",
+      iteration: 1,
+      openedBy: "reviewer@example.com",
+      meta: {
+        comments: seedComments(
+          rt,
+          run.id,
+          [{ id: "R-1", file: "src/retry.ts", line: 3, text: "Retry only REJECTED_TEMPORARY" }],
+          "reviewer@example.com",
+        ),
+      },
+    });
+    afterAnalysis(rt, run, { comments: [{ id: "R-1", class: "REQUIREMENT_CORRECTION" }] });
+    await engine.execute(run.id, { owner: "cli:t" });
+    const impact = server.requests.find((r) =>
+      ((r.body.messages as Array<{ content: string }>)[0]?.content ?? "").includes("# Agent: impact"),
+    );
+    const text = JSON.stringify(impact?.body.messages);
+    expect(text).toContain("# Requirements corrected by a human in review (binding)");
+    expect(text).toContain("R-1 src/retry.ts:3 — Retry only REJECTED_TEMPORARY");
   });
 
   it("an implementation that only reads is told to start, then stopped; it starts on the open plan step's files", async () => {

@@ -105,7 +105,7 @@ Produce the result document when every requirement has acceptance criteria.`,
   requires: { tools: true, structuredOutput: "json" },
   output: { type: "spec", schema: SpecResult, outcomes: ["ok"] },
   limits: { ...DEFAULT_LIMITS, maxToolCalls: 20 },
-  contextInputs: ["research", "design"],
+  contextInputs: ["research", "design", "requirement-correction"],
 };
 
 export const IMPACT_AGENT: AgentDefinition = {

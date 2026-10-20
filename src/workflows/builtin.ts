@@ -31,7 +31,7 @@ steps:
     kind: agentic
     agent: requirements
     phase: requirements
-    inputs: [sources, research, design]
+    inputs: [sources, research, design, requirement-correction]
     outputs: [requirements]
     transitions: { onSuccess: spec }
   - id: spec
@@ -39,7 +39,7 @@ steps:
     agent: specification
     onLimit: ask  # a half-done result costs more than a question: at its limit the run asks
     phase: spec
-    inputs: [research, requirements, design]
+    inputs: [research, requirements, design, requirement-correction]
     outputs: [spec]
     transitions: { onSuccess: approve-spec }
   - id: approve-spec
@@ -235,7 +235,7 @@ steps:
     kind: agentic
     agent: requirements
     phase: requirements
-    inputs: [sources, research, design]
+    inputs: [sources, research, design, requirement-correction]
     outputs: [requirements]
     transitions: { onSuccess: spec }
   - id: spec
@@ -243,7 +243,7 @@ steps:
     agent: specification
     onLimit: ask
     phase: spec
-    inputs: [research, requirements, design]
+    inputs: [research, requirements, design, requirement-correction]
     outputs: [spec]
     transitions: { onSuccess: approve-spec }
   - id: approve-spec

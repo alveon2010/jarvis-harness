@@ -8,6 +8,7 @@ import type { ProjectGraphExtractor } from "../core/capabilities/contracts.ts";
 import type { KnowledgeConfig } from "../core/config/schema.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import { ANSWERS, givenFor, SUGGESTIONS } from "../interaction/answers.ts";
+import { requirementCorrectionsOf } from "../interaction/corrections.ts";
 import { notesOf, notesText } from "../interaction/notes.ts";
 import {
   currentSymbols,
@@ -163,6 +164,7 @@ export function buildBaseMessages(input: BuildInput): Message[] {
   ].join("\n");
   const clarifications = describeClarifications(ctx);
   const decided = describeAcceptances(ctx);
+  const corrected = describeRequirementCorrections(ctx);
   const review = humanReviewOf(ctx, def);
   const sentBack = redoNotesFor(ctx.runtime, run.id, ctx.step.id, ctx.iteration);
   const l2 = [
@@ -172,6 +174,7 @@ export function buildBaseMessages(input: BuildInput): Message[] {
     loopReasons ? `# Why this step runs again\n${loopReasons}` : "",
     review ? review.instructions : "",
     clarifications ? `# Clarifications decided with a human (binding)\n${clarifications}` : "",
+    corrected ? `# Requirements corrected by a human in review (binding)\n${corrected}` : "",
     decided ? `# Decided by a human when accepting documents (binding)\n${decided}` : "",
     ((n) => (n.length > 0 ? `# Notes from a person during the run (binding)\n${notesText(n)}` : ""))(
       notesOf(ctx.runtime, ctx.run.id),
@@ -520,6 +523,20 @@ function describeClarifications(ctx: StepContext): string | undefined {
     }
   }
   return lines.join("\n");
+}
+
+/**
+ * Requirement corrections from a review (ADR-0019 §5): binding for every later step. Those from a
+ * clarification are already in its block above, with the rule they came with.
+ */
+function describeRequirementCorrections(ctx: StepContext): string | undefined {
+  const lines = requirementCorrectionsOf(ctx.runtime, ctx.run.id)
+    .filter((c) => c.doc.from !== "clarification")
+    .flatMap((c) => [
+      `- by ${c.doc.by}${c.doc.basedOn ? `, against requirements ${c.doc.basedOn}` : ""}:`,
+      ...c.doc.corrections.map((x) => `  ${clip(String(x), 1000).replace(/\n+/g, " ")}`),
+    ]);
+  return lines.length > 0 ? lines.join("\n") : undefined;
 }
 
 /**

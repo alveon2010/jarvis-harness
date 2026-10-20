@@ -4,6 +4,7 @@ import type { Run } from "../core/domain/run.ts";
 import { resolveModel } from "../models/router.ts";
 import { generateStructured } from "../models/structured.ts";
 import type { Message } from "../models/types.ts";
+import { recordRequirementCorrection } from "./corrections.ts";
 import type { Interaction, InteractionMessage } from "./store.ts";
 
 /**
@@ -174,6 +175,17 @@ export function resolveClarification(
     iteration: thread.iteration,
   });
   const ref = `${artifact.artifactId}@${artifact.version}`;
+  // the requirements it changes: an artifact of their own, the requirements step's input (ADR-0019 §4)
+  recordRequirementCorrection(rt, run, {
+    from: "clarification",
+    key: thread.id,
+    source: ref,
+    corrections: resolution.requirementCorrections,
+    rule: resolution.rule,
+    by: actorId,
+    stepId: thread.stepId,
+    iteration: thread.iteration,
+  });
   const closed = rt.interactions.close(thread.id, "resolved", actorId, ref);
   rt.runs.setWaitingFor(run.id, undefined);
   rt.events.emit({

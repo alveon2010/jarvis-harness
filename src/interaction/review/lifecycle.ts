@@ -1,5 +1,6 @@
 import type { Runtime } from "../../app/runtime.ts";
 import type { Run } from "../../core/domain/run.ts";
+import { recordRequirementCorrection } from "../corrections.ts";
 import type { Interaction } from "../store.ts";
 
 /**
@@ -99,6 +100,19 @@ export function afterAnalysis(
   }
   save(runtime, session, comments);
   runtime.interactions.setState(session.id, "acknowledged");
+  // the reviewer's words on a business rule: a requirement correction, for the requirements step
+  const corrected = Object.values(comments).filter((c) => c.class === "REQUIREMENT_CORRECTION");
+  recordRequirementCorrection(runtime, run, {
+    from: "review",
+    key: session.id,
+    ...(session.contentRef ? { source: session.contentRef } : {}),
+    corrections: corrected.map(
+      (c) => `${c.id} ${c.file}:${c.line} — ${c.text}${c.action ? ` (${c.action})` : ""}`,
+    ),
+    by: session.openedBy,
+    stepId: "review-analysis",
+    iteration: run.currentIteration,
+  });
   runtime.events.emit({
     kind: "review.classified",
     runId: run.id,

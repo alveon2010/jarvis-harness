@@ -98,6 +98,18 @@ interaction_messages(id, interaction_id, seq, actor, role human|jarvis, text, cr
 надо, `requirement-correction` (новая версия `requirements` с provenance `human`), `candidate`
 (ADR-0020 §6). После этого контекст треда освобождается — в последующие шаги попадают только артефакты.
 
+Как сделано `requirement-correction` (`src/interaction/corrections.ts`). «Новая версия `requirements`»
+понята просто: Jarvis не переписывает документ агента сам — правка человека становится отдельным
+артефактом типа `requirement-correction` (provenance `human`, `basedOn` — последняя версия `requirements`,
+`sourceRefs` — clarification или review-package), а новую версию `requirements` пишет шаг `requirements`,
+когда он идёт снова. Артефакт появляется в двух местах: при принятии уточнения, если в резолюции есть
+`requirementCorrections`, и после `review-analysis` — из замечаний класса `REQUIREMENT_CORRECTION` (слова
+ревьюера с `R-id` и местом в коде). На approval-гейте такого артефакта нет: гейта требований в `sdd` нет,
+а комментарий к spec по тексту не отличить от правки требований. Вход шагов: `requirement-correction` —
+во `inputs` шагов `requirements` и `spec` встроенных workflow (у specification — в `contextInputs`);
+всем остальным агентам правки из review показываются в L2 как обязательные (правки из уточнения там уже
+есть — в блоке уточнений).
+
 Ограничения: `human.clarification.maxTurns` (по умолчанию 8); исчерпание → тред переходит в
 `rejected`, Run остаётся в `WAITING_HUMAN` с явным требованием решения.
 
