@@ -112,7 +112,7 @@ import { git } from "../tools/local/exec.ts";
 import { type AskView, askContent, askOfRun, recentAsks } from "./ask.ts";
 import { SCRIPT, STYLE } from "./assets.ts";
 import { type DiffFile, type Html, html, parseDiff } from "./html.ts";
-import { inLang, LANG_COOKIE, LANGS, type Lang, lang, langOf, t, th } from "./i18n.ts";
+import { inLang, LANG_COOKIE, LANGS, type Lang, lang, langOf, plural, t, th } from "./i18n.ts";
 import { KIND_NAME, kindWhy } from "./kinds.ts";
 import {
   ARCHITECTURE,
@@ -804,30 +804,30 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
     const count = r.url.searchParams.get("count") ?? "";
     const file = r.url.searchParams.get("file") ?? "";
     const notices: Record<string, Html> = {
-      started: html`<div class="banner ok">Research started — it shows up under Runs too; the bell tells you when its candidate is ready</div>`,
-      queued: html`<div class="banner ok">${count || "1"} research${count && count !== "1" ? "es" : ""} queued — they run one after another</div>`,
-      unqueued: html`<div class="banner ok">Taken out of the queue</div>`,
-      resumed: html`<div class="banner ok">Resumed — it goes on in the background from where it stopped</div>`,
-      "term-added": html`<div class="banner ok">Added to the glossary as a draft — the next run's searches widen with it</div>`,
-      "no-file": html`<div class="banner bad">Not a knowledge file of this repository</div>`,
-      "no-path": html`<div class="banner bad">Not a folder of a module here — pick one in the tree or from the path's suggestions</div>`,
-      "no-parts": html`<div class="banner bad">Pick at least one part</div>`,
-      "check-all": html`<div class="banner bad">Tick every statement under «Check these first» — or send it back with a note</div>`,
-      taken: html`<div class="banner bad">The target was written by a person: replace it, or write under another name</div>`,
-      accepted: html`<div class="banner ok">Written to <code>${file}</code> — not committed yet</div>`,
-      rejected: html`<div class="banner ok">Discarded — nothing written</div>`,
-      again: html`<div class="banner ok">Discarded, and researching again with your note</div>`,
-      decided: html`<div class="banner bad">This candidate was decided meanwhile (in a terminal or another window)</div>`,
-      committed: html`<div class="banner ok">Committed: ${file}</div>`,
-      "nothing-to-commit": html`<div class="banner bad">Nothing to commit under .jarvis/</div>`,
-      onboarded: html`<div class="banner ok">Onboarded ${file}: the map and the service's documents are written — not committed yet</div>`,
-      "onboard-failed": html`<div class="banner bad">jarvis onboard failed for ${file} — see <code>jarvis logs --event ui.onboard</code></div>`,
-      "commit-failed": html`<div class="banner bad">git commit failed — see <code>jarvis logs --event ui.commit</code></div>`,
-      opened: html`<div class="banner ok">↗ opened in ${r.url.searchParams.get("editor") ?? "your editor"}</div>`,
-      "no-editor": html`<div class="banner bad">No editor found — set JARVIS_EDITOR (code, idea, webstorm…) where you start <code>jarvis ui</code></div>`,
+      started: html`<div class="banner ok">${t("Research started — it shows up under Runs too; the bell tells you when its candidate is ready")}</div>`,
+      queued: html`<div class="banner ok">${t("{n} queued — they run one after another", { n: plural(Number(count) || 1, "research") })}</div>`,
+      unqueued: html`<div class="banner ok">${t("Taken out of the queue")}</div>`,
+      resumed: html`<div class="banner ok">${t("Resumed — it goes on in the background from where it stopped")}</div>`,
+      "term-added": html`<div class="banner ok">${t("Added to the glossary as a draft — the next run's searches widen with it")}</div>`,
+      "no-file": html`<div class="banner bad">${t("Not a knowledge file of this repository")}</div>`,
+      "no-path": html`<div class="banner bad">${t("Not a folder of a module here — pick one in the tree or from the path's suggestions")}</div>`,
+      "no-parts": html`<div class="banner bad">${t("Pick at least one part")}</div>`,
+      "check-all": html`<div class="banner bad">${t("Tick every statement under «Check these first» — or send it back with a note")}</div>`,
+      taken: html`<div class="banner bad">${t("The target was written by a person: replace it, or write under another name")}</div>`,
+      accepted: html`<div class="banner ok">${th("Written to {file} — not committed yet", { file: html`<code>${file}</code>` })}</div>`,
+      rejected: html`<div class="banner ok">${t("Discarded — nothing written")}</div>`,
+      again: html`<div class="banner ok">${t("Discarded, and researching again with your note")}</div>`,
+      decided: html`<div class="banner bad">${t("This candidate was decided meanwhile (in a terminal or another window)")}</div>`,
+      committed: html`<div class="banner ok">${t("Committed: {file}", { file })}</div>`,
+      "nothing-to-commit": html`<div class="banner bad">${t("Nothing to commit under .jarvis/")}</div>`,
+      onboarded: html`<div class="banner ok">${t("Onboarded {name}: the map and the service's documents are written — not committed yet", { name: file })}</div>`,
+      "onboard-failed": html`<div class="banner bad">${th("jarvis onboard failed for {name} — see {cmd}", { name: file, cmd: html`<code>jarvis logs --event ui.onboard</code>` })}</div>`,
+      "commit-failed": html`<div class="banner bad">${th("git commit failed — see {cmd}", { cmd: html`<code>jarvis logs --event ui.commit</code>` })}</div>`,
+      opened: html`<div class="banner ok">↗ ${t("opened in {editor}", { editor: r.url.searchParams.get("editor") ?? t("your editor") })}</div>`,
+      "no-editor": html`<div class="banner bad">${th("No editor found — set JARVIS_EDITOR (code, idea, webstorm…) where you start {cmd}", { cmd: html`<code>jarvis ui</code>` })}</div>`,
       "candidate-added": html`<div class="banner ok">${th("Proposed {name} — it waits with the other candidates: {cmd}", { name: html`<code>${file}</code>`, cmd: html`<code>jarvis candidates promote ${file}</code>` })}</div>`,
       "candidate-invalid": html`<div class="banner bad">${t("Not proposed: {why}", { why: file || t("pick a kind") })}</div>`,
-      actor: html`<div class="banner bad">Cannot determine who decides: set JARVIS_ACTOR, actor.id or git config user.email (ADR-0006)</div>`,
+      actor: html`<div class="banner bad">${t("Cannot determine who decides: set JARVIS_ACTOR, actor.id or git config user.email (ADR-0006)")}</div>`,
     };
     return n ? notices[n] : undefined;
   };

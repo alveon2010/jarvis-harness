@@ -1361,6 +1361,125 @@ export const RU: Readonly<Record<string, string>> = {
     "Контракт остаётся как договорились, попросивший сабтаск продолжает по нему",
   "No such contract change request, or it is decided already":
     "Такой просьбы о смене контракта нет, или по ней уже решили",
+  // ---- the run's feed
+  "⇉ {n} tools in parallel": "⇉ {n} инстр. параллельно",
+  "{n} tools in a row": "{n} инстр. подряд",
+  "model call {n}": "вызов модели {n}",
+  running: "идёт",
+  "run created": "прогон создан",
+  "answers prepared for {questions}: {answers} from the sources, {decisions} your call":
+    "подготовлены ответы на {questions}: {answers} из источников, {decisions} решать вам",
+  "note from {who} for {step}": "заметка от {who} для {step}",
+  "note for {step}": "заметка для {step}",
+  "the run": "прогона",
+  "{agent} got the note": "{agent} получил заметку",
+  "the agent": "агент",
+  "{step} stopped: {calls} without an edit": "{step} остановлен: {calls} без единой правки",
+  "{step}: {calls} without an edit — told to start editing":
+    "{step}: {calls} без правок — велено начать править",
+  "many model calls": "много вызовов модели",
+  "the step": "шаг",
+  "no answers prepared for the open questions: {why}": "ответы на открытые вопросы не подготовлены: {why}",
+  "the model failed": "модель не ответила",
+  "{step} skipped: {why}": "{step} пропущен: {why}",
+  "nothing to do": "делать нечего",
+  "{step} done": "{step} готов",
+  "{step} error: {why}": "{step}: ошибка — {why}",
+  "round {n}": "круг {n}",
+  loop: "цикл",
+  completed: "завершён",
+  "waiting budget": "ждёт бюджет",
+  "waiting human": "ждёт человека",
+  suspended: "приостановлен",
+  cancelled: "отменён",
+  created: "создан",
+  "one more round of {step}": "ещё круг {step}",
+  "run {step} again": "{step} ещё раз",
+  "a terminal waits at the loop card": "терминал ждёт на карточке цикла",
+  "a terminal waits at the decision card": "терминал ждёт на карточке решения",
+  "your edit → checkpoint, {files}": "ваша правка → checkpoint, {files}",
+  "{doc} edited by a person{who} in {file}": "{doc} поправлен человеком{who} в {file}",
+  document: "документ",
+  "its file": "своём файле",
+  "edit of {file} not taken: {why}": "правка {file} не принята: {why}",
+  "a file": "файла",
+  "removed scratch files: {files}": "удалены черновые файлы: {files}",
+  "interrupted (Ctrl-C)": "прерван (Ctrl-C)",
+  "pause asked": "попросили паузу",
+  applied: "применён",
+  // ---- notices in the run's feed (src/app/activity.ts noticeOf)
+  "after {time}": "через {time}",
+  model: "модель",
+  "in {time}": "через {time}",
+  "retry {n}": "повтор {n}",
+  "the summary came back empty: the record of the calls and the sources were kept instead":
+    "сводка пришла пустой: вместо неё оставлены запись вызовов и источники",
+  "the summary was cut off: the record of the calls was added":
+    "сводка обрезана: к ней добавлена запись вызовов",
+  "conversation reset": "разговор начат заново",
+  "conversation compacted": "разговор сжат",
+  "1 block into a summary": "1 блок в сводку",
+  "{n} blocks into a summary": "блоков в сводку: {n}",
+  "compaction failed: {why} — older results were trimmed harder instead":
+    "сжатие не удалось: {why} — вместо этого старые результаты обрезаны сильнее",
+  "the summarizer": "сводка",
+  "the quota window of pool {pool} is full": "окно квоты пула {pool} заполнено",
+  "the quota window is full": "окно квоты заполнено",
+  "calls go to {model} until it frees": "вызовы идут в {model}, пока оно не освободится",
+  "the next model": "следующую модель",
+  "quota used up": "квота исчерпана",
+  "the run waits": "прогон ждёт",
+  "gave up after 1 attempt": "сдался после 1 попытки",
+  "gave up after {n} attempts": "сдался после попыток: {n}",
+  "untrusted content from the internet: {tool} — from now on effects wait for a person's approval (ADR-0016 §4)":
+    "недоверенное содержимое из интернета: {tool} — дальше эффекты ждут одобрения человека (ADR-0016 §4)",
+  "a tool": "инструмент",
+  "an internet tool": "инструмент интернета",
+  "effect {capability} held: the run read untrusted content ({from}) and no person has approved anything since (ADR-0016 §4)":
+    "эффект {capability} задержан: прогон прочитал недоверенное содержимое ({from}), а человек с тех пор ничего не одобрял (ADR-0016 §4)",
+  // ---- the page's script (src/ui/assets.ts CLIENT_STRINGS)
+  "Fold the rest": "Свернуть остальное",
+  "reconnecting…": "переподключаюсь…",
+  Copied: "Скопировано",
+  "Send back with {n} comment": "Вернуть с {n} комментарием",
+  "Send back with {n} comments": "Вернуть с комментариями: {n}",
+  "Switch to the light theme": "Светлая тема",
+  "Switch to the dark theme": "Тёмная тема",
+  "Notifications on: a run that waits for you says so — click to turn off":
+    "Уведомления включены: прогон, который ждёт вас, сообщит об этом — нажмите, чтобы выключить",
+  "Notify me when a run waits for me": "Сообщать, когда прогон ждёт меня",
+  "Notifications are blocked for this page in the browser settings":
+    "Уведомления для этой страницы запрещены в настройках браузера",
+  "This browser has no system notifications": "В этом браузере нет системных уведомлений",
+  run: "прогон",
+  "Could not reach jarvis ui": "Не удалось связаться с jarvis ui",
+  // ---- Knowledge notices
+  "Research started — it shows up under Runs too; the bell tells you when its candidate is ready":
+    "Исследование запущено — оно видно и в «Прогонах»; колокольчик скажет, когда кандидат будет готов",
+  "Taken out of the queue": "Убрано из очереди",
+  "Added to the glossary as a draft — the next run's searches widen with it":
+    "Добавлено в глоссарий черновиком — поиск следующего прогона расширится с ним",
+  "Not a knowledge file of this repository": "Это не файл знаний этого репозитория",
+  "Not a folder of a module here — pick one in the tree or from the path's suggestions":
+    "Здесь нет папки модуля — выберите её в дереве или из подсказок пути",
+  "Pick at least one part": "Выберите хотя бы одну часть",
+  "Tick every statement under «Check these first» — or send it back with a note":
+    "Отметьте каждое утверждение в «Сначала проверьте» — или верните с заметкой",
+  "The target was written by a person: replace it, or write under another name":
+    "Этот файл написал человек: замените его или запишите под другим именем",
+  "Discarded — nothing written": "Отброшено — ничего не записано",
+  "Discarded, and researching again with your note": "Отброшено, исследую заново с вашей заметкой",
+  "This candidate was decided meanwhile (in a terminal or another window)":
+    "По этому кандидату уже решили (в терминале или другом окне)",
+  "Nothing to commit under .jarvis/": "В .jarvis/ нечего коммитить",
+  "{n} queued — they run one after another": "в очереди {n} — идут одно за другим",
+  "Written to {file} — not committed yet": "Записано в {file} — ещё не закоммичено",
+  "Committed: {file}": "Закоммичено: {file}",
+  "Onboarded {name}: the map and the service's documents are written — not committed yet":
+    "Онбординг {name}: карта и документы сервиса записаны — ещё не закоммичено",
+  "jarvis onboard failed for {name} — see {cmd}": "jarvis onboard для {name} не удался — см. {cmd}",
+  "git commit failed — see {cmd}": "git commit не удался — см. {cmd}",
+  "opened in {editor}": "открыто в {editor}",
 };
 
 /**
@@ -1369,6 +1488,7 @@ export const RU: Readonly<Record<string, string>> = {
  */
 export const RU_PLURALS: Readonly<Record<string, readonly [string, string, string]>> = {
   run: ["прогон", "прогона", "прогонов"],
+  research: ["исследование", "исследования", "исследований"],
   call: ["вызов", "вызова", "вызовов"],
   "model call": ["вызов модели", "вызова модели", "вызовов модели"],
   "tool call": ["вызов инструмента", "вызова инструмента", "вызовов инструментов"],

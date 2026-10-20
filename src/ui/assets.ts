@@ -823,9 +823,40 @@ p.sv-pair{margin:0;font-size:14px}
 `;
 
 /** Live updates (SSE), copy buttons, line comments on the diff. No framework, no build. */
+/**
+ * The strings the page's script says, given to it in the page's language (src/ui/pages.ts puts them in a
+ * JSON block the script reads — not code, so the page's script policy is untouched).
+ */
+export const CLIENT_STRINGS = [
+  "Fold the rest",
+  "Show every line",
+  "reconnecting…",
+  "Copied",
+  "Send back",
+  "Send back with {n} comment",
+  "Send back with {n} comments",
+  "Switch to the light theme",
+  "Switch to the dark theme",
+  "Notifications on: a run that waits for you says so — click to turn off",
+  "Notify me when a run waits for me",
+  "Notifications are blocked for this page in the browser settings",
+  "This browser has no system notifications",
+  "run",
+  "Could not reach jarvis ui",
+] as const;
+// t("Fold the rest") t("Show every line") t("reconnecting…") t("Copied") t("Send back") t("Send back with {n} comment") t("Send back with {n} comments") t("Switch to the light theme") t("Switch to the dark theme") t("Notifications on: a run that waits for you says so — click to turn off") t("Notify me when a run waits for me") t("Notifications are blocked for this page in the browser settings") t("This browser has no system notifications") t("run") t("Could not reach jarvis ui")
+
 export const SCRIPT = `
 (() => {
   const body = document.body;
+  const dict = (() => {
+    try {
+      return JSON.parse(document.getElementById('jarvis-strings')?.textContent || '{}');
+    } catch {
+      return {};
+    }
+  })();
+  const T = (key, vars) => (dict[key] || key).replace(/\\{(\\w+)\\}/g, (all, name) => (vars && name in vars ? String(vars[name]) : all));
   const status = document.querySelector('.live');
   const say = (state, text) => {
     if (!status) return;
@@ -1038,7 +1069,7 @@ export const SCRIPT = `
     const folds = [...b.closest('.tf-log').querySelectorAll('details.fold')];
     const open = folds.some((d) => !d.open);
     for (const d of folds) d.open = open;
-    b.textContent = open ? 'Fold the rest' : 'Show every line';
+    b.textContent = open ? T('Fold the rest') : T('Show every line');
   });
 
   // N anywhere but in a field: New task, its box in focus
@@ -1158,7 +1189,7 @@ export const SCRIPT = `
     const runId = body.dataset.run;
     const source = new EventSource('/live' + (runId ? '?run=' + encodeURIComponent(runId) : ''));
     source.onopen = () => say('live', 'live');
-    source.onerror = () => say('lost', 'reconnecting…');
+    source.onerror = () => say('lost', T('reconnecting…'));
     let modelsSoon;
     source.addEventListener('journal', (e) => {
       let data = {};
@@ -1184,7 +1215,7 @@ export const SCRIPT = `
       try {
         await navigator.clipboard.writeText(copy.dataset.copy);
         const was = copy.textContent;
-        copy.textContent = 'Copied';
+        copy.textContent = T('Copied');
         setTimeout(() => { copy.textContent = was; }, 1500);
       } catch {
         window.prompt('Copy:', copy.dataset.copy);
@@ -1230,7 +1261,7 @@ export const SCRIPT = `
   function count() {
     const n = comments().length;
     const btn = document.querySelector('[data-send-back]');
-    if (btn) btn.textContent = n > 0 ? 'Send back with ' + n + ' comment' + (n === 1 ? '' : 's') : 'Send back';
+    if (btn) btn.textContent = n > 0 ? T(n === 1 ? 'Send back with {n} comment' : 'Send back with {n} comments', { n }) : T('Send back');
   }
 
   // the theme switch: the system's theme by default; a click flips light ↔ dark and remembers the
@@ -1241,8 +1272,9 @@ export const SCRIPT = `
   const labelTheme = () => {
     if (!themeButton) return;
     const to = effective() === 'dark' ? 'light' : 'dark';
-    themeButton.setAttribute('aria-label', 'Switch to the ' + to + ' theme');
-    themeButton.title = 'Switch to the ' + to + ' theme';
+    const switchTo = T(to === 'light' ? 'Switch to the light theme' : 'Switch to the dark theme');
+    themeButton.setAttribute('aria-label', switchTo);
+    themeButton.title = switchTo;
   };
   if (themeButton) {
     labelTheme();
@@ -1277,10 +1309,10 @@ export const SCRIPT = `
     bell.dataset.state = state;
     bell.setAttribute('aria-pressed', String(state === 'on'));
     const title = {
-      on: 'Notifications on: a run that waits for you says so — click to turn off',
-      off: 'Notify me when a run waits for me',
-      blocked: 'Notifications are blocked for this page in the browser settings',
-      unsupported: 'This browser has no system notifications',
+      on: T('Notifications on: a run that waits for you says so — click to turn off'),
+      off: T('Notify me when a run waits for me'),
+      blocked: T('Notifications are blocked for this page in the browser settings'),
+      unsupported: T('This browser has no system notifications'),
     }[state];
     bell.title = title;
     bell.setAttribute('aria-label', title);
@@ -1307,7 +1339,7 @@ export const SCRIPT = `
       // what waits when the page opens is on the page; a terminal at the card notifies by itself
       if (baseline || w.terminal || !notifyOn() || document.hasFocus()) continue;
       try {
-        const n = new Notification('Jarvis: ' + w.what, { body: w.task + '\\n' + w.workflow + ' · run ' + w.id, tag: 'jarvis-' + key });
+        const n = new Notification('Jarvis: ' + w.what, { body: w.task + '\\n' + w.workflow + ' · ' + T('run') + ' ' + w.id, tag: 'jarvis-' + key });
         n.onclick = () => { window.focus(); location.href = w.href || '/runs/' + w.id; n.close(); };
       } catch {
         /* a browser that only notifies from a service worker: the page still shows it */
@@ -1425,7 +1457,7 @@ export const SCRIPT = `
     const ref = e.target.closest('a[href^="/open?"]');
     if (!ref || e.metaKey || e.ctrlKey || e.shiftKey) return;
     e.preventDefault();
-    let text = 'Could not reach jarvis ui';
+    let text = T('Could not reach jarvis ui');
     let ok = false;
     try {
       const res = await fetch(ref.getAttribute('href') + '&js=1', { credentials: 'same-origin' });

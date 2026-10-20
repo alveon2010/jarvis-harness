@@ -23,6 +23,7 @@ import type { CandidateReason } from "../evals/candidates.ts";
 import type { ScheduledEvalOutcome } from "../evals/schedule.ts";
 import type { EgressNotice, ModelEgressNotice } from "../security/policy/egress.ts";
 import { shortRunId } from "../storage/runStore.ts";
+import { CLIENT_STRINGS } from "./assets.ts";
 import { checkLogHtml, checksHtml, checksOf } from "./checks.ts";
 import { type DiffFile, escapeHtml, type Html, html, join, markdownToHtml, type Part, raw } from "./html.ts";
 import { LANG_COOKIE, lang, plural, t, th, units, when } from "./i18n.ts";
@@ -150,6 +151,7 @@ ${chrome.refresh ? html`<noscript><meta http-equiv="refresh" content="${String(c
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
 <link rel="stylesheet" href="/assets/app.css">
 <script src="/assets/app.js" defer></script>
+${clientStrings()}
 </head>
 <body data-page="${chrome.page}"${chrome.runId ? html` data-run="${chrome.runId}"` : ""}${chrome.tick ? html` data-tick="${chrome.tick}"` : ""}>
 <a class="skip-link" href="#main">${t("Skip to content")}</a>
@@ -258,6 +260,15 @@ function statePill(run: Run, extra?: string): Html {
 }
 
 /** A file of the run as a link to the editor (refs.ts). */
+/** The script's strings in the page's language; nothing on an English page. */
+function clientStrings(): Html | string {
+  if (lang() === "en") return "";
+  const dict = Object.fromEntries(CLIENT_STRINGS.map((k) => [k, t(k)]));
+  return raw(
+    `<script type="application/json" id="jarvis-strings">${JSON.stringify(dict).replace(/</g, "\\u003c")}</script>`,
+  );
+}
+
 const fileRef = (path: string, line?: number): Html => raw(fileRefHtml(path, line));
 
 function changeLine(c: Change): Html {

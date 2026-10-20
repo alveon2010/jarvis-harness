@@ -81,6 +81,7 @@ import {
 } from "../security/policy/untrusted.ts";
 import { shortRunId } from "../storage/runStore.ts";
 import type { StoredEvent } from "../telemetry/events.ts";
+import { plural, t, units } from "./i18n.ts";
 
 /**
  * What the pages of `jarvis ui` show, read from the same stores and the same journal as the terminal
@@ -796,11 +797,13 @@ export function feedOf(events: readonly StoredEvent[]): FeedItem[] {
   for (const b of open.values()) {
     const ends = b.sub.map((s) => s.end ?? b.start);
     const span = Math.max(0, Math.max(...ends) - b.start);
-    const head = b.parallel ? `⇉ ${b.size} tools in parallel` : `${b.size} tools in a row`;
+    const head = b.parallel
+      ? t("⇉ {n} tools in parallel", { n: b.size })
+      : t("{n} tools in a row", { n: b.size });
     out[b.at] = {
       ts: (out[b.at] as FeedItem).ts,
       // a call still out: the batch runs, its length is not known yet
-      text: `model call ${b.modelCall} · ${head} · ${b.sub.some((x) => x.end === undefined) ? "running" : quickMs(span)}`,
+      text: `${t("model call {n}", { n: b.modelCall })} · ${head} · ${b.sub.some((x) => x.end === undefined) ? t("running") : units(quickMs(span))}`,
       sub: b.sub.map((s) => ({ text: s.text, ...(s.tone ? { tone: s.tone } : {}) })),
     };
   }
@@ -984,103 +987,139 @@ export function feedItem(e: StoredEvent): FeedItem | undefined {
   const p = (e.payload ?? {}) as Record<string, unknown>;
   const step = str(p.stepId) ?? e.stepId;
   const who = e.actor?.replace(/^(user|service|ci):/, "");
-  const from = (c: unknown) => (c === "ui" ? " from the page" : c === "cli" ? " in the terminal" : "");
+  const from = (c: unknown) =>
+    c === "ui" ? ` ${t("from the page")}` : c === "cli" ? ` ${t("in the terminal")}` : "";
+  const by = who ? ` ${t("by {who}", { who })}` : "";
   const at = (text: string, tone?: FeedItem["tone"]) => ({ ts: e.ts, text, ...(tone ? { tone } : {}) });
   switch (e.kind) {
     case "run.created":
-      return at(`run created${who ? ` by ${who}` : ""}`);
+      return at(`${t("run created")}${by}`);
     case "answers.suggested": {
       const n = (k: string) => (typeof p[k] === "number" ? (p[k] as number) : 0);
       return at(
-        `answers prepared for ${n("questions")} open question${n("questions") === 1 ? "" : "s"}: ${n("answers")} from the sources, ${n("decisions")} your call`,
+        t("answers prepared for {questions}: {answers} from the sources, {decisions} your call", {
+          questions: plural(n("questions"), "open question"),
+          answers: n("answers"),
+          decisions: n("decisions"),
+        }),
         "ok",
       );
     }
     case "human.note":
       return at(
-        `note${str(p.by) ? ` from ${str(p.by)}` : ""} for ${step ?? "the run"}: ${str(p.text)?.slice(0, 160) ?? ""}`,
+        `${str(p.by) ? t("note from {who} for {step}", { who: str(p.by) as string, step: step ?? t("the run") }) : t("note for {step}", { step: step ?? t("the run") })}: ${str(p.text)?.slice(0, 160) ?? ""}`,
       );
     case "human.note.delivered":
-      return at(`${str(p.agent) ?? "the agent"} got the note`, "ok");
+      return at(t("{agent} got the note", { agent: str(p.agent) ?? t("the agent") }), "ok");
     case "agent.idle":
       return p.stopped === true
         ? at(
-            `${step ?? "the step"} stopped: ${typeof p.modelCalls === "number" ? p.modelCalls : "many"} model calls without an edit`,
+            t("{step} stopped: {calls} without an edit", {
+              step: step ?? t("the step"),
+              calls:
+                typeof p.modelCalls === "number" ? plural(p.modelCalls, "model call") : t("many model calls"),
+            }),
             "bad",
           )
         : at(
-            `${step ?? "the step"}: ${typeof p.modelCalls === "number" ? p.modelCalls : "many"} model calls without an edit — told to start editing`,
+            t("{step}: {calls} without an edit — told to start editing", {
+              step: step ?? t("the step"),
+              calls:
+                typeof p.modelCalls === "number" ? plural(p.modelCalls, "model call") : t("many model calls"),
+            }),
             "warn",
           );
     case "answers.failed":
-      return at(`no answers prepared for the open questions: ${str(p.error) ?? "the model failed"}`, "warn");
+      return at(
+        t("no answers prepared for the open questions: {why}", {
+          why: str(p.error) ?? t("the model failed"),
+        }),
+        "warn",
+      );
     case "step.finish": {
       const status = str(p.status) ?? "success";
       const label = `${step ?? "?"}${typeof p.iteration === "number" && p.iteration > 1 ? `#${p.iteration}` : ""}`;
-      if (status === "skipped") return at(`${label} skipped: ${str(p.reason) ?? "nothing to do"}`);
+      if (status === "skipped")
+        return at(t("{step} skipped: {why}", { step: label, why: str(p.reason) ?? t("nothing to do") }));
       const outcome = str(p.outcome);
       if (status !== "success") return at(`${label} ${status}: ${str(p.reason) ?? ""}`.trim(), "bad");
       return outcome && outcome !== "success"
         ? at(`${label} → ${outcome}`, "warn")
-        : at(`${label} done`, "ok");
+        : at(t("{step} done", { step: label }), "ok");
     }
     case "step.error":
-      return at(`${step ?? "?"} error: ${str(p.message) ?? str(p.error) ?? ""}`, "bad");
+      return at(
+        t("{step} error: {why}", { step: step ?? "?", why: str(p.message) ?? str(p.error) ?? "" }),
+        "bad",
+      );
     case "workflow.loop": {
       const edge = /^(.+)->(.+)#(.+)$/.exec(str(p.edge) ?? "");
       const round =
         typeof p.iteration === "number"
-          ? `, round ${p.iteration}${typeof p.max === "number" ? `/${p.max}` : ""}`
+          ? `, ${t("round {n}", { n: `${p.iteration}${typeof p.max === "number" ? `/${p.max}` : ""}` })}`
           : "";
       return at(
-        edge ? `↻ ${edge[1]} → ${edge[2]} ${edge[3]}${round}` : `↻ loop ${str(p.edge) ?? ""}${round}`,
+        edge ? `↻ ${edge[1]} → ${edge[2]} ${edge[3]}${round}` : `↻ ${t("loop")} ${str(p.edge) ?? ""}${round}`,
         "warn",
       );
     }
     case "run.state": {
       const state = str(p.state) ?? "?";
       const why = str(p.reason);
-      if (state === "RUNNING") return at(`running${why ? ` — ${why}` : ""}`);
-      if (state === "COMPLETED") return at("✓ completed", "ok");
-      if (state === "FAILED") return at(`✗ failed${why ? `: ${why}` : ""}`, "bad");
-      return at(`⏸ ${state.toLowerCase().replace("_", " ")}${why ? ` — ${why}` : ""}`, "warn");
+      if (state === "RUNNING") return at(`${t("running")}${why ? ` — ${why}` : ""}`);
+      if (state === "COMPLETED") return at(`✓ ${t("completed")}`, "ok");
+      if (state === "FAILED") return at(`✗ ${t("failed")}${why ? `: ${why}` : ""}`, "bad");
+      // t("waiting budget") t("waiting human") t("suspended") t("cancelled") t("created")
+      return at(`⏸ ${t(state.toLowerCase().replace("_", " "))}${why ? ` — ${why}` : ""}`, "warn");
     }
     case "approval.recorded": {
       const d = str(p.decision) ?? "decision";
-      const verb = d === "approve" ? "✓ accepted" : d === "reject" ? "✗ rejected" : "↻ sent back";
+      const verb =
+        d === "approve"
+          ? `✓ ${t("accepted")}`
+          : d === "reject"
+            ? `✗ ${t("rejected")}`
+            : `↻ ${t("sent back")}`;
       return at(
-        `${verb} ${str(p.type) ?? ""}@${String(p.version ?? "?")}${who ? ` by ${who}` : ""}${from(p.channel)}`,
+        `${verb} ${str(p.type) ?? ""}@${String(p.version ?? "?")}${by}${from(p.channel)}`,
         d === "approve" ? "ok" : d === "reject" ? "bad" : "warn",
       );
     }
     case "loop.rerun":
       return at(
-        `↻ ${p.back === true ? `one more round of ${str(p.step) ?? "the step"}` : `run ${str(p.step) ?? "the step"} again`}${who ? ` — by ${who}` : ""}${from(p.channel)}`,
+        `↻ ${p.back === true ? t("one more round of {step}", { step: str(p.step) ?? t("the step") }) : t("run {step} again", { step: str(p.step) ?? t("the step") })}${who ? ` — ${t("by {who}", { who })}` : ""}${from(p.channel)}`,
         "warn",
       );
     case "card.open":
-      return at(`a terminal waits at the ${str(p.kind) === "loop" ? "loop" : "decision"} card`);
+      return at(
+        str(p.kind) === "loop"
+          ? t("a terminal waits at the loop card")
+          : t("a terminal waits at the decision card"),
+      );
     case "workspace.humanEdit": {
       const files = Array.isArray(p.files) ? p.files.length : 0;
-      return at(`your edit → checkpoint, ${files} file${files === 1 ? "" : "s"}`, "ok");
+      return at(t("your edit → checkpoint, {files}", { files: plural(files, "file") }), "ok");
     }
     case "artifact.humanEdit":
       return at(
-        `✎ ${str(p.type) ?? "document"}@${String(p.version ?? "?")} edited by a person${who ? ` (${who})` : ""} in ${str(p.file) ?? "its file"}`,
+        `✎ ${t("{doc} edited by a person{who} in {file}", { doc: `${str(p.type) ?? t("document")}@${String(p.version ?? "?")}`, who: who ? ` (${who})` : "", file: str(p.file) ?? t("its file") })}`,
         "ok",
       );
     case "artifact.humanEditRejected":
-      return at(`✎ edit of ${str(p.file) ?? "a file"} not taken: ${str(p.reason) ?? "?"}`, "bad");
+      return at(
+        `✎ ${t("edit of {file} not taken: {why}", { file: str(p.file) ?? t("a file"), why: str(p.reason) ?? "?" })}`,
+        "bad",
+      );
     case "workspace.scratchRemoved": {
       const files = Array.isArray(p.files) ? p.files.join(", ") : "";
-      return at(`removed scratch files: ${files}`);
+      return at(t("removed scratch files: {files}", { files }));
     }
     case "run.interrupted":
-      return at("⏸ interrupted (Ctrl-C)", "warn");
+      return at(`⏸ ${t("interrupted (Ctrl-C)")}`, "warn");
     case "run.pause":
-      return at(`⏸ pause asked${who ? ` by ${who}` : ""}${from(p.channel)}`, "warn");
+      return at(`⏸ ${t("pause asked")}${by}${from(p.channel)}`, "warn");
     case "run.applied":
-      return at(`applied${who ? ` by ${who}` : ""}`, "ok");
+      return at(`${t("applied")}${by}`, "ok");
     case "context.compacting": {
       const c = {
         kind: str(p.kind) ?? "compact",
@@ -1098,7 +1137,32 @@ export function feedItem(e: StoredEvent): FeedItem | undefined {
     case "model.error":
     case UNTRUSTED_CONTENT:
     case EFFECT_HELD: {
-      const notice = noticeOf(e);
+      // the notice's sentences, translated by src/app/activity.ts through t:
+      // t("after {time}")
+      // t("model")
+      // t("in {time}")
+      // t("retry {n}")
+      // t("the summary came back empty: the record of the calls and the sources were kept instead")
+      // t("the summary was cut off: the record of the calls was added")
+      // t("conversation reset")
+      // t("conversation compacted")
+      // t("1 block into a summary")
+      // t("{n} blocks into a summary")
+      // t("compaction failed: {why} — older results were trimmed harder instead")
+      // t("the summarizer")
+      // t("the quota window of pool {pool} is full")
+      // t("the quota window is full")
+      // t("calls go to {model} until it frees")
+      // t("the next model")
+      // t("quota used up")
+      // t("the run waits")
+      // t("gave up after 1 attempt")
+      // t("gave up after {n} attempts")
+      // t("untrusted content from the internet: {tool} — from now on effects wait for a person's approval (ADR-0016 §4)")
+      // t("a tool")
+      // t("an internet tool")
+      // t("effect {capability} held: the run read untrusted content ({from}) and no person has approved anything since (ADR-0016 §4)")
+      const notice = noticeOf(e, t);
       // the notice carries a wall clock of its own: the feed has one
       return notice
         ? at(

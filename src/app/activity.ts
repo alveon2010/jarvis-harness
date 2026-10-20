@@ -620,53 +620,60 @@ function traceOf(message: string): string | undefined {
  * the provider's trace id, and the final failure. Pilot: the corporate gateway cut requests with HTTP
  * 500 after exactly five minutes, and nothing on screen said so.
  */
-export function noticeOf(event: StoredEvent): string | undefined {
+/** A translator of a notice's sentences: the UI passes its `t` (src/ui/i18n.ts); the terminal keeps English. */
+export type NoticeText = (key: string, vars?: Readonly<Record<string, string | number>>) => string;
+const english: NoticeText = (key, vars) =>
+  vars ? key.replace(/\{(\w+)\}/g, (all, name: string) => (name in vars ? String(vars[name]) : all)) : key;
+
+export function noticeOf(event: StoredEvent, tr: NoticeText = english): string | undefined {
   const p = (event.payload ?? {}) as Record<string, unknown>;
   const message = str(p.message) ?? "";
   const reason = reasonOf(message);
-  const took = num(p.attemptMs) > 0 ? ` after ${clock(num(p.attemptMs))}` : "";
+  const took = num(p.attemptMs) > 0 ? ` ${tr("after {time}", { time: clock(num(p.attemptMs)) })}` : "";
   const trace = traceOf(message);
   const traceText = trace ? `; traceId ${trace}` : "";
-  const model = str(p.modelId) ?? "model";
+  const model = str(p.modelId) ?? tr("model");
   if (event.kind === "model.retry") {
     const of = num(p.maxRetries) > 0 ? `/${num(p.maxRetries)}` : "";
-    const delay = num(p.delayMs) > 0 ? ` in ${(num(p.delayMs) / 1000).toFixed(1)}s` : "";
-    return `⚠ ${wallClock(event.ts)} ${model}: ${reason}${took} — retry ${num(p.attempt)}${of}${delay}${traceText}`;
+    const delay =
+      num(p.delayMs) > 0 ? ` ${tr("in {time}", { time: `${(num(p.delayMs) / 1000).toFixed(1)}s` })}` : "";
+    return `⚠ ${wallClock(event.ts)} ${model}: ${reason}${took} — ${tr("retry {n}", { n: `${num(p.attempt)}${of}` })}${delay}${traceText}`;
   }
   if (event.kind === "context.compacted" || event.kind === "context.reset") {
     const fallback = str(p.fallback);
     const how =
       fallback === "empty"
-        ? " — the summary came back empty: the record of the calls and the sources were kept instead"
+        ? ` — ${tr("the summary came back empty: the record of the calls and the sources were kept instead")}`
         : fallback === "truncated"
-          ? " — the summary was cut off: the record of the calls was added"
+          ? ` — ${tr("the summary was cut off: the record of the calls was added")}`
           : "";
-    return `⇣ ${wallClock(event.ts)} ${event.kind === "context.reset" ? "conversation reset" : "conversation compacted"}: ${kilo(num(p.before))} → ${kilo(num(p.after))} tok, ${num(p.blocks)} block${num(p.blocks) === 1 ? "" : "s"} into a summary${how}`;
+    const blocks = num(p.blocks);
+    return `⇣ ${wallClock(event.ts)} ${event.kind === "context.reset" ? tr("conversation reset") : tr("conversation compacted")}: ${kilo(num(p.before))} → ${kilo(num(p.after))} tok, ${blocks === 1 ? tr("1 block into a summary") : tr("{n} blocks into a summary", { n: blocks })}${how}`;
   }
   if (event.kind === "context.compaction_failed")
-    return `⚠ ${wallClock(event.ts)} compaction failed: ${str(p.reason) ?? str(p.message) ?? "the summarizer"} — older results were trimmed harder instead`;
+    return `⚠ ${wallClock(event.ts)} ${tr("compaction failed: {why} — older results were trimmed harder instead", { why: str(p.reason) ?? str(p.message) ?? tr("the summarizer") })}`;
   if (event.kind === "model.failover") {
     const pool = /pool "([^"]+)"/.exec(str(p.reason) ?? "")?.[1] ?? str(p.pool);
-    return `↪ ${wallClock(event.ts)} ${str(p.from) ?? "model"} → ${str(p.to) ?? "?"}: the quota window${pool ? ` of pool ${pool}` : ""} is full — calls go to ${str(p.to) ?? "the next model"} until it frees`;
+    return `↪ ${wallClock(event.ts)} ${str(p.from) ?? tr("model")} → ${str(p.to) ?? "?"}: ${pool ? tr("the quota window of pool {pool} is full", { pool }) : tr("the quota window is full")} — ${tr("calls go to {model} until it frees", { model: str(p.to) ?? tr("the next model") })}`;
   }
   if (event.kind === "model.error" && str(p.kind) === "quota_exhausted") {
     // not a failure: the run parks and goes on when the window frees
     const pool = /pool "([^"]+)"/.exec(message)?.[1];
-    return `⏸ ${wallClock(event.ts)} ${model}: ${pool ? `the quota window of pool ${pool} is full` : "quota used up"} — the run waits`;
+    return `⏸ ${wallClock(event.ts)} ${model}: ${pool ? tr("the quota window of pool {pool} is full", { pool }) : tr("quota used up")} — ${tr("the run waits")}`;
   }
   if (event.kind === "model.error") {
     const attempts = num(p.retries) + 1;
-    return `✗ ${wallClock(event.ts)} ${model}: ${reason}${took} — gave up after ${attempts} attempt${attempts === 1 ? "" : "s"}${traceText}`;
+    return `✗ ${wallClock(event.ts)} ${model}: ${reason}${took} — ${attempts === 1 ? tr("gave up after 1 attempt") : tr("gave up after {n} attempts", { n: attempts })}${traceText}`;
   }
   // ADR-0016 §4: what came in from the internet, and an effect that waits for a person because of it
   if (event.kind === UNTRUSTED_CONTENT) {
-    const server = str(p.server) ? ` (server ${str(p.server)})` : "";
-    const step = event.stepId ? ` in ${event.stepId}` : "";
-    return `⚠ ${wallClock(event.ts)} untrusted content from the internet: ${str(p.capability) ?? "a tool"}${server}${step} — from now on effects wait for a person's approval (ADR-0016 §4)`;
+    const server = str(p.server) ? ` (${tr("server {name}", { name: str(p.server) as string })})` : "";
+    const step = event.stepId ? ` ${tr("in {step}", { step: event.stepId })}` : "";
+    return `⚠ ${wallClock(event.ts)} ${tr("untrusted content from the internet: {tool} — from now on effects wait for a person's approval (ADR-0016 §4)", { tool: `${str(p.capability) ?? tr("a tool")}${server}${step}` })}`;
   }
   if (event.kind === EFFECT_HELD) {
-    const from = `${str(p.source) ?? "an internet tool"}${str(p.sourceStep) ? ` in ${str(p.sourceStep)}` : ""}`;
-    return `⚠ ${wallClock(event.ts)} effect ${str(p.capability) ?? "?"} held: the run read untrusted content (${from}) and no person has approved anything since (ADR-0016 §4)`;
+    const from = `${str(p.source) ?? tr("an internet tool")}${str(p.sourceStep) ? ` ${tr("in {step}", { step: str(p.sourceStep) as string })}` : ""}`;
+    return `⚠ ${wallClock(event.ts)} ${tr("effect {capability} held: the run read untrusted content ({from}) and no person has approved anything since (ADR-0016 §4)", { capability: str(p.capability) ?? "?", from })}`;
   }
   if (event.kind === "run.state") {
     const state = str(p.state);
