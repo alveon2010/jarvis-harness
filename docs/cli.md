@@ -216,7 +216,12 @@ Jarvis как MCP-сервер на stdio (только чтение) для IDE
 
 ## Запуск и жизнь run
 
-### `jarvis work <task> [--workflow <name>] [--base <ref>] [--no-run] [--fresh design]`
+### `jarvis work <task> [--workflow <name>] [--base <ref>] [--no-run] [--fresh design] [--kind <вид>]`
+
+`--kind` — вид задачи: `feature`, `change`, `fix`, `refactor`, `test`, `docs`. По нему подбираются навыки и
+стандарты с `appliesTo.kinds` ([knowledge.md](knowledge.md)). Без флага — вид workflow (`fix` → fix), иначе
+`change`. Вид хранится в прогоне и переходит при продолжении (`spec` → `sdd`) и перезапуске. То же есть у
+`fix`, `research` и `spec`, а в `jarvis ui` — «Вид задачи» в «Новой задаче».
 
 Preflight (все MCP-серверы, до которых могут дотянуться агенты workflow, должны ответить на
 `tools/list`), создание run, рабочая копия по `workspace.mode`: worktree от `--base` (по умолчанию `HEAD`) или

@@ -4,6 +4,7 @@ import { request } from "node:http";
 import { hostname } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { taskKindOf } from "../../src/agents/knowledge.ts";
 import { createEngine } from "../../src/app/engine.ts";
 import { resumableOf } from "../../src/app/resumable.ts";
 import { createRuntime, type Runtime } from "../../src/app/runtime.ts";
@@ -115,6 +116,29 @@ describe("a task whose design changed at the same link", () => {
     });
     expect(rt.runs.get(run.id)?.options).toEqual({ fresh: ["design"] });
     expect(createRun("Order form: phone number mask").options).toBeUndefined();
+  });
+});
+
+describe("the kind of task", () => {
+  it("the box on the page starts the CLI with --kind; the run keeps it and the skills are picked by it", async () => {
+    launcher.start({ task: "ABC-42", workflow: "sdd", repoRoot: sb.project, kind: "refactor" });
+    expect((await calls(1))[0]).toBe(`${sb.project}|off|work ABC-42 --kind refactor`);
+    const engine = createEngine(rt);
+    const run = (workflow: string, kind?: "refactor") =>
+      rt.runs.create({
+        task: "ABC-42",
+        workflow,
+        owner: DEV,
+        workspace: { mode: "cwd", repoRoot: sb.project, path: sb.project, baseRef: "HEAD" },
+        dataClass: "internal",
+        ...(kind ? { options: { kind } } : {}),
+      });
+    const kindOf = (r: ReturnType<typeof run>) =>
+      taskKindOf({ run: r, workflow: engine.workflow(r.workflow) });
+    // the person's kind, else the workflow's own, else change
+    expect(kindOf(run("sdd", "refactor"))).toBe("refactor");
+    expect(kindOf(run("fix"))).toBe("fix");
+    expect(kindOf(run("sdd"))).toBe("change");
   });
 });
 

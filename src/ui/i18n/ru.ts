@@ -489,9 +489,27 @@ export const RU: Readonly<Record<string, string>> = {
   "Read the Figma frames again": "Заново прочитать макеты из Figma",
   "the design changed at the same link; past Jarvis's one-day cache, each frame is a Figma API call":
     "макет поменялся по той же ссылке; в обход дневного кэша Jarvis каждый фрейм — отдельный запрос к Figma API",
-  "Runs in the background, as": "Идёт в фоне, как",
-  "(or the one chosen) would without a terminal; where it needs you, it waits here — decide on the page and it goes on.":
-    "(или выбранное) без терминала; где нужны вы — ждёт здесь: решите на странице, и работа пойдёт дальше.",
+  "Runs in the background, as {cmd} (or the one chosen) would without a terminal; where it needs you, it waits here — decide on the page and it goes on.":
+    "Идёт в фоне, как {cmd} (или выбранное), только без терминала; где нужны вы — ждёт здесь: решите на странице, и работа пойдёт дальше.",
+  // ---- kind of task
+  Feature: "Новая функциональность",
+  Change: "Изменение",
+  "Bug fix": "Исправление бага",
+  Refactoring: "Рефакторинг",
+  Tests: "Тесты",
+  Docs: "Документация",
+  "Kind of task": "Вид задачи",
+  "as the workflow says": "по workflow",
+  "picks the skills and standards written for this kind of work":
+    "по нему подбираются навыки и стандарты для такой работы",
+  "new feature": "новая функциональность",
+  change: "изменение",
+  "bug fix": "исправление бага",
+  refactoring: "рефакторинг",
+  tests: "тесты",
+  docs: "документация",
+  "the kind of task the skills and standards were picked by":
+    "вид задачи, по которому подобраны навыки и стандарты",
   "The task names": "В задаче упомянуты",
   and: "и",
   "linked by": "связанные через",

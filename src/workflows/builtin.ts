@@ -321,6 +321,7 @@ steps:
 export const FIX_WORKFLOW = `
 name: fix
 version: 1
+kind: fix
 description: A bug fix — research, a specification to approve, the change with its test, the project's checks, review (jarvis fix)
 entry: discover
 steps:

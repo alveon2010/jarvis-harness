@@ -1,6 +1,12 @@
 import { Command, InvalidArgumentError } from "commander";
 import { ConfigError } from "../core/config/errors.ts";
-import { type FreshSource, FreshSourceSchema } from "../core/domain/run.ts";
+import {
+  type FreshSource,
+  FreshSourceSchema,
+  TASK_KINDS,
+  type TaskKind,
+  TaskKindSchema,
+} from "../core/domain/run.ts";
 import { errorFields } from "../telemetry/log.ts";
 import { staleBuild, versionText } from "../version.ts";
 import { cliLogger } from "./cliLog.ts";
@@ -90,6 +96,15 @@ function parseFresh(value: string): FreshSource[] {
       `expected ${FreshSourceSchema.options.join(", ")}; got ${bad.join(", ") || "nothing"}`,
     );
   return [...new Set(asked as FreshSource[])];
+}
+
+const KIND_HELP = `the kind of task, for the skills and standards scoped by kind: ${TASK_KINDS.join(", ")} (default: the workflow's, else change)`;
+
+/** `--kind fix`: what kind of work the task is (ADR-0020 §1). */
+function parseKind(value: string): TaskKind {
+  const parsed = TaskKindSchema.safeParse(value.trim());
+  if (!parsed.success) throw new InvalidArgumentError(`expected ${TASK_KINDS.join(", ")}; got ${value}`);
+  return parsed.data;
 }
 
 function silenceSqliteWarning(): void {
@@ -196,16 +211,18 @@ export function buildProgram(options: RunOptions = {}): Command {
     .option("--base <ref>", "base ref for the run's worktree (default: HEAD)")
     .option("--no-run", "only create the run")
     .option("--fresh <sources>", FRESH_HELP, parseFresh)
+    .option("--kind <kind>", KIND_HELP, parseKind)
     .action(
       async (
         task: string,
-        opts: { workflow: string; run: boolean; base?: string; fresh?: FreshSource[] },
+        opts: { workflow: string; run: boolean; base?: string; fresh?: FreshSource[]; kind?: TaskKind },
       ) => {
         await runWork(ctxFor(), task, {
           workflow: opts.workflow,
           noRun: !opts.run,
           ...(opts.base ? { base: opts.base } : {}),
           ...(opts.fresh ? { fresh: opts.fresh } : {}),
+          ...(opts.kind ? { kind: opts.kind } : {}),
         });
       },
     );
@@ -215,11 +232,13 @@ export function buildProgram(options: RunOptions = {}): Command {
     .description("run only the research step for a task (built-in workflow `research`)")
     .option("--base <ref>", "base ref for the run's worktree (default: HEAD)")
     .option("--fresh <sources>", FRESH_HELP, parseFresh)
-    .action(async (task: string, opts: { base?: string; fresh?: FreshSource[] }) => {
+    .option("--kind <kind>", KIND_HELP, parseKind)
+    .action(async (task: string, opts: { base?: string; fresh?: FreshSource[]; kind?: TaskKind }) => {
       await runWork(ctxFor(), task, {
         workflow: "research",
         ...(opts.base ? { base: opts.base } : {}),
         ...(opts.fresh ? { fresh: opts.fresh } : {}),
+        ...(opts.kind ? { kind: opts.kind } : {}),
       });
     });
   program
@@ -229,11 +248,13 @@ export function buildProgram(options: RunOptions = {}): Command {
     )
     .option("--base <ref>", "base ref for the run's worktree (default: HEAD)")
     .option("--fresh <sources>", FRESH_HELP, parseFresh)
-    .action(async (task: string, opts: { base?: string; fresh?: FreshSource[] }) => {
+    .option("--kind <kind>", KIND_HELP, parseKind)
+    .action(async (task: string, opts: { base?: string; fresh?: FreshSource[]; kind?: TaskKind }) => {
       await runWork(ctxFor(), task, {
         workflow: "fix",
         ...(opts.base ? { base: opts.base } : {}),
         ...(opts.fresh ? { fresh: opts.fresh } : {}),
+        ...(opts.kind ? { kind: opts.kind } : {}),
       });
     });
   program
@@ -241,11 +262,13 @@ export function buildProgram(options: RunOptions = {}): Command {
     .description("research, requirements and a specification up to its approval (built-in workflow `spec`)")
     .option("--base <ref>", "base ref for the run's worktree (default: HEAD)")
     .option("--fresh <sources>", FRESH_HELP, parseFresh)
-    .action(async (task: string, opts: { base?: string; fresh?: FreshSource[] }) => {
+    .option("--kind <kind>", KIND_HELP, parseKind)
+    .action(async (task: string, opts: { base?: string; fresh?: FreshSource[]; kind?: TaskKind }) => {
       await runWork(ctxFor(), task, {
         workflow: "spec",
         ...(opts.base ? { base: opts.base } : {}),
         ...(opts.fresh ? { fresh: opts.fresh } : {}),
+        ...(opts.kind ? { kind: opts.kind } : {}),
       });
     });
 

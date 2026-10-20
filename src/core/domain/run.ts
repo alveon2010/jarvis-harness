@@ -119,7 +119,17 @@ export type WaitingFor = z.infer<typeof WaitingForSchema>;
 /** What a task asks of its run beyond its text; kept with the run, so a resume keeps it too. */
 export const FreshSourceSchema = z.enum(["design"]);
 export type FreshSource = z.infer<typeof FreshSourceSchema>;
+/**
+ * What kind of work a task is: it picks the skills and standards scoped by `kinds` (ADR-0020 §1). Set at
+ * the start (`--kind`, «Kind» on New task), else the workflow's own `kind`, else `change`.
+ */
+export const TASK_KINDS = ["feature", "change", "fix", "refactor", "test", "docs"] as const;
+export const TaskKindSchema = z.enum(TASK_KINDS);
+export type TaskKind = z.infer<typeof TaskKindSchema>;
+
 export const RunOptionsSchema = z.strictObject({
+  /** The kind of task, when the person said it; otherwise the workflow's (src/agents/knowledge.ts). */
+  kind: TaskKindSchema.optional(),
   /** Sources read again past Jarvis's cache: "design" — the Figma frames (a frame changed at the same link). */
   fresh: z.array(FreshSourceSchema).optional(),
   /** A subtask of a task across services (ADR-0025 §6): its master run and its key in the split. */

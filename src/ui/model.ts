@@ -30,7 +30,7 @@ import { type TryOut, tryOutOf } from "../app/tryOut.ts";
 import { type Change, changesIn, homePath } from "../cli/checkout.ts";
 import { changedFilesOf, type DocFacts, docFacts, reasonsOf } from "../cli/gate.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
-import { isTerminal, type Run } from "../core/domain/run.ts";
+import { isTerminal, type Run, type TaskKind } from "../core/domain/run.ts";
 import type { WorkflowDefinition } from "../core/domain/workflow.ts";
 import { caseOfRun, casesRootOf } from "../evals/runToCase.ts";
 import {
@@ -664,6 +664,8 @@ export function feedOf(events: readonly StoredEvent[]): FeedItem[] {
 
 export interface RunPage {
   readonly run: Run;
+  /** The kind of task the skills were picked by: the person's, else the workflow's, else change. */
+  readonly kind: TaskKind;
   readonly plan: readonly string[];
   readonly steps: readonly StepRow[];
   readonly tokens: RunTokens;
@@ -1085,6 +1087,7 @@ export async function runPage(
   const feed = feedOf(events);
   return {
     run,
+    kind: run.options?.kind ?? workflow?.kind ?? "change",
     plan,
     steps: order.map(row).filter((r) => forThisRun(runtime, run, workflow, r)),
     ...crossOf(runtime, run),

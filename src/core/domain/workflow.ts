@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TaskKindSchema } from "./run.ts";
 
 /**
  * Workflow definition (ADR-0004 §1): a directed graph of steps with declared transitions.
@@ -65,6 +66,8 @@ export const WorkflowDefinitionSchema = z
     version: z.int().positive().default(1),
     description: z.string().optional(),
     entry: z.string().min(1),
+    /** The kind of task this workflow does when the run does not say (`fix` → fix; run.ts TASK_KINDS). */
+    kind: TaskKindSchema.optional(),
     /** The longer workflow a finished run of this one may go on as (`spec` → `sdd`, src/app/handoff.ts). */
     next: z.string().min(1).optional(),
     steps: z.array(StepDefinitionSchema).min(1),

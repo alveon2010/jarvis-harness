@@ -18,7 +18,7 @@ import type { Approval } from "../../artifacts/store.ts";
 import { resolveActor } from "../../core/actor/resolve.ts";
 import type { Actor } from "../../core/domain/actor.ts";
 import type { ApprovalDecision } from "../../core/domain/artifact.ts";
-import type { FreshSource, Run, WorkspaceRef } from "../../core/domain/run.ts";
+import type { FreshSource, Run, TaskKind, WorkspaceRef } from "../../core/domain/run.ts";
 import { layoutOf, rootRelative, versionedAt } from "../../core/paths.ts";
 import { recordInputs, recordKnowledgeRepoInputs } from "../../evals/inputs.ts";
 import { daemonTick } from "../../orchestration/daemon.ts";
@@ -505,6 +505,8 @@ async function startContinuation(
     workspace,
     dataClass: runtime.loaded.config.dataClass,
     ...(runtime.loaded.config.profile ? { profile: runtime.loaded.config.profile } : {}),
+    // a spec goes on as sdd: the kind the person picked goes with it
+    ...(from.options?.kind ? { options: { kind: from.options.kind } } : {}),
   });
   const carried = handOff(runtime, from, run, startAt);
   runtime.events.emit({
@@ -624,7 +626,10 @@ export async function runRestart(
       workspace,
       dataClass: runtime.loaded.config.dataClass,
       ...(runtime.loaded.config.profile ? { profile: runtime.loaded.config.profile } : {}),
-      ...(from.options?.fresh?.length ? { options: { fresh: [...from.options.fresh] } } : {}),
+      ...((o) => (Object.keys(o).length > 0 ? { options: o } : {}))({
+        ...(from.options?.fresh?.length ? { fresh: [...from.options.fresh] } : {}),
+        ...(from.options?.kind ? { kind: from.options.kind } : {}),
+      }),
     });
     const carried = handOff(runtime, from, run, startAt, (a) => !a.stepId || keepSteps.has(a.stepId));
     if (options.note) noteForStart(runtime, run, startAt, actor, options.note);
@@ -739,7 +744,13 @@ function restOf(engine: LocalWorkflowEngine, from: Run): string | undefined {
 export async function runWork(
   ctx: CliContext,
   task: string,
-  options: { workflow?: string; noRun?: boolean; base?: string; fresh?: readonly FreshSource[] },
+  options: {
+    workflow?: string;
+    noRun?: boolean;
+    base?: string;
+    fresh?: readonly FreshSource[];
+    kind?: TaskKind;
+  },
 ): Promise<void> {
   const loaded = await loadForCli(ctx);
   const runtime = createRuntime(loaded, { env: ctx.env });
@@ -784,7 +795,10 @@ export async function runWork(
       workspace,
       dataClass: loaded.config.dataClass,
       ...(loaded.config.profile ? { profile: loaded.config.profile } : {}),
-      ...(options.fresh?.length ? { options: { fresh: [...options.fresh] } } : {}),
+      ...((o) => (Object.keys(o).length > 0 ? { options: o } : {}))({
+        ...(options.fresh?.length ? { fresh: [...options.fresh] } : {}),
+        ...(options.kind ? { kind: options.kind } : {}),
+      }),
     });
     runtime.events.emit({
       kind: "run.created",

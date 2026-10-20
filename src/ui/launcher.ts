@@ -4,7 +4,7 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, statSync } fr
 import { join } from "node:path";
 import { waitingCard } from "../app/decide.ts";
 import type { Runtime } from "../app/runtime.ts";
-import type { Run } from "../core/domain/run.ts";
+import type { Run, TaskKind } from "../core/domain/run.ts";
 import { moduleOfRun } from "../onboarding/moduleRun.ts";
 
 /**
@@ -78,7 +78,14 @@ export interface Launch {
 
 export interface Launcher {
   /** `freshDesign`: the Figma frames read again past the cache (`--fresh design`). */
-  start(input: { task: string; workflow: Workflow; repoRoot: string; freshDesign?: boolean }): Launch;
+  start(input: {
+    task: string;
+    workflow: Workflow;
+    repoRoot: string;
+    freshDesign?: boolean;
+    /** The kind of task the person picked (`--kind`); without, the workflow's. */
+    kind?: TaskKind;
+  }): Launch;
   /** A finished research/spec goes on as its next workflow: `jarvis continue <run>` in the background. */
   continueRun(from: Run, workflow: Workflow): Launch;
   /** A cancelled or failed run again from a step: `jarvis restart <run> --from <step>` in the background. */
@@ -272,6 +279,7 @@ export function createLauncher(options: LauncherOptions): Launcher {
         input.task,
         ...(input.workflow === "sdd-cross" ? ["--workflow", "sdd-cross"] : []),
         ...(input.freshDesign ? ["--fresh", "design"] : []),
+        ...(input.kind ? ["--kind", input.kind] : []),
       ];
       spawnCli(args, input.repoRoot, log, (code) => {
         launch.exitCode = code ?? 1;

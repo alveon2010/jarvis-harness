@@ -1,7 +1,8 @@
 import { basename } from "node:path";
+import { TASK_KINDS, type TaskKind } from "../core/domain/run.ts";
 import type { CatalogLink, NamedService } from "../knowledge/catalog.ts";
 import { type Html, html } from "./html.ts";
-import { plural, t } from "./i18n.ts";
+import { plural, t, th } from "./i18n.ts";
 import type { Actions, LaunchView } from "./pages.ts";
 
 /**
@@ -199,6 +200,17 @@ function howFarHtml(chosen: StartPlace | undefined, on: HowFar): Html {
   })}</div>`;
 }
 
+/** The kinds of task as the form names them (run.ts TASK_KINDS). */
+const KIND_LABEL: Record<TaskKind, string> = {
+  // t("Feature") t("Change") t("Bug fix") t("Refactoring") t("Tests") t("Docs")
+  feature: "Feature",
+  change: "Change",
+  fix: "Bug fix",
+  refactor: "Refactoring",
+  test: "Tests",
+  docs: "Docs",
+};
+
 /** The form; research first and chosen in every place: find out before changing anything. */
 export function newTaskHtml(start: StartForm, actions: Actions): Html {
   const chosen = start.places.find((p) => p.root === start.current) ?? start.places[0];
@@ -214,9 +226,10 @@ export function newTaskHtml(start: StartForm, actions: Actions): Html {
 <p class="what" data-said aria-live="polite">${whatOf(h, chosen)}</p>
 <div class="startfrom" data-from aria-live="polite"></div>
 <details class="more"><summary>${t("More options")}</summary>
+<label class="field inline">${t("Kind of task")} <select name="kind"><option value="">${t("as the workflow says")}</option>${TASK_KINDS.map((k) => html`<option value="${k}">${t(KIND_LABEL[k])}</option>`)}</select> <span class="meta">— ${t("picks the skills and standards written for this kind of work")}</span></label>
 <label class="check"><input type="checkbox" name="fresh" value="design"> ${t("Read the Figma frames again")} <span class="meta">— ${t("the design changed at the same link; past Jarvis's one-day cache, each frame is a Figma API call")}</span></label>
 </details>
-<p class="hint">${t("Runs in the background, as")} <code>jarvis research "…"</code> ${t("(or the one chosen) would without a terminal; where it needs you, it waits here — decide on the page and it goes on.")}</p>
+<p class="hint">${th("Runs in the background, as {cmd} (or the one chosen) would without a terminal; where it needs you, it waits here — decide on the page and it goes on.", { cmd: html`<code>jarvis research "…"</code>` })}</p>
 </form>
 </section>`;
 }

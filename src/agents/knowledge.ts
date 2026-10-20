@@ -1,13 +1,16 @@
 import { detectStackScopes, effectiveStacks, stacksForPaths } from "../capabilities/detector.ts";
+import type { TaskKind } from "../core/domain/run.ts";
 import { type EngineeringContextPackage, resolvePackage } from "../knowledge/resolver.ts";
 import { rankKnowledge, refreshIndex } from "../knowledge/retrieval/service.ts";
 import { knowledgeRootsOf } from "../knowledge/sources.ts";
 import type { StepContext } from "../orchestration/types.ts";
 
-/** Task kind from the task id/title: ABC-42 says nothing, so "change" unless the run says otherwise. */
-export function taskKindOf(ctx: StepContext): string {
-  const hint = String((ctx.run as { kind?: string }).kind ?? "");
-  return hint || "change";
+/**
+ * The kind of task (ADR-0020 §1): what the person picked at the start, else the workflow's own kind
+ * (`fix`), else `change` — a task id like ABC-42 says nothing about it.
+ */
+export function taskKindOf(ctx: Pick<StepContext, "run" | "workflow">): TaskKind {
+  return ctx.run.options?.kind ?? ctx.workflow.kind ?? "change";
 }
 
 /**

@@ -70,7 +70,7 @@ import { isPlainObject } from "../core/config/merge.ts";
 import { knowledgeConfigOf } from "../core/config/meta.ts";
 import type { Actor } from "../core/domain/actor.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
-import { isTerminal, type Run } from "../core/domain/run.ts";
+import { isTerminal, type Run, TaskKindSchema } from "../core/domain/run.ts";
 import { layoutOf, metaConfigFile, rootRelative } from "../core/paths.ts";
 import { caseOfRun, casesRootOf, runToCase } from "../evals/runToCase.ts";
 import {
@@ -1496,11 +1496,13 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       return redirect(r, `/launches/${continueFrom(launcher, from, workflow).id}`);
     }
     const freshDesign = form.get("fresh") === "design";
+    const kind = TaskKindSchema.safeParse(form.get("kind"));
     const launch = launcher.start({
       task,
       workflow,
       repoRoot: repo,
       ...(freshDesign ? { freshDesign } : {}),
+      ...(kind.success ? { kind: kind.data } : {}),
     });
     // straight to the launch: it becomes the run's page as soon as the run begins
     return redirect(r, `/launches/${launch.id}`);
