@@ -547,6 +547,12 @@ ${
     : html`<div class="panel empty">Nothing waits for you.</div>`
 }
 </section>
+${((w) =>
+  w
+    ? dockHtml(
+        html`<span class="pill wait">${String(waits)} wait${waits === 1 ? "s" : ""}</span><div class="what"><b>${firstLine(w.run.task, 120)}</b><span>${w.run.workflow} · ${w.run.currentStep ?? ""} · waiting ${ago(w.run.updatedAt, now)}</span></div><span class="grow"></span>${start && actions ? html`<span class="hint">New task <kbd class="key">N</kbd></span>` : ""}${actions && w.card.kind === "loop" ? form(actions, `${runHref(w.run)}/open`, html`<button type="submit" class="btn">Open in editor</button>`) : ""}<a class="btn primary" href="${runHref(w.run)}">Open the run</a>`,
+      )
+    : dockHtml(""))(page.waiting[0])}
 <section class="group" aria-labelledby="running" data-live="running">
 <h2 id="running">Running</h2>
 ${launches.map((l) => launchHtml(l, now, start?.homeDir ?? ""))}
@@ -849,7 +855,8 @@ ${choice("go-on", "Not this task's — go on without it", `${card.step} counts a
 ${choice("spec", "Back to the spec", "The task is not what the spec says: the spec gets your words and comes to you again.", "Back to the spec")}
 </fieldset>
 <label class="field grow">Your words — needed for a hint; for the others, why<textarea name="text" rows="3" maxlength="4000" placeholder="${t.failures[0]?.at ? `«The value comes rounded from ${t.failures[0].at.split(":")[0]} — round once, at the end»` : "A hint, a decision, where to look"}"></textarea></label>
-<div class="actions"><button type="submit" class="btn primary big" data-choice-go>Send back to ${back}</button><span class="hint">or Cancel run… at the top</span></div>`,
+`,
+    html` id="tests-form"`,
   );
 }
 
@@ -1126,7 +1133,6 @@ ${a.batch ? batchHtml(a.batch) : ""}
 ${toolBudget(a, now)}
 ${last ? html`<span class="meta">${last}</span>` : ""}
 ${notesBox(page, a.step.id, actions, a.step.agent === "implementation")}
-${steerHtml(page, a.step, actions)}
 </section>`;
 }
 
@@ -1361,7 +1367,7 @@ ${r.stateReason && r.state !== "RUNNING" && r.state !== "WAITING_BUDGET" ? html`
 ${page.continuedFrom ? continuedFromHtml(page.continuedFrom) : ""}
 ${page.subtaskOf ? html`<p class="muted">subtask ${page.subtaskOf.key} of ${page.subtaskOf.of}${page.subtaskOf.service ? ` · ${page.subtaskOf.service}` : ""} of <a href="/runs/${shortRunId(page.subtaskOf.master.id)}">${firstLine(page.subtaskOf.master.task, 120)}</a> — the contract is the master's</p>` : ""}
 </div>
-<div class="row headact">${actions && pausable(page) ? (page.pausing ? html`<span class="btn small" aria-disabled="true">Pausing…</span>` : form(actions, `/runs/${encodeURIComponent(shortRunId(r.id))}/pause`, html`<button type="submit" class="btn small" title="Stops after the current model or tool call, keeps its place; Resume goes on">Pause</button>`)) : ""}${actions && !isTerminal(r.state) ? (cancelling(r) ? html`<span class="btn small danger" aria-disabled="true">Cancelling…</span>` : cancelHtml(r, actions)) : ""}</div>
+<div class="row headact">${actions && !isTerminal(r.state) ? (cancelling(r) ? html`<span class="btn small danger" aria-disabled="true">Cancelling…</span>` : cancelHtml(r, actions)) : ""}</div>
 </div>
 </div>
 ${notice ?? ""}
@@ -1392,7 +1398,48 @@ ${
 </section>
 ${checkout ?? ""}
 </div>
-</div>`;
+</div>
+${runDock(page, actions)}`;
+}
+
+/**
+ * The page's actions at the bottom of the screen, in reach however long the page: on a sticky strip
+ * that is the last thing in the page, a live region of its own.
+ */
+export function dockHtml(body: Html | string): Html {
+  return body
+    ? html`<div class="dock" data-live="dock" role="region" aria-label="Actions"><div class="dock-in">${body}</div></div>`
+    : html`<div data-live="dock" hidden></div>`;
+}
+
+/**
+ * A run's dock: the button of the decision in the card when failed checks stopped it (it submits the
+ * card's form); while it works, its switches and Pause.
+ */
+function runDock(page: RunPage, actions?: Actions): Html {
+  const card = page.card;
+  if (!actions) return dockHtml("");
+  if (card?.kind === "loop" && card.tests && !card.rerun && !card.goOn) {
+    const t = card.tests;
+    const back = card.to ?? "implementation";
+    return dockHtml(
+      html`<div class="what"><b data-choice-label>Send back with a hint</b><span>${card.step} · round ${String(t.round)} of ${String(t.rounds)}</span></div><span class="grow"></span>${form(actions, `${runHref(page.run)}/open`, html`<button type="submit" class="btn">Open in editor</button>`)}<button type="submit" form="tests-form" class="btn primary big" data-choice-go>Send back to ${back}</button>`,
+    );
+  }
+  const a = page.activity;
+  if (!card && a?.step && pausable(page)) {
+    const pause = page.pausing
+      ? html`<span class="btn" aria-disabled="true">Pausing…</span>`
+      : form(
+          actions,
+          `/runs/${encodeURIComponent(shortRunId(page.run.id))}/pause`,
+          html`<button type="submit" class="btn" title="Stops after the current model or tool call, keeps its place; Resume goes on">Pause</button>`,
+        );
+    return dockHtml(
+      html`<span class="spin" aria-hidden="true"></span><div class="what"><b>${a.step.id}${a.step.iteration > 1 ? `#${a.step.iteration}` : ""}${page.planProgress ? ` · plan ${planAt(page.planProgress)}` : ""}</b><span>${callText(a)}</span></div><span class="grow"></span>${steerHtml(page, a.step, actions)}${pause}`,
+    );
+  }
+  return dockHtml("");
 }
 
 /**

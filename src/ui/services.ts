@@ -5,7 +5,7 @@ import type { CatalogLink } from "../knowledge/catalog.ts";
 import { shortRunId } from "../storage/runStore.ts";
 import { type Html, html, raw } from "./html.ts";
 import { type KnowledgeCounts, knowledgeTabs } from "./knowledge.ts";
-import type { Actions } from "./pages.ts";
+import { type Actions, dockHtml } from "./pages.ts";
 
 /**
  * Knowledge → Services (ADR-0025): the map of a knowledge repository as a person checks it — what each
@@ -223,9 +223,13 @@ ${
         absent > 0 ? `${absent} not on this machine` : "",
       ]
         .filter(Boolean)
-        .join(
-          ", ",
-        )}</span><span class="grow"></span>${page.canOnboard ? onboardButton(actions, todo, `Onboard ${plural(todo.length, "service")}`, "/knowledge/services", "btn small strong") : ""}</div>`
+        .join(", ")}</span></div>${
+        page.canOnboard && todo.length > 0
+          ? dockHtml(
+              html`<div class="what"><b>${plural(todo.length, "service")} without a required check</b><span>${todo.join(", ")} — agents cannot check their changes there</span></div><span class="grow"></span>${onboardButton(actions, todo, `Onboard ${plural(todo.length, "service")}`, "/knowledge/services", "btn primary")}`,
+            )
+          : ""
+      }`
     : ""
 }
 <div class="cols">

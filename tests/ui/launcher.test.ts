@@ -775,6 +775,10 @@ describe("New task on the page", () => {
       'aria-checked="false" title="the project&#39;s setting: asks when a round fails as the one before"',
     );
     expect(body).toContain("Stop after implementation");
+    // the switches and Pause in the dock while it works
+    expect(body).toMatch(
+      /<div class="dock" data-live="dock"[\s\S]*Stop after implementation[\s\S]*>Pause<\/button>/,
+    );
     expect((await post(`/runs/${short}/note`, { t: token, text: " " })).location).toContain("notice=no-note");
     expect(
       (await post(`/runs/${short}/note`, { t: token, text: "The method serves the courier app too" }))

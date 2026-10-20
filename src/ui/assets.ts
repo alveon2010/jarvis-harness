@@ -249,7 +249,19 @@ tr:last-child td{border-bottom:0}
 .tests-stop .checkout-fold summary{cursor:pointer}
 .clarify .answers{display:flex;flex-wrap:wrap;gap:8px}
 .clarify .answers .btn{white-space:normal;text-align:left;height:auto;min-height:32px;padding:6px 12px}
-.steer{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;border-top:1px solid var(--line-soft);padding-top:10px}
+.steer{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center}
+.steer .hint{display:none}
+/* the dock: the page's actions at the bottom of the screen, the full width behind them */
+.dock{position:sticky;bottom:0;z-index:30;margin-top:auto;padding:12px 0;background:color-mix(in srgb,var(--panel) 92%,transparent);-webkit-backdrop-filter:saturate(1.4) blur(10px);backdrop-filter:saturate(1.4) blur(10px);box-shadow:0 0 0 100vmax color-mix(in srgb,var(--panel) 92%,transparent),0 -6px 24px rgba(24,22,18,.05);clip-path:inset(-24px -100vmax 0 -100vmax);border-top:1px solid var(--line);border-image:linear-gradient(var(--line),var(--line)) 1/1px 0 0 0/0 100vmax 0 100vmax}
+.dock-in{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.dock .what{display:flex;flex-direction:column;gap:1px;min-width:0;flex:0 1 auto}
+.dock .what b{font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dock .what span{font-size:12.5px;color:var(--muted)}
+.dock .grow{flex:1 1 auto}
+.dock form{display:inline}
+kbd.key{font-family:var(--mono);font-size:11px;padding:0 5px;border-radius:4px;border:1px solid var(--field-line);color:var(--muted)}
+main.wrap{min-height:calc(100vh - 57px)}
+main.wrap:has(>.dock){padding-bottom:0}
 .steer .swf{display:inline}
 .sw{display:inline-flex;align-items:center;gap:8px;border:0;background:none;padding:2px 0;font:inherit;font-size:14px;color:var(--ink);cursor:pointer}
 .sw i{width:32px;height:18px;border-radius:999px;background:var(--border-btn);position:relative;display:inline-block;flex:none;transition:background .15s}
@@ -1006,11 +1018,16 @@ export const SCRIPT = `
   });
 
   // failed checks: the button says what the chosen way does
+  // (the button is in the dock, outside the form it submits; the dock is refreshed apart from the card)
+  function syncChoice() {
+    const r = document.querySelector('[data-choices] input[name="choice"]:checked');
+    if (!r) return;
+    for (const go of document.querySelectorAll('[data-choice-go]')) if (r.dataset.go) go.textContent = r.dataset.go;
+    const title = r.closest('label') && r.closest('label').querySelector('b');
+    for (const l of document.querySelectorAll('[data-choice-label]')) if (title) l.textContent = title.textContent;
+  }
   document.addEventListener('change', (e) => {
-    const r = e.target;
-    if (!r || r.name !== 'choice' || !r.closest('[data-choices]')) return;
-    const go = r.form && r.form.querySelector('[data-choice-go]');
-    if (go && r.dataset.go) go.textContent = r.dataset.go;
+    if (e.target && e.target.name === 'choice' && e.target.closest('[data-choices]')) syncChoice();
   });
 
   // an open question answered in one's own words: that answer is the one picked
@@ -1086,6 +1103,7 @@ export const SCRIPT = `
         }
         el.replaceWith(fresh);
       }
+      syncChoice();
       const title = next.querySelector('title');
       if (title) document.title = title.textContent;
     } catch {

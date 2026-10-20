@@ -529,6 +529,12 @@ describe("failed checks stop the run: the card and the choices", () => {
     expect(page).toContain('value="hint" data-go="Send back to implementation" checked');
     expect(page).toContain('value="go-on"');
     expect(page).toContain(`action="/runs/${short}/tests"`);
+    // the button is in the dock at the bottom of the screen and submits the card's form
+    expect(page).toContain('<div class="dock" data-live="dock" role="region" aria-label="Actions">');
+    expect(page).toContain(
+      '<button type="submit" form="tests-form" class="btn primary big" data-choice-go>Send back to implementation</button>',
+    );
+    expect(page).toContain('id="tests-form"');
     expect(page).toContain(`href="/runs/${short}/artifacts/checks/checks.json?v=2"`);
   });
 
