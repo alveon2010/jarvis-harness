@@ -749,6 +749,14 @@ function stepRow(s: StepRow, now: number, plan?: PlanProgress): Html {
     else if (r.agent) notes.push(r.agent);
     if (r.modelCalls > 0) notes.push(plural(r.modelCalls, "call"));
     if (r.tools && Object.keys(r.tools).length > 0) notes.push(toolMix(r.tools));
+    // tool definitions a fifth of the input or more: worth seeing (ADR-0013 §5)
+    if (r.toolSchema && r.toolSchema.share >= 0.2)
+      notes.push(
+        t("tool schemas {tokens} — {share}% of the input", {
+          tokens: kilo(r.toolSchema.tokens),
+          share: Math.round(r.toolSchema.share * 100),
+        }),
+      );
     const tools = r.tools ? Object.values(r.tools).reduce((n, k) => n + k, 0) : 0;
     if (tools > 0 && r.modelCalls > 1) notes.push(`⇉ ${(tools / r.modelCalls).toFixed(1)} ${t("per call")}`);
     if (r.contradictions)

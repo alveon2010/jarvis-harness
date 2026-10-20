@@ -1197,6 +1197,7 @@ export const RU: Readonly<Record<string, string>> = {
   "stack {stacks}": "стеку {stacks}",
   "skills:": "навыки:",
   "no such skill: {ids}": "нет такого навыка: {ids}",
+  "tool schemas {tokens} — {share}% of the input": "схемы инструментов {tokens} — {share}% входа",
 };
 
 /**

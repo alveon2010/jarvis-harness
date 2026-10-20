@@ -62,7 +62,11 @@ export function preflightModels(
     if (step.kind !== "agentic" || !step.agent) continue;
     const def = agents.get(step.agent);
     if (!def) continue;
-    for (const p of validateRoles(runtime.loaded.config, [{ role: def.role, requires: def.requires }], runtime.probes))
+    for (const p of validateRoles(
+      runtime.loaded.config,
+      [{ role: def.role, requires: def.requires }],
+      runtime.probes,
+    ))
       out.push({ step: step.id, reason: p.reason });
   }
   return out;

@@ -22,6 +22,8 @@ export interface StepReport {
   readonly modelCalls: number;
   readonly promptTokens: number;
   readonly outputTokens: number;
+  /** The largest share of one call's input the tool definitions took, and their size (ADR-0013 §5). */
+  readonly toolSchema?: { readonly tokens: number; readonly share: number };
   readonly retries: number;
   readonly toolCalls: number;
   /** Calls per capability, in the order first used. */
@@ -64,6 +66,7 @@ interface Open {
   modelCalls: number;
   promptTokens: number;
   outputTokens: number;
+  toolSchema?: { tokens: number; share: number };
   retries: number;
   toolCalls: number;
   quick?: { tool: string; used: boolean; reason?: string };
@@ -145,6 +148,10 @@ export class Journey {
           o.promptTokens += num(p.promptTokens);
           o.outputTokens += num(p.outputTokens);
           o.retries += num(p.retries);
+          const schema = num(p.toolSchemaTokens);
+          const input = num(p.estimatedPromptTokens) || num(p.promptTokens);
+          if (schema > 0 && input > 0 && schema / input > (o.toolSchema?.share ?? 0))
+            o.toolSchema = { tokens: schema, share: schema / input };
         }
         return [];
       case "tool.call":
@@ -213,6 +220,7 @@ export class Journey {
       modelCalls: o.modelCalls,
       promptTokens: o.promptTokens,
       outputTokens: o.outputTokens,
+      ...(o.toolSchema ? { toolSchema: o.toolSchema } : {}),
       retries: o.retries,
       toolCalls: o.toolCalls,
       ...(o.tools ? { tools: o.tools } : {}),

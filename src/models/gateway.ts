@@ -171,6 +171,12 @@ export class ModelGateway implements ModelCaller {
       request.messages,
       request.tools,
     );
+    // ADR-0013 §5: the tool definitions alone, at the same calibration — a long capability list is a
+    // hidden cause of pressure, and in the small window of a local model often the largest one
+    const toolSchemaTokens =
+      (request.tools?.length ?? 0) > 0
+        ? this.estimator.estimateMessages(modelId, model.tokenizer, [], request.tools)
+        : 0;
     // the typical answer of this kind of call, not the whole maxOutput (pilot: a pool of 30k let
     // nothing through after 14k with a 16k reserve per call); the request itself keeps maxOutput
     const reserveKind = {
@@ -192,7 +198,7 @@ export class ModelGateway implements ModelCaller {
         );
       }
       const response = this.finish(request, entry.response, 0, 0, "replay");
-      this.emitCall(request, response, estimatedPrompt, reuse, sinceLastMs);
+      this.emitCall(request, response, estimatedPrompt, reuse, sinceLastMs, toolSchemaTokens);
       return response;
     }
 
@@ -312,7 +318,7 @@ export class ModelGateway implements ModelCaller {
               cassetteVersion: 1,
             });
           }
-          this.emitCall(request, response, estimatedPrompt, reuse, sinceLastMs);
+          this.emitCall(request, response, estimatedPrompt, reuse, sinceLastMs, toolSchemaTokens);
           this.log.debug("model.response", {
             ...(request.runId ? { runId: request.runId } : {}),
             ...(request.stepId ? { stepId: request.stepId } : {}),
@@ -541,6 +547,7 @@ export class ModelGateway implements ModelCaller {
     estimatedPrompt: number,
     reuse?: number,
     sinceLastMs?: number,
+    toolSchemaTokens = 0,
   ): void {
     const estimated = this.cachedEstimate(request, response, reuse, sinceLastMs);
     const key = this.prefixKey(request);
@@ -571,6 +578,7 @@ export class ModelGateway implements ModelCaller {
         source: response.source,
         responseFormat: request.responseFormat?.kind ?? "text",
         toolCount: request.tools?.length ?? 0,
+        ...(toolSchemaTokens > 0 ? { toolSchemaTokens } : {}),
         rateLimit: response.rateLimit,
         ...(response.streamed ? { streamed: true } : {}),
         ...(response.firstTokenMs !== undefined ? { firstTokenMs: response.firstTokenMs } : {}),

@@ -91,6 +91,10 @@ describe("ModelGateway", () => {
     });
     expect(response.finishReason).toBe("tool_calls");
     expect(response.toolCalls).toEqual([{ id: "call_1", name: "ping", arguments: '{"echo":"hi"}' }]);
+    // the tool definitions' own size goes into model.call (ADR-0013 §5)
+    const call = events.events.find((e) => e.kind === "model.call");
+    expect(call?.payload?.toolSchemaTokens).toBeGreaterThan(0);
+    expect(call?.payload?.toolSchemaTokens).toBeLessThan(call?.payload?.estimatedPromptTokens as number);
   });
 
   it("retries transient errors with backoff and reports retries", async () => {
