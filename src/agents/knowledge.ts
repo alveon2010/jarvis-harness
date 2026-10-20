@@ -1,3 +1,4 @@
+import { type KindChoice, kindOfTask } from "../app/taskKind.ts";
 import { detectStackScopes, effectiveStacks, stacksForPaths } from "../capabilities/detector.ts";
 import type { TaskKind } from "../core/domain/run.ts";
 import { type EngineeringContextPackage, resolvePackage } from "../knowledge/resolver.ts";
@@ -7,11 +8,15 @@ import { knowledgeRootsOf } from "../knowledge/sources.ts";
 import type { StepContext } from "../orchestration/types.ts";
 
 /**
- * The kind of task (ADR-0020 §1): what the person picked at the start, else the workflow's own kind
- * (`fix`), else `change` — a task id like ABC-42 says nothing about it.
+ * The kind of task (ADR-0020 §1) and what decided it: the person's pick, the workflow's own kind, the
+ * words of the task, else `change` (src/app/taskKind.ts) — the same rules the page shows as it is typed.
  */
+export function taskKindChoiceOf(ctx: Pick<StepContext, "run" | "workflow">): KindChoice {
+  return kindOfTask({ task: ctx.run.task, picked: ctx.run.options?.kind, workflowKind: ctx.workflow.kind });
+}
+
 export function taskKindOf(ctx: Pick<StepContext, "run" | "workflow">): TaskKind {
-  return ctx.run.options?.kind ?? ctx.workflow.kind ?? "change";
+  return taskKindChoiceOf(ctx).kind;
 }
 
 /**
@@ -96,6 +101,7 @@ export async function packageForStep(ctx: StepContext, agentId: string): Promise
       how: pkg.skillsBy.how,
       ...(pkg.skillsBy.missing ? { missing: pkg.skillsBy.missing } : {}),
       kind: pkg.task.kind,
+      kindBy: taskKindChoiceOf(ctx).by,
       stacks: pkg.task.stacks,
       paths: affectedPaths.length,
       onRequest: pkg.deferredSkills.map(skillRef),

@@ -15,12 +15,13 @@ import type { Change } from "../cli/checkout.ts";
 import { toolMix } from "../cli/progress.ts";
 import { documentToMarkdown } from "../cli/render.ts";
 import { incompleteOf } from "../cli/style.ts";
-import { isTerminal, type Run, type TaskKind } from "../core/domain/run.ts";
+import { isTerminal, type Run } from "../core/domain/run.ts";
 import type { EgressNotice, ModelEgressNotice } from "../security/policy/egress.ts";
 import { shortRunId } from "../storage/runStore.ts";
 import { checkLogHtml, checksHtml, checksOf } from "./checks.ts";
 import { type DiffFile, escapeHtml, type Html, html, join, markdownToHtml, type Part, raw } from "./html.ts";
 import { LANG_COOKIE, lang, plural, t, th, units, when } from "./i18n.ts";
+import { KIND_NAME, kindWhy } from "./kinds.ts";
 import type {
   ApprovalCard,
   ArtifactPage,
@@ -1368,17 +1369,6 @@ export function timeHtml(time: TimeSplit): Html {
   return html`<span class="timew" tabindex="0" aria-describedby="tpop">${duration(total)}${total - working >= 60_000 ? html` <span class="work">· ${t("{d} working", { d: duration(working) })}</span>` : ""}<span class="tpop" id="tpop" role="tooltip"><b class="ttl">${t("Time of this run")}</b><span class="bar">${bar}</span><table>${rows}<tr class="total"><td>${t("Total")}</td><td class="v">${duration(total)}</td><td class="pc"></td></tr></table><span class="note">${t("From the run's journal, {when}. Working time is what the run cost in time; the rest is where it waited.", { when })}</span></span></span>`;
 }
 
-/** The kind of task in the run's header (run.ts TASK_KINDS). */
-const KIND_NAME: Record<TaskKind, string> = {
-  // t("new feature") t("change") t("bug fix") t("refactoring") t("tests") t("docs")
-  feature: "new feature",
-  change: "change",
-  fix: "bug fix",
-  refactor: "refactoring",
-  test: "tests",
-  docs: "docs",
-};
-
 export function runContent(
   page: RunPage,
   now: number,
@@ -1400,7 +1390,7 @@ export function runContent(
   const meta = join(
     [
       r.workflow,
-      html`<span title="${t("the kind of task the skills and standards were picked by")}">${t(KIND_NAME[page.kind])}</span>`,
+      html`<span title="${t("the kind of task the skills and standards were picked by")} — ${kindWhy(page.kind)}">${t(KIND_NAME[page.kind.kind])}</span>`,
       `run ${shortRunId(r.id)}`,
       page.time ? timeHtml(page.time) : duration(page.workedMs),
       plural(tk.calls, "model call"),

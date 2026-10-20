@@ -63,6 +63,7 @@ import {
   startSubtask,
   subtasksOf,
 } from "../app/subtasks.ts";
+import { kindOfTask } from "../app/taskKind.ts";
 import { tryOutOf } from "../app/tryOut.ts";
 import { type OpenChecked, type OpenIn, type OpenResult, reviewFiles } from "../cli/checkout.ts";
 import { humanMove } from "../cli/commands/human.ts";
@@ -103,6 +104,7 @@ import { type AskView, askContent, askOfRun, recentAsks } from "./ask.ts";
 import { SCRIPT, STYLE } from "./assets.ts";
 import { type DiffFile, type Html, html, parseDiff } from "./html.ts";
 import { inLang, LANG_COOKIE, LANGS, type Lang, lang, langOf, t, th } from "./i18n.ts";
+import { KIND_NAME, kindWhy } from "./kinds.ts";
 import {
   ARCHITECTURE,
   docsContent,
@@ -1465,7 +1467,22 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
     const body = known
       ? html`${startFromHtml(point, { task, workflow, targets: targets() }, Date.now())}${restartHintOf(task, workflow, repo)}${crossNoteOf(task, repo)}`
       : "";
-    return send(r, 200, String(body), "text/html; charset=utf-8", { "Cache-Control": "no-store" });
+    // the kind of task as it is typed (src/app/taskKind.ts): the line under the form shows it
+    const workflowKind = (() => {
+      try {
+        return engine.workflow(workflow).kind;
+      } catch {
+        return undefined;
+      }
+    })();
+    const picked = TaskKindSchema.safeParse(q.get("kind"));
+    const kind = kindOfTask({ task, workflowKind, ...(picked.success ? { picked: picked.data } : {}) });
+    return send(r, 200, String(body), "text/html; charset=utf-8", {
+      "Cache-Control": "no-store",
+      "X-Task-Kind": kind.kind,
+      "X-Task-Kind-Name": encodeURIComponent(t(KIND_NAME[kind.kind])),
+      "X-Task-Kind-Why": encodeURIComponent(kindWhy(kind)),
+    });
   };
 
   /** "New task": the CLI started in the background, driven by the page (src/ui/launcher.ts). */

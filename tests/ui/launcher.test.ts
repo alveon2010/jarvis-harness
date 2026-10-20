@@ -478,6 +478,25 @@ describe("New task on the page", () => {
     expect(await from({ task: "ABC-43", workflow: "sdd" })).toContain("No finished research of ABC-43");
     expect(await from({ task: "ABC-42", workflow: "research" })).toBe("");
     expect(await from({ task: "ABC-42", workflow: "sdd", repo: "/etc" })).toBe("");
+    // the kind of task as it is typed: what the line under the form shows, and why
+    const kindOf = async (q: Record<string, string>) => {
+      const res = await fetch(
+        `http://127.0.0.1:${ui?.port}/runs/from?${new URLSearchParams({ repo: sb.project, ...q })}`,
+        { headers: { cookie: `jarvis_ui_${ui?.port}=${encodeURIComponent(ui?.token ?? "")}` } },
+      );
+      return [res.headers.get("x-task-kind"), decodeURIComponent(res.headers.get("x-task-kind-why") ?? "")];
+    };
+    expect(await kindOf({ task: "ABC-42 the cart crashes", workflow: "sdd" })).toEqual([
+      "fix",
+      "by the word «crashes»",
+    ]);
+    expect(await kindOf({ task: "ABC-42 new page", workflow: "fix" })).toEqual(["fix", "by the workflow"]);
+    expect(await kindOf({ task: "ABC-42", workflow: "sdd", kind: "docs" })).toEqual([
+      "docs",
+      "picked by you",
+    ]);
+    expect(await kindOf({ task: "ABC-42", workflow: "sdd" })).toEqual(["change", "by default"]);
+    expect(await page("/")).toContain("data-kind-line");
     // Start with the box ticked: the research goes on
     const started = await post("/runs/new", {
       t: token,

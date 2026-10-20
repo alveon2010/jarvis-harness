@@ -790,6 +790,14 @@ p.sv-pair{margin:0;font-size:14px}
 .magain form{padding:0 14px 14px}
 .field.inline{flex-direction:row;align-items:center;gap:8px;flex-wrap:wrap}
 .field.inline select{width:auto;height:36px;flex:none}
+.kindline{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;font-size:13px;color:var(--muted);margin-top:-4px}
+.kindline b{color:var(--ink);font-weight:600}
+.kindpick{display:contents}
+.kindpick summary{cursor:pointer;color:var(--accent);list-style:none;text-decoration:underline;text-underline-offset:2px}
+.kindpick summary::-webkit-details-marker{display:none}
+.kindpick[open] summary{color:var(--muted)}
+.kindpick .seg{margin-top:6px}
+.kindpick[open]::after{content:"";flex-basis:100%}
 .field.inline input{height:40px;padding:0 10px;border:1px solid var(--field-line);border-radius:8px;font-family:var(--mono);font-size:13px;background:var(--panel);color:var(--ink)}
 .mdrafts{margin-top:20px;padding:16px 20px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 20px}
 .mdrafts>div{display:flex;flex-direction:column;gap:4px}
@@ -904,16 +912,29 @@ export const SCRIPT = `
         summary.replaceChildren(icon, nm, ...(badge ? [badge.cloneNode(true)] : []), summary.querySelector('.car'));
       }
     };
+    // the kind of task: the line says what was picked and why; «Change» opens the kinds, «Auto» goes back
+    const kindLine = newForm.querySelector('[data-kind-line]');
+    const showKind = (headers) => {
+      if (!kindLine) return;
+      const name = headers.get('X-Task-Kind-Name');
+      const why = headers.get('X-Task-Kind-Why');
+      if (name) kindLine.querySelector('[data-kind-name]').textContent = decodeURIComponent(name);
+      if (why) kindLine.querySelector('[data-kind-why]').textContent = '— ' + decodeURIComponent(why);
+    };
     let timer;
     let asked = '';
     const look = () => {
       const p = place();
       const h = how();
-      const q = new URLSearchParams({ task: taskField.value, workflow: h ? h.value : '', repo: p ? p.value : '' }).toString();
+      const k = radios('kind').find((r) => r.checked);
+      const q = new URLSearchParams({ task: taskField.value, workflow: h ? h.value : '', repo: p ? p.value : '', kind: k ? k.value : '' }).toString();
       if (q === asked) return;
       asked = q;
       fetch('/runs/from?' + q, { headers: { Accept: 'text/html' } })
-        .then((res) => (res.ok ? res.text() : ''))
+        .then((res) => {
+          if (res.ok && asked === q) showKind(res.headers);
+          return res.ok ? res.text() : '';
+        })
         .then((text) => {
           if (asked === q) startFrom.innerHTML = text;
         })
@@ -963,7 +984,7 @@ export const SCRIPT = `
       if (!t) return;
       // arrows move the choice and keep the list open; a click or Enter closes it
       if (t.name === 'repo') choosePlace(t, false);
-      else if (t.name === 'workflow') {
+      else if (t.name === 'workflow' || t.name === 'kind') {
         sync();
         look();
       }

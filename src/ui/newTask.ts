@@ -1,8 +1,10 @@
 import { basename } from "node:path";
-import { TASK_KINDS, type TaskKind } from "../core/domain/run.ts";
+import { kindOfTask } from "../app/taskKind.ts";
+import { TASK_KINDS } from "../core/domain/run.ts";
 import type { CatalogLink, NamedService } from "../knowledge/catalog.ts";
 import { type Html, html } from "./html.ts";
 import { plural, t, th } from "./i18n.ts";
+import { KIND_LABEL, KIND_NAME, kindWhy } from "./kinds.ts";
 import type { Actions, LaunchView } from "./pages.ts";
 
 /**
@@ -200,16 +202,16 @@ function howFarHtml(chosen: StartPlace | undefined, on: HowFar): Html {
   })}</div>`;
 }
 
-/** The kinds of task as the form names them (run.ts TASK_KINDS). */
-const KIND_LABEL: Record<TaskKind, string> = {
-  // t("Feature") t("Change") t("Bug fix") t("Refactoring") t("Tests") t("Docs")
-  feature: "Feature",
-  change: "Change",
-  fix: "Bug fix",
-  refactor: "Refactoring",
-  test: "Tests",
-  docs: "Docs",
-};
+/**
+ * The kind of task as a line under the form: what was picked and why — by the workflow, the words of the
+ * task (src/app/taskKind.ts, sent back as the task is typed), or the person — and «Change» to pick one.
+ * Pilot: a select under «More options» was one more thing to decide before every task.
+ */
+function kindLineHtml(): Html {
+  const first = kindOfTask({ task: "" });
+  return html`<div class="kindline" data-kind-line><span>${t("Kind of task:")} <b data-kind-name>${t(KIND_NAME[first.kind])}</b> <span class="meta" data-kind-why>— ${kindWhy(first)}</span></span>
+<details class="kindpick"><summary title="${t("picks the skills and standards written for this kind of work")}">${t("Pick another")}</summary><div class="seg" role="radiogroup" aria-label="${t("Kind of task")}"><label><input type="radio" name="kind" value="" checked><span>${t("Auto")}</span></label>${TASK_KINDS.map((k) => html`<label><input type="radio" name="kind" value="${k}" data-name="${t(KIND_NAME[k])}"><span>${t(KIND_LABEL[k])}</span></label>`)}</div></details></div>`;
+}
 
 /** The form; research first and chosen in every place: find out before changing anything. */
 export function newTaskHtml(start: StartForm, actions: Actions): Html {
@@ -224,9 +226,9 @@ export function newTaskHtml(start: StartForm, actions: Actions): Html {
 <div class="cbar">${whereHtml(start.places, chosen, start.homeDir)}${howFarHtml(chosen, on)}<span class="grow"></span><button type="submit" class="btn primary" data-go>${goOf(h, chosen)}</button></div>
 </div>
 <p class="what" data-said aria-live="polite">${whatOf(h, chosen)}</p>
+${kindLineHtml()}
 <div class="startfrom" data-from aria-live="polite"></div>
 <details class="more"><summary>${t("More options")}</summary>
-<label class="field inline">${t("Kind of task")} <select name="kind"><option value="">${t("as the workflow says")}</option>${TASK_KINDS.map((k) => html`<option value="${k}">${t(KIND_LABEL[k])}</option>`)}</select> <span class="meta">— ${t("picks the skills and standards written for this kind of work")}</span></label>
 <label class="check"><input type="checkbox" name="fresh" value="design"> ${t("Read the Figma frames again")} <span class="meta">— ${t("the design changed at the same link; past Jarvis's one-day cache, each frame is a Figma API call")}</span></label>
 </details>
 <p class="hint">${th("Runs in the background, as {cmd} (or the one chosen) would without a terminal; where it needs you, it waits here — decide on the page and it goes on.", { cmd: html`<code>jarvis research "…"</code>` })}</p>
