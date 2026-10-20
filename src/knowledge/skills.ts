@@ -66,10 +66,15 @@ function readSkill(dir: string, level: Skill["level"]): Skill {
   return { ...parsed.data, instructions: readFileSync(instructionsFile, "utf8").trim(), level, dir };
 }
 
+/**
+ * The skills of a folder. A subfolder without `skill.yaml` is not a skill (notes, an `IMPROVEMENT.md`
+ * left by hand) and is passed over: pilot — one such folder failed every agent call of the project. A
+ * folder with `skill.yaml` is a skill, and a broken one still fails loudly.
+ */
 function readSkillsDir(dir: string, level: Skill["level"]): Skill[] {
   if (!existsSync(dir)) return [];
   return readdirSync(dir)
-    .filter((d) => statSync(join(dir, d)).isDirectory())
+    .filter((d) => statSync(join(dir, d)).isDirectory() && existsSync(join(dir, d, "skill.yaml")))
     .sort()
     .map((d) => readSkill(join(dir, d), level));
 }

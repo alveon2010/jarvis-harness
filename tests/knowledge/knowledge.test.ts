@@ -203,6 +203,9 @@ describe("skills and the resolver", () => {
         .map((s) => s.id)
         .sort(),
     ).toEqual(["refactor", "unit-testing"]);
+    // a folder without skill.yaml is not a skill: passed over, the rest still load
+    sb.write("project/.jarvis/skills/better-errors/IMPROVEMENT.md", "a note\n");
+    expect(loadSkills({ projectRoot: sb.project }).map((s) => s.id)).not.toContain("better-errors");
     sb.write("project/.jarvis/skills/broken/skill.yaml", "id: broken\n");
     expect(() => loadSkills({ projectRoot: sb.project })).toThrow(SkillLoadError);
   });
