@@ -55,7 +55,10 @@ function render(ctx: CliContext, target: Target, explanations: RunExplanation[],
     );
     ctx.out.line("artifacts");
     for (const a of e.artifacts) {
-      ctx.out.line(`  ${a.label}  ${a.type}  by ${a.producedBy}${a.step ? ` in ${a.step}` : ""}`);
+      const made = a.editedBy
+        ? `edited by a person, ${a.editedBy.actor}${a.editedBy.from ? ` (from @${a.editedBy.from})` : ""}`
+        : `by ${a.producedBy}${a.calls ? ` from ${a.calls.model} model call(s), ${a.calls.tools} tool call(s)` : ""}`;
+      ctx.out.line(`  ${a.label}  ${a.type}  ${made}${a.step ? ` in ${a.step}` : ""}`);
       for (const ap of a.approvals)
         ctx.out.line(
           `      ${ap.decision} by ${ap.actor} ${ap.at.slice(0, 16)}${ap.comment ? ` — ${ap.comment}` : ""}`,

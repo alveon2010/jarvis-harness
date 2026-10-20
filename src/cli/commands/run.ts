@@ -14,6 +14,7 @@ import { carriedSteps, RESTARTABLE, restartPlanOf } from "../../app/restart.ts";
 import { createRuntime, type Runtime } from "../../app/runtime.ts";
 import { runDetail } from "../../app/status.ts";
 import { afterRunStops, CROSS_WORKFLOWS, workflowHere } from "../../app/subtasks.ts";
+import { EDITABLE_TYPES, editableFile, isEditable, syncEditable } from "../../artifacts/editable.ts";
 import type { Approval } from "../../artifacts/store.ts";
 import { resolveActor } from "../../core/actor/resolve.ts";
 import type { Actor } from "../../core/domain/actor.ts";
@@ -42,7 +43,7 @@ import {
   systemShell,
 } from "../checkout.ts";
 import type { CliContext } from "../context.ts";
-import { humanGate } from "../gate.ts";
+import { humanGate, systemEditor } from "../gate.ts";
 import { CliExit, EXIT } from "../output.ts";
 import { waitParked } from "../parked.ts";
 import { followRun, formatRunHeader, oneLine } from "../progress.ts";
@@ -868,6 +869,11 @@ export async function runApprove(ctx: CliContext, ref: string, options: ApproveO
   try {
     const run = requireRun(ctx, runtime, ref);
     const actor = await actorFor(ctx, runtime);
+    // ADR-0005 §3: `jarvis approve` decides on the latest version — the person's edit of the file too
+    const edits = syncEditable(runtime, run, actor);
+    for (const a of edits.edited)
+      if (!ctx.out.json) ctx.out.line(`${a.type}/${a.name}@${a.version}: your edit of the file is recorded`);
+    for (const r of edits.rejected) ctx.out.error(`${r.file}: edit not taken — ${r.reason}`);
     const awaited = awaitedArtifact(runtime, run);
     const type = options.type ?? awaited?.type;
     if (!type) {
@@ -946,6 +952,73 @@ export async function runApprove(ctx: CliContext, ref: string, options: ApproveO
       await executeAndReport(ctx, runtime, createEngine(runtime), run, false, { approval });
     }
     ctx.out.result(approval, () => ctx.out.line(line));
+  } finally {
+    await runtime.close();
+  }
+}
+
+export interface EditOptions {
+  /** false: print the file only (`--no-open`). */
+  readonly open?: boolean;
+  /** Opens the file and returns when the person is done (default `$VISUAL`, `$EDITOR`, `vi`). */
+  readonly editor?: (file: string) => boolean;
+}
+
+/**
+ * `jarvis edit <run> [type]` (ADR-0005 §3): the document in its file, in the person's editor; what
+ * they change is recorded as the next version, theirs. Without a type: what the run waits on, else
+ * the first editable document it has.
+ */
+export async function runEdit(
+  ctx: CliContext,
+  ref: string,
+  type: string | undefined,
+  options: EditOptions = {},
+): Promise<void> {
+  const loaded = await loadForCli(ctx);
+  const runtime = createRuntime(loaded, { env: ctx.env });
+  try {
+    const run = requireRun(ctx, runtime, ref);
+    const actor = await actorFor(ctx, runtime);
+    syncEditable(runtime, run, actor);
+    const awaited = awaitedArtifact(runtime, run)?.type;
+    const chosen =
+      type ??
+      (awaited && isEditable(awaited)
+        ? awaited
+        : EDITABLE_TYPES.find((t) => runtime.artifacts.listLatest(run.id, t).length > 0));
+    if (!chosen || !isEditable(chosen)) {
+      ctx.out.error(
+        `${chosen ? `"${chosen}" is not edited as a file` : "the run has no document to edit yet"}; editable: ${EDITABLE_TYPES.join(", ")}`,
+      );
+      throw new CliExit(EXIT.error);
+    }
+    const before = runtime.artifacts.listLatest(run.id, chosen)[0];
+    if (!before) {
+      ctx.out.error(`run has no artifact of type "${chosen}"`);
+      throw new CliExit(EXIT.error);
+    }
+    const file = editableFile(run, before);
+    if (!existsSync(file)) {
+      ctx.out.error(`the run's workspace ${run.workspace.path} is gone: nothing to edit`);
+      throw new CliExit(EXIT.error);
+    }
+    const label = `${before.type}/${before.name}@${before.version}`;
+    if (options.open === false || ctx.out.json) {
+      ctx.out.result({ file, artifact: label }, () => ctx.out.line(file));
+      return;
+    }
+    (options.editor ?? systemEditor(ctx))(file);
+    const after = syncEditable(runtime, run, actor);
+    const made = after.edited.find((a) => a.artifactId === before.artifactId);
+    for (const r of after.rejected) ctx.out.error(`${r.file}: edit not taken — ${r.reason}`);
+    ctx.out.line(
+      made
+        ? `${made.type}/${made.name}@${made.version}: edited by ${actor.id} (from @${before.version})`
+        : `${label}: no change`,
+    );
+    if (made && run.state === "WAITING_HUMAN")
+      ctx.out.line(`  the new version waits for a decision: jarvis approve ${shortRunId(run.id)}`);
   } finally {
     await runtime.close();
   }

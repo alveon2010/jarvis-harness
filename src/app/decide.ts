@@ -1,4 +1,5 @@
 import { hostname } from "node:os";
+import { syncEditable } from "../artifacts/editable.ts";
 import type { Approval } from "../artifacts/store.ts";
 import type { Actor } from "../core/domain/actor.ts";
 import type { ApprovalDecision, ArtifactVersion } from "../core/domain/artifact.ts";
@@ -55,6 +56,9 @@ export function recordDecision(
     readonly channel?: DecisionChannel;
   },
 ): Approval {
+  // ADR-0005 §3: an edit of the file is recorded first, as the decider's. The decision still goes to
+  // the version they were shown — a newer one (their edit) waits for a decision of its own (§4).
+  syncEditable(runtime, run, input.actor);
   const prior = runtime.artifacts.approvalsFor(input.artifact.artifactId, input.artifact.version)[0];
   if (prior)
     throw new DecisionTakenError(`${input.type}/${input.artifact.name}@${input.artifact.version}`, prior);

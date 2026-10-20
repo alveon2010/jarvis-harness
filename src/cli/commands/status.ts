@@ -1,7 +1,9 @@
+import { existsSync } from "node:fs";
 import { formatActivity, kilo } from "../../app/activity.ts";
 import { duration } from "../../app/journey.ts";
 import { createRuntime } from "../../app/runtime.ts";
 import { type PoolStatus, type RunDetail, runDetail, runsOverview } from "../../app/status.ts";
+import { editableDir, isEditable } from "../../artifacts/editable.ts";
 import { isTerminal } from "../../core/domain/run.ts";
 import { shortRunId } from "../../storage/runStore.ts";
 import type { CliContext } from "../context.ts";
@@ -248,7 +250,7 @@ export function renderDetail(ctx: CliContext, d: RunDetail, now: Date, eventLimi
     for (const a of d.artifacts) {
       const who =
         a.provenance.kind === "human"
-          ? `human:${a.provenance.actor.id}`
+          ? `✎ edited by ${a.provenance.actor.id}`
           : a.provenance.kind === "agent"
             ? `agent:${a.provenance.agentId}`
             : a.provenance.kind;
@@ -261,6 +263,12 @@ export function renderDetail(ctx: CliContext, d: RunDetail, now: Date, eventLimi
         `  ${padEnd(`${a.type}/${a.name}@${a.version}`, 32)} ${st.muted(padEnd(who, 24))} ${st.muted(ago(a.createdAt, now))}${gate}`,
       );
     }
+    // ADR-0005 §3: where a person edits the documents; the change is taken before the next step
+    const dir = editableDir(d.run);
+    if (!isTerminal(d.run.state) && d.artifacts.some((a) => isEditable(a.type)) && existsSync(dir))
+      out.line(
+        `  ${st.muted(`edit as files in ${dir} (or jarvis edit ${shortRunId(d.run.id)}): taken before the next step`)}`,
+      );
   }
   const effectTotal = Object.values(d.effects.counts).reduce((a, b) => a + b, 0);
   if (effectTotal > 0) {
@@ -430,11 +438,13 @@ export function renderSummary(
           : "";
       const partial = incompleteOf(a);
       const incomplete = partial ? `  ${st.warn(`⚠ incomplete (${partial.limit} limit)`)}` : "";
+      const edited =
+        a.provenance.kind === "human" ? `  ${st.muted(`✎ edited by ${a.provenance.actor.id}`)}` : "";
       const step = a.stepId
         ? st.muted(`  ${a.stepId}${a.iteration && a.iteration > 1 ? `#${a.iteration}` : ""}`)
         : "";
       out.line(
-        `${i === 0 ? f("artifacts") : " ".repeat(13)}${options.link ? options.link(a, `${a.type}/${a.name}@${a.version}`) : `${a.type}/${a.name}@${a.version}`}${step}${gate}${incomplete}`,
+        `${i === 0 ? f("artifacts") : " ".repeat(13)}${options.link ? options.link(a, `${a.type}/${a.name}@${a.version}`) : `${a.type}/${a.name}@${a.version}`}${step}${edited}${gate}${incomplete}`,
       );
     });
   const next = nextCommands(d, options.goOn);

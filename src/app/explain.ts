@@ -25,6 +25,10 @@ export interface ExplainedArtifact {
   readonly name: string;
   readonly step?: string;
   readonly producedBy: string;
+  /** An agent's document: how many model and tool calls it was made from (ADR-0005 §2). */
+  readonly calls?: { readonly model: number; readonly tools: number };
+  /** A version a person made by editing the file (ADR-0005 §3), and the version they edited. */
+  readonly editedBy?: { readonly actor: string; readonly from?: number; readonly comment?: string };
   readonly sources: string[];
   readonly approvals: Array<{ actor: string; decision: string; comment?: string; at: string }>;
   /** Lines of the artifact that mention the focus file (when one was asked about). */
@@ -100,6 +104,13 @@ function producer(a: ArtifactVersion): string {
   return p.kind;
 }
 
+/** Artifacts written before the refs were kept have none: nothing is claimed for them. */
+function callsOf(a: ArtifactVersion): { calls?: { model: number; tools: number } } {
+  const p = a.provenance;
+  if (p.kind !== "agent" || p.modelCallRefs.length + p.toolCallRefs.length === 0) return {};
+  return { calls: { model: p.modelCallRefs.length, tools: p.toolCallRefs.length } };
+}
+
 function approvalOf(a: Approval) {
   return {
     actor: `${a.actor.kind}:${a.actor.id}`,
@@ -143,6 +154,16 @@ export function explainRun(runtime: Runtime, run: Run, focusFile?: string): RunE
       name: a.name,
       ...(a.stepId ? { step: a.stepId } : {}),
       producedBy: producer(a),
+      ...callsOf(a),
+      ...(a.provenance.kind === "human"
+        ? {
+            editedBy: {
+              actor: `${a.provenance.actor.kind}:${a.provenance.actor.id}`,
+              ...(a.parentVersion ? { from: a.parentVersion } : {}),
+              ...(a.provenance.comment ? { comment: a.provenance.comment } : {}),
+            },
+          }
+        : {}),
       sources: a.sourceRefs,
       approvals: runtime.artifacts.approvalsFor(a.artifactId).map(approvalOf),
       mentions,

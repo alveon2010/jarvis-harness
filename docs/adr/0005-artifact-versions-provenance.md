@@ -5,8 +5,16 @@
 - Основание: [ADR-0001](0001-target-architecture.md) §4 («Artifact с версией, schema, provenance и source
   references»), §12 (artifact metadata: checksum, provenance), §13 (human approval), §14 (trace: task → spec →
   evidence → plan → diff); [ADR-0004](0004-workflow-back-edges.md) §4 (итерации порождают версии)
-- Код (план): `src/artifacts/{model,store,versions}.ts`, `src/storage/approvals.ts`, `src/context/builder.ts`
-  (выбор версии при сборке контекста), CLI `jarvis spec|plan … --edit`, `jarvis approve`
+- Код: `src/core/domain/artifact.ts`, `src/artifacts/store.ts` (версии, approvals, `recordHumanEdit`),
+  `src/artifacts/editable.ts` (§3: файлы в workspace и сверка checksum), `src/telemetry/callRefs.ts` (§2:
+  `modelCallRefs` / `toolCallRefs`), CLI `jarvis edit <run> [type]`, `jarvis approve`
+- Сделано: §1–§4, §5 (шаг получает последнюю версию; за гейтом это и есть одобренная — гейт не пропускает
+  неодобренную). §3 — файлы `.jarvis/runs/<runId>/<name>` для `spec`, `plan`, `review`; сверка перед каждым
+  шагом, при решении на гейте (карточка, страница, `jarvis approve`) и при `jarvis continue`; CLI —
+  `jarvis edit <run> [type]` вместо `jarvis spec … --edit` (`jarvis spec <task>` уже занят workflow).
+  §2 — ссылки на вызовы это `event:<seq>` событий `model.call` / `tool.call` шага (у вызова нет своего id);
+  их число видно в `jarvis explain` и на странице артефакта.
+- Не сделано: §6 (retention — промежуточные версии пока не удаляются вовсе)
 
 ## Контекст
 

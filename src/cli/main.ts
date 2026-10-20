@@ -49,6 +49,7 @@ import {
   runContinue,
   runDaemon,
   runDiff,
+  runEdit,
   runFollow,
   runForget,
   runGc,
@@ -536,6 +537,16 @@ export function buildProgram(options: RunOptions = {}): Command {
         });
       },
     );
+
+  program
+    .command("edit <run> [type]")
+    .description(
+      "edit a run's document (spec, plan, review) as a file in $EDITOR; the change becomes its next version (ADR-0005 §3)",
+    )
+    .option("--no-open", "only print the file's path")
+    .action(async (run: string, type: string | undefined, opts: { open: boolean }) => {
+      await runEdit(ctxFor(), run, type, { open: opts.open });
+    });
 
   program
     .command("ci <task>")

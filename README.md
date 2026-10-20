@@ -96,6 +96,7 @@ tools:
 jarvis work ABC-42                 # runs the `sdd` workflow in its own git worktree
 jarvis status <run> --watch 5      # <run>: the id `work` printed; `jarvis status` alone lists the runs
 jarvis c                           # back to the run that waits for you: decide right there
+jarvis edit <run> spec             # fix the spec yourself: your edit becomes its next version
 jarvis approve <run> --resume      # or approve from anywhere; later, the implementation
 jarvis diff <run> && jarvis apply <run>   # one squash commit on your branch
 ```

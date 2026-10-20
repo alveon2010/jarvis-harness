@@ -225,6 +225,10 @@ describe("jarvis explain", () => {
     const human = await jarvis(["explain", "src/onboarding.ts:2"]);
     expect(human.out).toContain("task      ABC-7");
     expect(human.out).toContain("research/research.json@1");
+    // ADR-0005 §2: the document says what it was made from
+    expect(human.out).toMatch(
+      /research\/research\.json@1 {2}research {2}by agent research from \d+ model call\(s\), \d+ tool call\(s\)/,
+    );
   });
 
   it("explains a file, a commit and a run, and says so when there is no provenance", async () => {

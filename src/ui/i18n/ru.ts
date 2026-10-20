@@ -1211,6 +1211,12 @@ export const RU: Readonly<Record<string, string>> = {
   "in {step}": "в {step}",
   "Untrusted content from the internet came in: {where}. Its text went to the agents as data, not instructions; effects — a PR, a comment, a push — wait for a person to approve the run's artifact.":
     "Пришли недоверенные данные из интернета: {where}. Агенты получили этот текст как данные, а не как инструкции; эффекты — PR, комментарий, push — ждут, пока человек одобрит артефакт прогона.",
+  // ---- a person edits a document as a file (ADR-0005)
+  "made from {model}, {tools}": "сделано за {model}, {tools}",
+  "edited by a person, {who}": "правка человека, {who}",
+  "from @{v}": "из @{v}",
+  "Edit it as a file: {file} — the change becomes the next version, yours, before the next step reads it (or {cmd}).":
+    "Правьте как файл: {file} — правка станет следующей версией, вашей, до того как её прочитает следующий шаг (или {cmd}).",
   // ---- a step's skills
   "named by the workflow step": "заданы в шаге workflow",
   "picked by {what}": "подобраны по {what}",

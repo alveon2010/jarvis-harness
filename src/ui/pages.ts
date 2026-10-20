@@ -1456,7 +1456,7 @@ ${
   page.artifacts.length > 0
     ? html`<ul>${page.artifacts.map(
         (a) =>
-          html`<li><a href="${artifactHref(r, a)}">${a.type}/${a.name}@${a.version}</a><span class="meta">${a.stepId ?? "-"}${a.iteration && a.iteration > 1 ? `#${a.iteration}` : ""}</span>${a.state ? html`<span class="${a.state === "approved" ? "ok" : "warn"}" style="font-size:13px">${a.state}</span>` : ""}</li>`,
+          html`<li><a href="${artifactHref(r, a)}">${a.type}/${a.name}@${a.version}</a><span class="meta">${a.stepId ?? "-"}${a.iteration && a.iteration > 1 ? `#${a.iteration}` : ""}</span>${a.provenance.kind === "human" ? html`<span class="meta">✎ ${t("edited by a person, {who}", { who: a.provenance.actor.id })}</span>` : ""}${a.state ? html`<span class="${a.state === "approved" ? "ok" : "warn"}" style="font-size:13px">${a.state}</span>` : ""}</li>`,
       )}</ul>`
     : html`<p class="muted">${t("No artifacts yet.")}</p>`
 }
@@ -2059,6 +2059,12 @@ ${
 </section>`;
 }
 
+/** « · made from 12 model calls, 30 tool calls» — nothing for a document written before refs were kept. */
+function madeFrom(model: number, tools: number): string {
+  if (model + tools === 0) return "";
+  return ` · ${t("made from {model}, {tools}", { model: plural(model, "model call"), tools: plural(tools, "tool call") })}`;
+}
+
 // t("awaiting your approval")
 export function artifactContent(page: ArtifactPage, extras: ArtifactExtras): Html {
   const a = page.artifact;
@@ -2075,9 +2081,9 @@ export function artifactContent(page: ArtifactPage, extras: ArtifactExtras): Htm
   const glyph = { ok: "✓", bad: "✗", wait: "↻", info: "⏸" }[tone];
   const who =
     a.provenance.kind === "agent"
-      ? t("agent {id}", { id: a.provenance.agentId })
+      ? `${t("agent {id}", { id: a.provenance.agentId })}${madeFrom(a.provenance.modelCallRefs.length, a.provenance.toolCallRefs.length)}`
       : a.provenance.kind === "human"
-        ? `${a.provenance.actor.id}`
+        ? `✎ ${t("edited by a person, {who}", { who: a.provenance.actor.id })}${a.parentVersion ? ` (${t("from @{v}", { v: a.parentVersion })})` : ""}`
         : a.provenance.kind;
   const partial = incompleteOf(a);
   const diff = extras.diff;
@@ -2146,6 +2152,7 @@ ${
 }
 </div>
 ${extras.banner ?? ""}
+${page.editFile ? html`<p class="meta">✎ ${th("Edit it as a file: {file} — the change becomes the next version, yours, before the next step reads it (or {cmd}).", { file: html`<code>${page.editFile}</code>`, cmd: html`<code>jarvis edit ${shortRunId(page.run.id)} ${a.type}</code>` })}</p>` : ""}
 ${partial ? html`<div class="banner bad">⚠ ${t("incomplete: agent {agent} hit its {limit} limit — what it did not cover is unknown", { agent: partial.agentId, limit: partial.limit })}</div>` : ""}
 ${
   diff || page.questions || extras.tryOut

@@ -1,7 +1,9 @@
+import { writeFileSync } from "node:fs";
 import { request } from "node:http";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createEngine } from "../../src/app/engine.ts";
 import { createRuntime, type Runtime } from "../../src/app/runtime.ts";
+import { editableFile, syncEditable } from "../../src/artifacts/editable.ts";
 import { loadConfig } from "../../src/core/config/load.ts";
 import { shortRunId } from "../../src/storage/runStore.ts";
 import { escapeHtml, markdownToHtml, parseDiff } from "../../src/ui/html.ts";
@@ -476,6 +478,37 @@ describe("jarvis ui: pages", () => {
     }
     const doc = await get(`/runs/${short}/artifacts/spec/spec.json`, authed());
     expect(doc.body).toContain("Mask &lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;");
+  });
+
+  it("a document edited in its file shows the person; an agent's says what it was made from (ADR-0005)", async () => {
+    const { run, artifact } = seedWaiting("Orders: 404 for a missing order", '{ "summary": "404" }');
+    const short = run.id.slice(4, 12);
+    rt.artifacts.put({
+      runId: run.id,
+      type: "plan",
+      name: "plan.json",
+      content: "{}",
+      provenance: {
+        kind: "agent",
+        agentId: "plan",
+        modelCallRefs: ["event:1", "event:2"],
+        toolCallRefs: ["event:3"],
+      },
+    });
+    const plan = await get(`/runs/${short}/artifacts/plan/plan.json`, authed());
+    expect(plan.body).toContain("agent plan · made from 2 model calls, 1 tool call");
+
+    syncEditable(rt, run);
+    const file = editableFile(run, artifact);
+    const before = await get(`/runs/${short}/artifacts/spec/spec.json`, authed());
+    expect(before.body).toContain(`Edit it as a file: <code>${escapeHtml(file)}</code>`);
+    writeFileSync(file, '{ "summary": "404 with a code" }');
+    syncEditable(rt, run, DEV);
+    const doc = await get(`/runs/${short}/artifacts/spec/spec.json`, authed());
+    expect(doc.body).toContain("✎ edited by a person, dev@example.com (from @1)");
+    const runPage = await get(`/runs/${short}`, authed());
+    expect(runPage.body).toContain("✎ edited by a person, dev@example.com");
+    expect(runPage.body).toContain("✎ spec@2 edited by a person");
   });
 
   it("live updates: a new event in the journal reaches the open page", async () => {

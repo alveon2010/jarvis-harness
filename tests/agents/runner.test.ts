@@ -199,6 +199,16 @@ describe("AgentRuntimeRunner", () => {
 
     const artifact = rt.artifacts.find(run.id, "research", "research.json");
     expect(artifact?.provenance).toMatchObject({ kind: "agent", agentId: "research" });
+    // ADR-0005 §2: the document names the calls it was made from, by their place in the journal
+    const p = artifact?.provenance.kind === "agent" ? artifact.provenance : undefined;
+    expect(p?.modelCallRefs).toHaveLength(4);
+    expect(p?.toolCallRefs).toHaveLength(2);
+    const bySeq = new Map(rt.events.list({ runId: run.id, limit: 10_000 }).map((e) => [`event:${e.seq}`, e]));
+    expect(p?.modelCallRefs.map((r) => bySeq.get(r)?.kind)).toEqual(Array(4).fill("model.call"));
+    expect(p?.toolCallRefs.map((r) => bySeq.get(r)?.payload?.capability)).toEqual([
+      "repo.search",
+      "repo.read",
+    ]);
     expect(artifact?.sourceRefs).toEqual([
       "src/onboarding.ts",
       expect.stringMatching(/^knowledge:domain\.md#/),

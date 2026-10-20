@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { basename } from "node:path";
 import { type Activity, activityOf, compactingText, noticeOf } from "../app/activity.ts";
 import { type BudgetGrant, type BudgetStop, budgetGranted, budgetStopOf } from "../app/budgetStop.ts";
@@ -29,6 +30,7 @@ import { MASTER_WORKFLOW, masterOf, type SubtaskView, splitOf, subtasksOf } from
 import { type KindChoice, kindOfTask } from "../app/taskKind.ts";
 import { type TimeSplit, timeSplitOf } from "../app/timeSplit.ts";
 import { type TryOut, tryOutOf } from "../app/tryOut.ts";
+import { editableFile, isEditable } from "../artifacts/editable.ts";
 import { type Change, changesIn, homePath } from "../cli/checkout.ts";
 import { changedFilesOf, type DocFacts, docFacts, reasonsOf } from "../cli/gate.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
@@ -959,6 +961,13 @@ export function feedItem(e: StoredEvent): FeedItem | undefined {
       const files = Array.isArray(p.files) ? p.files.length : 0;
       return at(`your edit → checkpoint, ${files} file${files === 1 ? "" : "s"}`, "ok");
     }
+    case "artifact.humanEdit":
+      return at(
+        `✎ ${str(p.type) ?? "document"}@${String(p.version ?? "?")} edited by a person${who ? ` (${who})` : ""} in ${str(p.file) ?? "its file"}`,
+        "ok",
+      );
+    case "artifact.humanEditRejected":
+      return at(`✎ edit of ${str(p.file) ?? "a file"} not taken: ${str(p.reason) ?? "?"}`, "bad");
     case "workspace.scratchRemoved": {
       const files = Array.isArray(p.files) ? p.files.join(", ") : "";
       return at(`removed scratch files: ${files}`);
@@ -1310,6 +1319,16 @@ export interface ArtifactPage {
   readonly terminal: boolean;
   readonly driven?: boolean;
   readonly resumable?: Resumable;
+  /** The latest version of a document a person may edit as a file (ADR-0005 §3): where it is. */
+  readonly editFile?: string;
+}
+
+/** The file of an editable document, while the run is not over and its workspace is there. */
+function editFileOf(run: Run, artifact: ArtifactVersion, latest: ArtifactVersion): string | undefined {
+  if (!isEditable(artifact.type) || artifact.version !== latest.version || isTerminal(run.state))
+    return undefined;
+  const file = editableFile(run, artifact);
+  return existsSync(file) ? file : undefined;
 }
 
 export function artifactPage(
@@ -1356,6 +1375,7 @@ export function artifactPage(
     ...questionsOf(runtime, artifact, text),
     terminal: waitingCard(runtime, run.id) !== undefined,
     ...((r) => (r ? { resumable: r } : {}))(resumableOf(runtime, run)),
+    ...((f) => (f ? { editFile: f } : {}))(editFileOf(run, artifact, latest)),
   };
 }
 

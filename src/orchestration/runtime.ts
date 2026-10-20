@@ -5,6 +5,7 @@ import { pendingRedo } from "../app/redo.ts";
 import { roundStop } from "../app/rounds.ts";
 import type { Runtime } from "../app/runtime.ts";
 import { checksAskOf, pauseAfterRequested } from "../app/steer.ts";
+import { syncEditable } from "../artifacts/editable.ts";
 import { BudgetExceededError, BudgetedGateway } from "../budget/runBudget.ts";
 import { EXIT } from "../cli/output.ts";
 import type { Run, RunState } from "../core/domain/run.ts";
@@ -276,6 +277,8 @@ export class LocalWorkflowEngine {
       this.emit(run, "step.finish", { stepId: step.id, iteration, status: "skipped", reason: skip });
       return { status: "success" };
     }
+    // ADR-0005 §3: a person's edit of a document in its file becomes the version this step reads
+    this.syncEdits(run);
     const inputs = this.inputsFor(run, step);
     const restored = this.restoredState(run, step, iteration);
     const historyId = this.rt.history.start(run.id, step.id, iteration, inputs);
@@ -318,6 +321,7 @@ export class LocalWorkflowEngine {
     };
     try {
       const outcome = await this.executors[step.kind].execute(ctx);
+      this.syncEdits(run);
       if (step.kind === "agentic") {
         // files the agent made to try something out do not go into the run's commits
         const swept = (await workspace.sweepScratch?.()) ?? [];
@@ -680,6 +684,8 @@ export class LocalWorkflowEngine {
     suspend: SuspendRun,
     workspace: Workspace,
   ): Promise<Run> {
+    // a run that waits has its documents in files, ready to be edited
+    this.syncEdits(run);
     const headCommit = await workspace.checkpoint(`jarvis: ${step.id} #${iteration} ${suspend.state}`, {
       "Jarvis-Run": run.id,
       "Jarvis-Step": step.id,
@@ -801,6 +807,11 @@ export class LocalWorkflowEngine {
         modelUnavailable: { since, reason, checks: (previous?.checks ?? 0) + 1 },
       },
     });
+  }
+
+  /** The engine runs for the run's owner: an edit it finds is theirs (a gate decision syncs as its actor). */
+  private syncEdits(run: Run): void {
+    syncEditable(this.rt, run);
   }
 
   private emit(run: Run, kind: string, payload: Record<string, unknown>): void {

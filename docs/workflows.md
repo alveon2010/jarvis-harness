@@ -345,7 +345,8 @@ steps:
 - люди: `approval.recorded|skipped|committed` (у `recorded` — `channel`: `cli` или `ui`), `card.open|closed`
   (карточка в терминале ждёт решения: так страница знает, пойдёт ли прогон дальше сразу),
   `interaction.opened|turn|resolved|rejected`, `review.submitted|classified|resolved|markersRemoved`,
-  `workspace.humanEdit|scratchRemoved`;
+  `workspace.humanEdit|scratchRemoved`, `artifact.humanEdit|humanEditRejected` (документ поправлен в
+  файле `.jarvis/runs/<run>/…`: новая версия человека или причина, почему правка не принята);
 - знание и контекст: `knowledge.promoted`, `standards.checked`, `retrieval.knowledge`,
   `graph.update|update_failed`, `context.pressure|trimmed|compacting|compacted|reset|tightened|compaction_failed|overflow|prefixChanged`
   (`compacting` — началась сводка старой части разговора: отдельный вызов модели);

@@ -26,6 +26,7 @@ import type { AgentRunner } from "../orchestration/executors.ts";
 import { InterruptedError, interruption } from "../orchestration/interrupt.ts";
 import { type StepContext, type StepOutcome, SuspendRun } from "../orchestration/types.ts";
 import { wrapUntrusted } from "../security/policy/untrusted.ts";
+import { callRefsOf } from "../telemetry/callRefs.ts";
 import type { ToolResult } from "../tools/types.ts";
 import { buildBaseMessages, outlinesFor } from "./context.ts";
 import type { AgentRegistry } from "./definition.ts";
@@ -742,7 +743,12 @@ export class AgentRuntimeRunner implements AgentRunner {
         name: `${def.output.type}.json`,
         content: JSON.stringify(forPeople(rt, ctx.run.id, result.value), null, 2),
         mediaType: "application/json",
-        provenance: { kind: "agent", agentId: def.id, ...(budgetExhausted ? { budgetExhausted } : {}) },
+        provenance: {
+          kind: "agent",
+          agentId: def.id,
+          ...callRefsOf(rt.events, ctx.run.id, ctx.step.id, ctx.iteration),
+          ...(budgetExhausted ? { budgetExhausted } : {}),
+        },
         // What the agent was told (ADR-0020 §4) joins what it read (ADR-0005).
         sourceRefs: [...(doc.sources ?? []), ...pkg.provenance],
         stepId: ctx.step.id,
@@ -776,7 +782,11 @@ export class AgentRuntimeRunner implements AgentRunner {
           type: "invalid-output",
           name: `${def.output.type}.txt`,
           content: error.rawText,
-          provenance: { kind: "agent", agentId: def.id },
+          provenance: {
+            kind: "agent",
+            agentId: def.id,
+            ...callRefsOf(rt.events, ctx.run.id, ctx.step.id, ctx.iteration),
+          },
           stepId: ctx.step.id,
           iteration: ctx.iteration,
         });
