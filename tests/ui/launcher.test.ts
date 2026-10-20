@@ -661,6 +661,11 @@ describe("New task on the page", () => {
     const at = { runId: run.id, stepId: "implementation" };
     rt.events.emit({ kind: "step.start", ...at, payload: { stepId: "implementation", iteration: 1 } });
     rt.events.emit({ kind: "agent.start", ...at, payload: { agent: "implementation" } });
+    rt.events.emit({
+      kind: "context.skills",
+      ...at,
+      payload: { skills: ["skill:sdd-implementation@1"], how: "picked", kind: "fix", stacks: ["java"] },
+    });
     for (const [capability, args] of [
       ["plan.step", { step: "1", status: "start" }],
       ["repo.write", { path: "src/slots.types.ts", content: "x" }],
@@ -679,6 +684,8 @@ describe("New task on the page", () => {
     );
     expect(body).toContain('href="/open?path=src%2Fsaga.ts"');
     expect(body).toContain("running now · plan 2 of 3");
+    // which skills the step's agent got, and why
+    expect(body).toContain("skills: sdd-implementation@1 — picked by kind fix, stack java");
     expect(await page("/")).toContain('<b class="planat">plan 2 of 3</b> Fetch the slots in the saga');
   });
 

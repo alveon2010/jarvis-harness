@@ -38,6 +38,12 @@ export const StepDefinitionSchema = z.strictObject({
   inputs: z.array(z.string().min(1)).default([]),
   outputs: z.array(z.string().min(1)).default([]),
   transitions: StepTransitionsSchema.prefault({}),
+  /**
+   * Agentic steps: the skills its agent gets, by id, in full and in this order — no picking by kind,
+   * stack or paths and no `maxSkills` cut (ADR-0020 §3). For weak models, what a step must follow is
+   * not left to ranking or to a request the model might not make. Absent: the skills are picked.
+   */
+  skills: z.array(z.string().min(1)).optional(),
   /** Only for composite steps: independent children run in parallel with a shared budget. */
   children: z.array(z.string().min(1)).default([]),
   /**

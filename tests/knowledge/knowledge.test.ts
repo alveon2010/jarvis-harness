@@ -247,6 +247,19 @@ describe("skills and the resolver", () => {
     ]);
     const again = resolvePackage({ roots: { projectRoot: sb.project }, config: CONFIG, task });
     expect(again.provenance).toEqual(pkg.provenance);
+    expect(pkg.skillsBy).toEqual({ how: "picked" });
+
+    // a workflow step that names its skills gets them, in its order and in full: nothing picked, no cut
+    const named = resolvePackage({
+      roots: { projectRoot: sb.project },
+      config: CONFIG,
+      task,
+      stepSkills: ["unit-testing", "sdd-implementation", "py-thing", "no-such"],
+    });
+    expect(named.skills.map((s) => s.id)).toEqual(["unit-testing", "sdd-implementation", "py-thing"]);
+    expect(named.skillsBy).toEqual({ how: "step", missing: ["no-such"] });
+    // what else matched stays on request
+    expect(named.deferredSkills.map((s) => s.id)).toEqual(["aspnet-endpoint-change", "csharp-generic"]);
 
     // before impact analysis nothing is known about paths: path-scoped items stay in
     const early = resolvePackage({

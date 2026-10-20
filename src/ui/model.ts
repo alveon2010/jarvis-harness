@@ -575,6 +575,31 @@ export interface StepRow {
   readonly startedAt?: string;
   /** Done in the run this one went on from (`jarvis continue`): its report, not this run's. */
   readonly carriedFrom?: { readonly id: string; readonly workflow: string };
+  /** The skills its agent got last time and why (event `context.skills`, src/agents/knowledge.ts). */
+  readonly skills?: StepSkills;
+}
+
+export interface StepSkills {
+  /** `skill:id@v`, in the order the agent got them. */
+  readonly refs: readonly string[];
+  /** `step` — named by the workflow step; `picked` — by kind, stacks, paths and agent. */
+  readonly how: "step" | "picked";
+  readonly kind?: string;
+  readonly stacks: readonly string[];
+  /** Skill ids the step names that the project has not. */
+  readonly missing: readonly string[];
+}
+
+function skillsOf(e: StoredEvent): StepSkills {
+  const p = (e.payload ?? {}) as Record<string, unknown>;
+  const list = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+  return {
+    refs: list(p.skills),
+    how: p.how === "step" ? "step" : "picked",
+    ...(typeof p.kind === "string" ? { kind: p.kind } : {}),
+    stacks: list(p.stacks),
+    missing: list(p.missing),
+  };
 }
 
 export interface FeedItem {
@@ -988,7 +1013,9 @@ export async function runPage(
   const loops = new Map<string, LoopReport[]>();
   const started = new Map<string, string>();
   const finished = new Set<string>();
+  const skills = new Map<string, StepSkills>();
   for (const e of events) {
+    if (e.kind === "context.skills" && e.stepId) skills.set(e.stepId, skillsOf(e));
     if (e.kind === "step.start") {
       const id = str(e.payload?.stepId) ?? e.stepId;
       if (id) {
@@ -1053,6 +1080,7 @@ export async function runPage(
       rounds: all.filter((r) => r.status !== "skipped").length,
       loops: loops.get(id) ?? [],
       ...(at ? { startedAt: at } : {}),
+      ...((k) => (k ? { skills: k } : {}))(skills.get(id)),
     };
   };
   // composite children right under their parent, as the terminal shows them side by side

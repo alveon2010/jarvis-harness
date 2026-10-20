@@ -32,6 +32,7 @@ import type {
   RunsPage,
   ScopeCard,
   StepRow,
+  StepSkills,
   TestsStop,
   WaitCard,
   WaitingCandidate,
@@ -713,6 +714,23 @@ ${b.calls.slice(0, 12).map((c) => {
 
 /* ---- one run ---- */
 
+/** Under a step: the skills its agent got, and why — named by the workflow, or picked by the task. */
+function stepSkillsHtml(k: StepSkills): Html {
+  const names = k.refs.map((r) => r.replace(/^skill:/, ""));
+  const why =
+    k.how === "step"
+      ? t("named by the workflow step")
+      : t("picked by {what}", {
+          what: [
+            k.kind ? t("kind {kind}", { kind: k.kind }) : "",
+            ...(k.stacks.length > 0 ? [t("stack {stacks}", { stacks: k.stacks.join(", ") })] : []),
+          ]
+            .filter(Boolean)
+            .join(", "),
+        });
+  return html`<span class="note">${t("skills:")} ${names.length > 0 ? names.join(", ") : t("none")} — ${why}${k.missing.length > 0 ? html` · <span class="bad">${t("no such skill: {ids}", { ids: k.missing.join(", ") })}</span>` : ""}</span>`;
+}
+
 function stepRow(s: StepRow, now: number, plan?: PlanProgress): Html {
   const icon = {
     done: ["✓", "ok"],
@@ -769,7 +787,7 @@ function stepRow(s: StepRow, now: number, plan?: PlanProgress): Html {
   const tone = icon?.[1] === "info" ? "" : icon?.[1];
   return html`<li class="step ${s.status}${s.child ? " child" : ""}${s.status === "waiting" || s.status === "running" ? " focus" : ""}">
 <span class="ic ${tone ?? ""}" aria-hidden="true">${icon?.[0] ?? ""}</span>
-<span class="nm"><b>${s.id}${iteration}<span class="sr"> — ${s.status}</span></b>${notes.length > 0 ? html`<span class="note">${notes.join(" · ")}</span>` : ""}</span>
+<span class="nm"><b>${s.id}${iteration}<span class="sr"> — ${s.status}</span></b>${notes.length > 0 ? html`<span class="note">${notes.join(" · ")}</span>` : ""}${s.skills ? stepSkillsHtml(s.skills) : ""}</span>
 <span class="took">${took}</span>
 </li>`;
 }

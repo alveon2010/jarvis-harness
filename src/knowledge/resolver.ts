@@ -103,6 +103,11 @@ export interface EngineeringContextPackage {
   readonly knowledge: KnowledgeDoc[];
   /** Everything that matched but was cut by maxSkills — available on request via knowledge.read. */
   readonly deferredSkills: Skill[];
+  /**
+   * How the skills were chosen: `step` — the workflow step names them; `picked` — by the task's kind,
+   * stacks, paths and agent. `missing`: ids the step names that no skill has.
+   */
+  readonly skillsBy: { readonly how: "step" | "picked"; readonly missing?: readonly string[] };
   /** `standard:ID@v`, `skill:id@v`, `knowledge:name#sha` — goes into artifact provenance. */
   readonly provenance: string[];
 }
@@ -152,6 +157,8 @@ export interface ResolveInput {
   readonly roots: KnowledgeRoots;
   readonly config: KnowledgeConfig;
   readonly task: TaskScope;
+  /** The skills the workflow step names (StepDefinition.skills): given as they are, nothing picked. */
+  readonly stepSkills?: readonly string[];
 }
 
 export function resolvePackage(input: ResolveInput): EngineeringContextPackage {
@@ -184,8 +191,16 @@ export function resolvePackage(input: ResolveInput): EngineeringContextPackage {
       task,
     ),
   );
-  const selectedSkills = skillsRanked.slice(0, input.config.maxSkills);
-  const deferredSkills = skillsRanked.slice(input.config.maxSkills);
+  const byId = new Map(skills.map((s) => [s.id, s]));
+  const named = input.stepSkills;
+  const selectedSkills = named
+    ? named.map((id) => byId.get(id)).filter((s): s is Skill => s !== undefined)
+    : skillsRanked.slice(0, input.config.maxSkills);
+  // what else matched stays available on request, as with picking
+  const deferredSkills = named
+    ? skillsRanked.filter((s) => !named.includes(s.id))
+    : skillsRanked.slice(input.config.maxSkills);
+  const missing = named?.filter((id) => !byId.has(id)) ?? [];
 
   const required = selectedSkills.flatMap((s) => s.requiredStandards);
   const standardsRanked = rank(standards, (s) => {
@@ -205,6 +220,7 @@ export function resolvePackage(input: ResolveInput): EngineeringContextPackage {
     standards: stableBySeverity(standardsRanked),
     knowledge,
     deferredSkills,
+    skillsBy: named ? { how: "step", ...(missing.length > 0 ? { missing } : {}) } : { how: "picked" },
     provenance: [
       ...selectedSkills.map(skillRef),
       ...standardsRanked.map(standardRef),

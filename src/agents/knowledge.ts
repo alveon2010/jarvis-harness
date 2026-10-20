@@ -2,6 +2,7 @@ import { detectStackScopes, effectiveStacks, stacksForPaths } from "../capabilit
 import type { TaskKind } from "../core/domain/run.ts";
 import { type EngineeringContextPackage, resolvePackage } from "../knowledge/resolver.ts";
 import { rankKnowledge, refreshIndex } from "../knowledge/retrieval/service.ts";
+import { skillRef } from "../knowledge/skills.ts";
 import { knowledgeRootsOf } from "../knowledge/sources.ts";
 import type { StepContext } from "../orchestration/types.ts";
 
@@ -81,6 +82,24 @@ export async function packageForStep(ctx: StepContext, agentId: string): Promise
     roots,
     config: config.knowledge,
     task: { kind: taskKindOf(ctx), affectedPaths, stacks, agentId },
+    ...(ctx.step.skills ? { stepSkills: ctx.step.skills } : {}),
+  });
+  // which skills the agent got and why, for the run's page (src/ui/model.ts)
+  ctx.runtime.events.emit({
+    kind: "context.skills",
+    runId: ctx.run.id,
+    stepId: ctx.step.id,
+    iteration: ctx.iteration,
+    payload: {
+      agent: agentId,
+      skills: pkg.skills.map(skillRef),
+      how: pkg.skillsBy.how,
+      ...(pkg.skillsBy.missing ? { missing: pkg.skillsBy.missing } : {}),
+      kind: pkg.task.kind,
+      stacks: pkg.task.stacks,
+      paths: affectedPaths.length,
+      onRequest: pkg.deferredSkills.map(skillRef),
+    },
   });
   if (pkg.knowledge.length <= ctx.runtime.loaded.config.knowledge.retrieval.rankAbove) return pkg;
   // ADR-0015: the index keeps pace with the project and the run before it ranks.

@@ -1197,6 +1197,13 @@ export const RU: Readonly<Record<string, string>> = {
     "Этот прогон нельзя продолжить: он не закончен, ему некуда идти или его уже продолжили",
   "Not a repository this page knows: start {cmd} in it":
     "Этот репозиторий странице незнаком: запустите в нём {cmd}",
+  // ---- a step's skills
+  "named by the workflow step": "заданы в шаге workflow",
+  "picked by {what}": "подобраны по {what}",
+  "kind {kind}": "виду {kind}",
+  "stack {stacks}": "стеку {stacks}",
+  "skills:": "навыки:",
+  "no such skill: {ids}": "нет такого навыка: {ids}",
 };
 
 /**
