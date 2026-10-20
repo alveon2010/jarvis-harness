@@ -176,7 +176,8 @@ describe("AgentRuntimeRunner", () => {
     expect(messages[1]?.content).toContain("canRestartOnboarding()");
     expect(
       (first.body.tools as unknown[]).map((t) => (t as { function: { name: string } }).function.name),
-    ).toEqual(expect.arrayContaining(["repo.read", "repo.search", "git.log"]));
+      // on the wire without dots: OpenAI-compatible servers take [a-zA-Z0-9_-] only; mapped back on the reply
+    ).toEqual(expect.arrayContaining(["repo_read", "repo_search", "git_log"]));
     // System layer is byte-identical across the tool rounds (ADR-0013 §4).
     const systemTexts = server.requests
       .slice(0, 3)

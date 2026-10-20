@@ -94,7 +94,8 @@ export function windowsCommandLine(command: string): string {
 
 /** Runs a command line through the shell (project commands, `shell.run`). */
 export function runShell(command: string, options: CommandOptions): Promise<CommandResult> {
-  if (process.platform === "win32") return runCommand("cmd.exe", ["/c", windowsCommandLine(command)], options);
+  if (process.platform === "win32")
+    return runCommand("cmd.exe", ["/c", windowsCommandLine(command)], options);
   return runCommand("/bin/sh", ["-c", command], options);
 }
 

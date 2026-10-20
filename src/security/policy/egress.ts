@@ -37,7 +37,9 @@ export function modelEgressAllowed(
 ): boolean {
   const model = config.models[modelId];
   if (!model) return false;
-  return modelAllowed(config.dataClass, model.egress) || modelEgressExceptionFor(config, modelId) !== undefined;
+  return (
+    modelAllowed(config.dataClass, model.egress) || modelEgressExceptionFor(config, modelId) !== undefined
+  );
 }
 
 export function networkAllowed(dataClass: DataClass, network: Network): boolean {
