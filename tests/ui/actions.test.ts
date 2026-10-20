@@ -802,7 +802,7 @@ describe("the implementation gate says how to try it", () => {
 
     const page = await getPage(`/runs/${short}/artifacts/implementation/implementation.json`);
     expect(page).toContain('<a href="#try">Try it</a>');
-    expect(page).toContain("Go to the run's checkout");
+    expect(page).toContain("Go to the run&#39;s checkout");
     expect(page).toContain("branch jarvis/ABC-42/run");
     expect(page).toContain("<code>yarn start-dev</code>");
     expect(page).toContain("<b>R1</b> Slots come from logistics-api");

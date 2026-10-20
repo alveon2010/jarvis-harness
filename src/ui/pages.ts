@@ -1,8 +1,8 @@
 import { type Activity, clock, compactingText, kilo, QUIET_MS, type ToolBatch } from "../app/activity.ts";
 import { type BudgetStop, sourceOf, unitOf } from "../app/budgetStop.ts";
-import { type BudgetWait, whenText } from "../app/budgetWait.ts";
+import { type BudgetWait, whenText as whenTextEn } from "../app/budgetWait.ts";
 import { isStale, issueKeyOf, type StartPoint } from "../app/continuation.ts";
-import { duration } from "../app/journey.ts";
+import { duration as durationEn } from "../app/journey.ts";
 import type { McpHealth, McpServerHealth } from "../app/mcpHealth.ts";
 import type { HealthState, ModelHealth, ModelPerf, ModelsHealth, Unlimited } from "../app/modelHealth.ts";
 import type { PlanProgress } from "../app/planProgress.ts";
@@ -20,6 +20,7 @@ import type { EgressNotice, ModelEgressNotice } from "../security/policy/egress.
 import { shortRunId } from "../storage/runStore.ts";
 import { checkLogHtml, checksHtml, checksOf } from "./checks.ts";
 import { type DiffFile, escapeHtml, type Html, html, join, markdownToHtml, type Part, raw } from "./html.ts";
+import { LANG_COOKIE, lang, plural, t, units, when } from "./i18n.ts";
 import type {
   ApprovalCard,
   ArtifactPage,
@@ -56,15 +57,13 @@ export interface Actions {
   readonly canLaunch?: boolean;
 }
 
-const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
-
 /** A POST form with the session token: a foreign page cannot make one (ADR-0023 §5). */
 function form(actions: Actions, action: string, body: Part, attrs: Part = ""): Html {
   return html`<form method="post" action="${action}"${attrs}><input type="hidden" name="t" value="${actions.token}">${body}</form>`;
 }
 
 /** "Resume": the page drives the run from now on and starts `jarvis resume` (src/app/resumable.ts). */
-function resumeForm(actions: Actions, run: Pick<Run, "id">, label = "Resume"): Html {
+function resumeForm(actions: Actions, run: Pick<Run, "id">, label = t("Resume")): Html {
   return form(
     actions,
     `${runHref(run)}/resume`,
@@ -75,11 +74,12 @@ function resumeForm(actions: Actions, run: Pick<Run, "id">, label = "Resume"): H
 /** After a decision: who goes on with it — the terminal at the card, this page, or nobody yet. */
 function goesOn(page: Pick<RunPage, "run" | "terminal" | "driven" | "resumable">, actions?: Actions): Html {
   const cmd = `jarvis continue ${shortRunId(page.run.id)}`;
-  if (page.terminal) return html`<span class="hint">The terminal waiting at the card goes on with it.</span>`;
+  if (page.terminal)
+    return html`<span class="hint">${t("The terminal waiting at the card goes on with it.")}</span>`;
   if (page.resumable && actions)
-    return html`${resumeForm(actions, page.run)}<span class="hint">${page.driven ? "It did not go on by itself" : "No terminal waits at this run"}: Resume goes on in the background, or <code>${cmd}</code> in a terminal</span>`;
-  if (page.driven) return html`<span class="hint">It goes on in the background.</span>`;
-  return html`<span class="hint">No terminal waits at this run: it goes on with <code>${cmd}</code></span><button type="button" class="btn" data-copy="${cmd}">Copy command</button>`;
+    return html`${resumeForm(actions, page.run)}<span class="hint">${page.driven ? t("It did not go on by itself") : t("No terminal waits at this run")}: ${t("Resume goes on in the background, or")} <code>${cmd}</code> ${t("in a terminal")}</span>`;
+  if (page.driven) return html`<span class="hint">${t("It goes on in the background.")}</span>`;
+  return html`<span class="hint">${t("No terminal waits at this run: it goes on with")} <code>${cmd}</code></span><button type="button" class="btn" data-copy="${cmd}">${t("Copy command")}</button>`;
 }
 
 export interface Chrome {
@@ -114,12 +114,19 @@ function sectionsHtml(chrome: Chrome): Html {
   const path = chrome.path ?? "";
   const services = path.startsWith("/knowledge/services");
   const at = (on: boolean) => (on ? html` aria-current="page"` : "");
-  return html`<nav class="sections" aria-label="Pages"><a href="/"${at(chrome.page === "runs" || chrome.page === "run" || chrome.page === "artifact")}>Runs${chrome.waits ? html`<span class="n w">${String(chrome.waits)} waits</span>` : ""}</a><a href="/knowledge"${at(chrome.page === "knowledge" && !services)}>Knowledge</a>${chrome.services !== undefined ? html`<a href="/knowledge/services"${at(services)}>Services<span class="n">${String(chrome.services)}</span></a>` : ""}</nav>`;
+  return html`<nav class="sections" aria-label="${t("Pages")}"><a href="/"${at(chrome.page === "runs" || chrome.page === "run" || chrome.page === "artifact")}>${t("Runs")}${chrome.waits ? html`<span class="n w">${plural(chrome.waits, "waits", "wait")}</span>` : ""}</a><a href="/knowledge"${at(chrome.page === "knowledge" && !services)}>${t("Knowledge")}</a>${chrome.services !== undefined ? html`<a href="/knowledge/services"${at(services)}>${t("Services")}<span class="n">${String(chrome.services)}</span></a>` : ""}</nav>`;
+}
+
+/** EN | RU in the top bar: a link that sets the language cookie and comes back here (src/ui/server.ts). */
+function langSwitch(path: string): Html {
+  const now = lang();
+  const other = now === "ru" ? "en" : "ru";
+  return html`<a class="theme lang" href="/lang?to=${other}&amp;back=${encodeURIComponent(path)}" hreflang="${other}" title="${now === "ru" ? "English" : "Русский"}" aria-label="${now === "ru" ? "Switch to English" : "Переключить на русский"}" data-lang-cookie="${LANG_COOKIE}">${other.toUpperCase()}</a>`;
 }
 
 export function layout(chrome: Chrome, content: Html): string {
   return html`<!doctype html>
-<html lang="en"${chrome.theme ? html` data-theme="${chrome.theme}"` : ""}>
+<html lang="${lang()}"${chrome.theme ? html` data-theme="${chrome.theme}"` : ""}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -133,20 +140,21 @@ ${chrome.refresh ? html`<noscript><meta http-equiv="refresh" content="${String(c
 <script src="/assets/app.js" defer></script>
 </head>
 <body data-page="${chrome.page}"${chrome.runId ? html` data-run="${chrome.runId}"` : ""}${chrome.tick ? html` data-tick="${chrome.tick}"` : ""}>
-<a class="skip-link" href="#main">Skip to content</a>
+<a class="skip-link" href="#main">${t("Skip to content")}</a>
 <header class="top"><div class="bar">
 <a class="brand" href="/"><span class="mark" aria-hidden="true"></span>jarvis</a>
 ${sectionsHtml(chrome)}
 ${chrome.repos ?? ""}
 <div class="status">
-<div class="models-wrap" data-pop-wrap><button type="button" class="models" data-mcp aria-expanded="false" aria-controls="mcp-pop" title="MCP: checking the servers…"><span class="dot" data-state="pending" aria-hidden="true"></span><span>mcp</span></button>
-<div id="mcp-pop" class="pop" role="dialog" aria-label="MCP servers" hidden><div data-mcp-body>${mcpPending()}</div></div></div>
-<div class="models-wrap" data-pop-wrap><button type="button" class="models" data-models aria-expanded="false" aria-controls="models-pop" title="Models: collecting the stats…"><span class="dot" data-state="pending" aria-hidden="true"></span><span>models</span><span class="free" data-badge hidden></span></button>
-<div id="models-pop" class="pop" role="dialog" aria-label="Models" hidden><div data-models-body>${modelsPending()}</div></div></div>
-<span class="live" data-state="connecting" role="status" title="${chrome.address}"><span class="dot" aria-hidden="true"></span><span class="label">connecting…</span></span>
-<button type="button" class="theme notify" data-notify aria-pressed="false" aria-label="System notifications when a run waits for you" title="System notifications when a run waits for you"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.75a4 4 0 0 0-4 4v2.6L2.75 11h10.5L12 8.35v-2.6a4 4 0 0 0-4-4zM6.5 13a1.5 1.5 0 0 0 3 0" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"></path></svg></button>
-<button type="button" class="theme" data-theme-switch aria-label="Switch the theme" title="Switch the theme"><svg class="moon" viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 9.6A5.75 5.75 0 0 1 6.4 2.5a5.75 5.75 0 1 0 7.1 7.1z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"></path></svg><svg class="sun" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.5"></circle><path d="M8 1v1.75M8 13.25V15M1 8h1.75M13.25 8H15M3.05 3.05l1.24 1.24M11.71 11.71l1.24 1.24M3.05 12.95l1.24-1.24M11.71 4.29l1.24-1.24" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path></svg></button>
-${chrome.canStart ? html`<a class="btn primary small newtask-btn" href="/#new" data-new-task title="New task (N)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"></path></svg>New task<kbd aria-hidden="true">N</kbd></a>` : ""}
+<div class="models-wrap" data-pop-wrap><button type="button" class="models" data-mcp aria-expanded="false" aria-controls="mcp-pop" title="${t("MCP: checking the servers…")}"><span class="dot" data-state="pending" aria-hidden="true"></span><span>mcp</span></button>
+<div id="mcp-pop" class="pop" role="dialog" aria-label="${t("MCP servers")}" hidden><div data-mcp-body>${mcpPending()}</div></div></div>
+<div class="models-wrap" data-pop-wrap><button type="button" class="models" data-models aria-expanded="false" aria-controls="models-pop" title="${t("Models: collecting the stats…")}"><span class="dot" data-state="pending" aria-hidden="true"></span><span>models</span><span class="free" data-badge hidden></span></button>
+<div id="models-pop" class="pop" role="dialog" aria-label="${t("Models")}" hidden><div data-models-body>${modelsPending()}</div></div></div>
+<span class="live" data-state="connecting" role="status" title="${chrome.address}"><span class="dot" aria-hidden="true"></span><span class="label">${t("connecting…")}</span></span>
+<button type="button" class="theme notify" data-notify aria-pressed="false" aria-label="${t("System notifications when a run waits for you")}" title="${t("System notifications when a run waits for you")}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.75a4 4 0 0 0-4 4v2.6L2.75 11h10.5L12 8.35v-2.6a4 4 0 0 0-4-4zM6.5 13a1.5 1.5 0 0 0 3 0" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"></path></svg></button>
+<button type="button" class="theme" data-theme-switch aria-label="${t("Switch the theme")}" title="${t("Switch the theme")}"><svg class="moon" viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 9.6A5.75 5.75 0 0 1 6.4 2.5a5.75 5.75 0 1 0 7.1 7.1z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"></path></svg><svg class="sun" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.5"></circle><path d="M8 1v1.75M8 13.25V15M1 8h1.75M13.25 8H15M3.05 3.05l1.24 1.24M11.71 11.71l1.24 1.24M3.05 12.95l1.24-1.24M11.71 4.29l1.24-1.24" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path></svg></button>
+${langSwitch(chrome.path ?? "/")}
+${chrome.canStart ? html`<a class="btn primary small newtask-btn" href="/#new" data-new-task title="${t("New task (N)")}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"></path></svg>${t("New task")}<kbd aria-hidden="true">N</kbd></a>` : ""}
 </div>
 </div></header>
 ${
@@ -161,7 +169,7 @@ ${
     : ""
 }
 <main id="main" class="wrap">
-${chrome.back ? html`<nav class="crumb" aria-label="Back"><a href="${chrome.back.href}">← ${chrome.back.label}</a></nav>` : ""}
+${chrome.back ? html`<nav class="crumb" aria-label="${t("Back")}"><a href="${chrome.back.href}">← ${chrome.back.label}</a></nav>` : ""}
 ${content}
 </main>
 </body>
@@ -191,11 +199,16 @@ export function wallClock(iso: string): string {
 function ago(iso: string, now: number): string {
   const ms = Math.max(0, now - Date.parse(iso));
   const m = Math.floor(ms / 60_000);
-  if (m < 1) return "just now";
-  if (m < 60) return `${m}m`;
+  if (m < 1) return t("just now");
+  if (m < 60) return units(`${m}m`);
   const h = Math.floor(m / 60);
-  return h < 48 ? `${h}h` : `${Math.floor(h / 24)}d`;
+  return units(h < 48 ? `${h}h` : `${Math.floor(h / 24)}d`);
 }
+
+/** How long, in the page's language. */
+const duration = (ms: number): string => units(durationEn(ms));
+/** When a wait ends, in the page's language. */
+const whenText = (iso: string | undefined, now?: number): string => when(whenTextEn(iso, now));
 
 const runHref = (run: Pick<Run, "id">) => `/runs/${encodeURIComponent(shortRunId(run.id))}`;
 
@@ -215,7 +228,7 @@ const pausable = (page: Pick<RunPage, "run" | "leaseLive">): boolean =>
 
 function statePill(run: Run, extra?: string): Html {
   if (cancelling(run))
-    return html`<span class="pill bad"><span class="spin" aria-hidden="true"></span> CANCELLING</span>`;
+    return html`<span class="pill bad"><span class="spin" aria-hidden="true"></span> ${t("CANCELLING")}</span>`;
   const s = run.state;
   const tone =
     s === "COMPLETED"
@@ -228,7 +241,7 @@ function statePill(run: Run, extra?: string): Html {
             ? "plain"
             : "wait";
   const glyph = { ok: "✓", bad: "✗", info: "◌", plain: "–", wait: "⏸" }[tone];
-  const label = s === "WAITING_BUDGET" ? "PAUSED · waits for quota" : s;
+  const label = s === "WAITING_BUDGET" ? t("PAUSED · waits for quota") : t(s);
   return html`<span class="pill ${tone}">${glyph} ${label}${extra ? ` · ${extra}` : ""}</span>`;
 }
 
@@ -244,14 +257,14 @@ function changeLine(c: Change): Html {
 function terminalHint(card: WaitCard, terminal: boolean, run: Run): Html {
   const cmd = `jarvis continue ${shortRunId(run.id)}`;
   if (terminal)
-    return html`<p class="hint">A terminal waits at this card: what you decide there shows here, and the other way round.</p>`;
+    return html`<p class="hint">${t("A terminal waits at this card: what you decide there shows here, and the other way round.")}</p>`;
   const key =
     card.kind === "loop"
-      ? html` (<code>r</code> runs ${card.step} again)`
+      ? html` (<code>r</code> ${t("runs {step} again", { step: card.step })})`
       : card.kind === "budget"
-        ? html` (<code>enter</code> more, <code>f</code> finish)`
+        ? html` (<code>enter</code> ${t("more")}, <code>f</code> ${t("finish")})`
         : "";
-  return html`<div class="actions"><span class="hint">Decide in the terminal: <code>${cmd}</code>${key}</span><button type="button" class="btn" data-copy="${cmd}">Copy command</button></div>`;
+  return html`<div class="actions"><span class="hint">${t("Decide in the terminal:")} <code>${cmd}</code>${key}</span><button type="button" class="btn" data-copy="${cmd}">${t("Copy command")}</button></div>`;
 }
 
 /* ---- runs ---- */
@@ -260,16 +273,16 @@ function terminalHint(card: WaitCard, terminal: boolean, run: Run): Html {
 function candidateCardHtml(c: WaitingCandidate, now: number): Html {
   const href = `/knowledge/modules?path=${encodeURIComponent(c.module)}`;
   return html`<article class="panel card">
-<div class="row"><span class="pill info">⏸ knowledge · module</span><span class="meta">onboard-module · ${c.run} · waiting ${ago(c.at, now)}</span></div>
-<h3>Review what the research found: <code>${c.module}</code></h3>
-<p>${c.claims ? `${c.claims.kept} of ${c.claims.proposed} claims confirmed against the code` : "A module document"}${c.review > 0 ? ` · ${c.review} generalisation${c.review === 1 ? "" : "s"} to check` : ""}. Nothing is written until you accept it.</p>
-<div class="actions"><a class="btn primary" href="${href}">Review the module</a><a class="btn" href="/runs/${encodeURIComponent(c.run)}">Open the run</a></div>
+<div class="row"><span class="pill info">⏸ ${t("knowledge · module")}</span><span class="meta">onboard-module · ${c.run} · ${t("waiting {ago}", { ago: ago(c.at, now) })}</span></div>
+<h3>${t("Review what the research found:")} <code>${c.module}</code></h3>
+<p>${c.claims ? t("{kept} of {proposed} claims confirmed against the code", { kept: c.claims.kept, proposed: c.claims.proposed }) : t("A module document")}${c.review > 0 ? ` · ${t("{n} to check", { n: plural(c.review, "generalisation") })}` : ""}. ${t("Nothing is written until you accept it.")}</p>
+<div class="actions"><a class="btn primary" href="${href}">${t("Review the module")}</a><a class="btn" href="/runs/${encodeURIComponent(c.run)}">${t("Open the run")}</a></div>
 </article>`;
 }
 
 function waitingCardHtml(w: WaitingRun, now: number, actions?: Actions): Html {
   const { run, card } = w;
-  const meta = html`<span class="meta">${run.workflow} · ${shortRunId(run.id)} · waiting ${ago(run.updatedAt, now)}${w.terminal ? " · a terminal waits" : ""}</span>`;
+  const meta = html`<span class="meta">${run.workflow} · ${shortRunId(run.id)} · ${t("waiting {ago}", { ago: ago(run.updatedAt, now) })}${w.terminal ? ` · ${t("a terminal waits")}` : ""}</span>`;
   // decided, and nobody goes on with it: Resume first (src/app/resumable.ts)
   const resume = w.resumable && actions ? resumeForm(actions, run) : "";
   const primary = resume ? "btn" : "btn primary";
@@ -280,21 +293,21 @@ function waitingCardHtml(w: WaitingRun, now: number, actions?: Actions): Html {
         (r, i) =>
           html`${i > 0 ? "; " : ""}${r.kind ? html`<span class="chip">${r.kind}</span> ` : ""}${cut(r.text, 120)}`,
       );
-    const more = card.reasons.length > 2 ? ` +${card.reasons.length - 2} more` : "";
+    const more = card.reasons.length > 2 ? ` ${t("+{n} more", { n: card.reasons.length - 2 })}` : "";
     return html`<article class="panel card">
-<div class="row"><span class="pill wait">⏸ loop used up · ${card.step}</span>${meta}</div>
+<div class="row"><span class="pill wait">⏸ ${card.tests ? t("tests failed") : t("loop used up")} · ${card.step}</span>${meta}</div>
 <h3>${firstLine(run.task)}</h3>
-<p>${card.step} sent the work back ${card.iterations ? `${card.iterations} times` : "too often"}${card.reasons.length > 0 ? html`: ${reasons}${more}` : "."}</p>
-<div class="actions">${resume}<a class="${primary}" href="${runHref(run)}">Open the run</a>${actions ? form(actions, `${runHref(run)}/open`, html`<button type="submit" class="btn">Open in editor</button>`) : ""}</div>
+<p>${card.iterations ? t("{step} sent the work back {times}", { step: card.step, times: plural(card.iterations, "time") }) : t("{step} sent the work back too often", { step: card.step })}${card.reasons.length > 0 ? html`: ${reasons}${more}` : "."}</p>
+<div class="actions">${resume}<a class="${primary}" href="${runHref(run)}">${t("Open the run")}</a>${actions ? form(actions, `${runHref(run)}/open`, html`<button type="submit" class="btn">${t("Open in editor")}</button>`) : ""}</div>
 </article>`;
   }
   if (card.kind === "budget") {
     const s = card.stop;
     return html`<article class="panel card">
-<div class="row"><span class="pill wait">⏸ budget · ${s.stepId}</span>${meta}</div>
+<div class="row"><span class="pill wait">⏸ ${t("budget")} · ${s.stepId}</span>${meta}</div>
 <h3>${firstLine(run.task)}</h3>
-<p>${s.stepId} stopped at ${amount(s.used)} of ${amount(s.cap)} ${unitOf(s.dimension)} — ${sourceOf(s)}.${card.granted ? html` <span class="ok">${grantText(s, card.granted)}</span>` : ""}</p>
-<div class="actions">${resume}<a class="${primary}" href="${runHref(run)}">Open the run</a></div>
+<p>${t("{step} stopped at {used} of {cap} {unit}", { step: s.stepId, used: amount(s.used), cap: amount(s.cap), unit: unitOf(s.dimension) })} — ${sourceOf(s)}.${card.granted ? html` <span class="ok">${grantText(s, card.granted)}</span>` : ""}</p>
+<div class="actions">${resume}<a class="${primary}" href="${runHref(run)}">${t("Open the run")}</a></div>
 </article>`;
   }
   if (card.kind === "approval") {
@@ -305,35 +318,35 @@ function waitingCardHtml(w: WaitingRun, now: number, actions?: Actions): Html {
           .join(". ")
       : cut(card.excerpt ?? "", 180);
     return html`<article class="panel card">
-<div class="row"><span class="pill info">⏸ approval · ${card.type}</span>${meta}</div>
+<div class="row"><span class="pill info">⏸ ${t("approval")} · ${card.type}</span>${meta}</div>
 <h3>${firstLine(run.task)}</h3>
 ${gist ? html`<p>${gist}</p>` : ""}
-${card.decision ? html`<p class="ok">${decisionText(card)}${w.terminal ? " — the terminal goes on" : resume ? " — nothing goes on with it yet" : html` — the run waits for <code>jarvis continue</code>`}</p>` : ""}
-<div class="actions">${resume}<a class="${primary}" href="${artifactHref(run, card.artifact)}">Review the ${card.type}</a><a class="btn" href="${runHref(run)}">Open the run</a></div>
+${card.decision ? html`<p class="ok">${decisionText(card)}${w.terminal ? ` — ${t("the terminal goes on")}` : resume ? ` — ${t("nothing goes on with it yet")}` : html` — ${t("the run waits for")} <code>jarvis continue</code>`}</p>` : ""}
+<div class="actions">${resume}<a class="${primary}" href="${artifactHref(run, card.artifact)}">${t("Review the {type}", { type: card.type })}</a><a class="btn" href="${runHref(run)}">${t("Open the run")}</a></div>
 </article>`;
   }
   if (card.kind === "clarify") {
     const question = card.messages.find((m) => m.role === "jarvis")?.text ?? "";
     return html`<article class="panel card">
-<div class="row"><span class="pill wait">⏸ clarification · ${card.thread.stepId}</span>${meta}</div>
+<div class="row"><span class="pill wait">⏸ ${t("clarification")} · ${card.thread.stepId}</span>${meta}</div>
 <h3>${firstLine(run.task)}</h3>
 ${question ? html`<p>${cut(question, 220)}</p>` : ""}
-${card.proposal ? html`<p class="ok">Jarvis proposes a rule — accept it or answer on</p>` : ""}
-<div class="actions"><a class="btn primary" href="${runHref(run)}#decision">Answer</a></div>
+${card.proposal ? html`<p class="ok">${t("Jarvis proposes a rule — accept it or answer on")}</p>` : ""}
+<div class="actions"><a class="btn primary" href="${runHref(run)}#decision">${t("Answer")}</a></div>
 </article>`;
   }
   if (card.kind === "scope")
     return html`<article class="panel card">
-<div class="row"><span class="pill wait">⏸ spans services · ${[...new Set(card.report.spans.map((x) => x.service))].join(", ")}</span>${meta}</div>
+<div class="row"><span class="pill wait">⏸ ${t("spans services")} · ${[...new Set(card.report.spans.map((x) => x.service))].join(", ")}</span>${meta}</div>
 <h3>${firstLine(run.task)}</h3>
-<p>The impact reaches other services: on as a task across services, or only ${card.report.service}</p>
-<div class="actions"><a class="btn primary" href="${runHref(run)}#decision">Decide</a></div>
+<p>${t("The impact reaches other services: on as a task across services, or only {service}", { service: card.report.service })}</p>
+<div class="actions"><a class="btn primary" href="${runHref(run)}#decision">${t("Decide")}</a></div>
 </article>`;
   return html`<article class="panel card">
 <div class="row"><span class="pill wait">⏸ ${card.what}</span>${meta}</div>
 <h3>${firstLine(run.task)}</h3>
-<p>Answer in the terminal: <code>jarvis continue ${shortRunId(run.id)}</code></p>
-<div class="actions"><a class="btn primary" href="${runHref(run)}">Open the run</a></div>
+<p>${t("Answer in the terminal:")} <code>jarvis continue ${shortRunId(run.id)}</code></p>
+<div class="actions"><a class="btn primary" href="${runHref(run)}">${t("Open the run")}</a></div>
 </article>`;
 }
 
@@ -342,11 +355,11 @@ function decisionText(card: ApprovalCard): string {
   if (!d) return "";
   const verb =
     d.approval.decision === "approve"
-      ? "✓ accepted"
+      ? `✓ ${t("accepted")}`
       : d.approval.decision === "reject"
-        ? "✗ rejected"
-        : "↻ sent back";
-  return `${verb} by ${d.approval.actor.id}${d.channel === "ui" ? " in the browser" : d.channel === "cli" ? " in the terminal" : ""}`;
+        ? `✗ ${t("rejected")}`
+        : `↻ ${t("sent back")}`;
+  return `${verb} ${t("by {who}", { who: d.approval.actor.id })}${d.channel === "ui" ? ` ${t("in the browser")}` : d.channel === "cli" ? ` ${t("in the terminal")}` : ""}`;
 }
 
 /**
@@ -361,31 +374,32 @@ export function ticking(ms: number): Html {
 /** `model call 12, waiting 0:21, receiving ~1.1k tok`: what the step's agent does now. */
 export function callText(a: Activity): Html {
   const step = a.step;
-  if (!step) return html`starting…`;
+  if (!step) return html`${t("starting…")}`;
   // the tools of the last answer still run: the model is not asked yet
   if (a.batch?.running)
-    return html`model call ${a.batch.modelCall} asked for ${a.batch.size} tools · running them`;
-  if (a.waitingMs === undefined)
-    return html`${step.modelCalls} model call${step.modelCalls === 1 ? "" : "s"}`;
+    return html`${t("model call {n} asked for {tools} · running them", { n: a.batch.modelCall, tools: plural(a.batch.size, "tool") })}`;
+  if (a.waitingMs === undefined) return html`${plural(step.modelCalls, "model call")}`;
   const coming = a.receiving
     ? a.receiving.outputChars > 0
-      ? `, receiving ~${kilo(Math.round(a.receiving.outputChars / 4))} tok`
-      : `, thinking ~${kilo(Math.round(a.receiving.reasoningChars / 4))} tok`
+      ? `, ${t("receiving ~{n} tok", { n: kilo(Math.round(a.receiving.outputChars / 4)) })}`
+      : `, ${t("thinking ~{n} tok", { n: kilo(Math.round(a.receiving.reasoningChars / 4)) })}`
     : "";
-  const retry = a.retrying ? `, retry ${a.retrying.attempt} after ${a.retrying.reason}` : "";
+  const retry = a.retrying
+    ? `, ${t("retry {n} after {why}", { n: a.retrying.attempt, why: a.retrying.reason })}`
+    : "";
   // a stream that began and went quiet (it reports every few seconds): a slow or stuck provider, say so
   const quiet =
     a.receiving && a.quietMs !== undefined && a.quietMs >= QUIET_MS
-      ? html`, <span class="warn">nothing from the model for ${ticking(a.quietMs)}</span>`
+      ? html`, <span class="warn">${t("nothing from the model for")} ${ticking(a.quietMs)}</span>`
       : "";
   if (a.compacting)
     return html`${compactingText(a.compacting)}, ${ticking(a.compacting.ms)}${coming}${quiet}${retry}`;
-  return html`model call ${step.modelCalls + 1}, waiting ${ticking(a.waitingMs)}${coming}${quiet}${retry}`;
+  return html`${t("model call {n}, waiting", { n: step.modelCalls + 1 })} ${ticking(a.waitingMs)}${coming}${quiet}${retry}`;
 }
 
 /** `[8/18] implementation#2 · model call 12, waiting 0:21, receiving ~1.1k tok` */
 function activityText(a: Activity | undefined, position?: { index: number; total: number }): Html {
-  if (!a?.step) return html`starting…`;
+  if (!a?.step) return html`${t("starting…")}`;
   const pos = position ? `[${position.index}/${position.total}] ` : "";
   const step = `${pos}${a.step.id}${a.step.iteration > 1 ? `#${a.step.iteration}` : ""}${a.step.agent && a.step.agent !== a.step.id ? ` · ${a.step.agent}` : ""}`;
   return html`${step} · ${callText(a)}`;
@@ -397,23 +411,23 @@ function toolBudget(a: Activity | undefined, now: number): Html {
   const used = step?.toolCalls ?? 0;
   const pct = max ? Math.min(100, Math.round((used / max) * 100)) : 0;
   const since = step ? ticking(now - Date.parse(step.startedAt)) : "";
-  return html`<div class="bar" role="img" aria-label="${max ? `${used} of ${max} tool calls used` : `${used} tool calls`}"><span style="width:${pct}%"></span></div>
-<span class="meta">tools ${max ? `${used}/${max}` : used}${since ? html` · ${since}` : ""}${step && step.modelCalls > 1 && used > 0 ? html` · ${perCall(used, step.modelCalls, "tools per model call")}` : ""}</span>`;
+  return html`<div class="bar" role="img" aria-label="${max ? t("{n} of {m} tool calls used", { n: used, m: max }) : plural(used, "tool call")}"><span style="width:${pct}%"></span></div>
+<span class="meta">${t("tools")} ${max ? `${used}/${max}` : used}${since ? html` · ${since}` : ""}${step && step.modelCalls > 1 && used > 0 ? html` · ${perCall(used, step.modelCalls, t("tools per model call"))}` : ""}</span>`;
 }
 
 function recentState(run: Run): Html {
   const why = run.stateReason ? ` · ${cut(run.stateReason, 48)}` : "";
   switch (run.state) {
     case "COMPLETED":
-      return html`<span class="ok">✓ COMPLETED</span>`;
+      return html`<span class="ok">✓ ${t("COMPLETED")}</span>`;
     case "FAILED":
-      return html`<span class="bad">✗ FAILED${why}</span>`;
+      return html`<span class="bad">✗ ${t("FAILED")}${why}</span>`;
     case "CANCELLED":
-      return html`<span class="muted">– CANCELLED${why}</span>`;
+      return html`<span class="muted">– ${t("CANCELLED")}${why}</span>`;
     case "RUNNING":
-      return html`<span class="warn">⏸ interrupted · <code>jarvis resume</code></span>`;
+      return html`<span class="warn">⏸ ${t("interrupted")} · <code>jarvis resume</code></span>`;
     case "WAITING_BUDGET":
-      return html`<span class="warn">⏸ waits for ${run.waitingFor?.kind === "model" ? "the model" : "quota"}</span>`;
+      return html`<span class="warn">⏸ ${run.waitingFor?.kind === "model" ? t("waits for the model") : t("waits for quota")}</span>`;
     default:
       return html`<span class="muted">${run.state}${why}</span>`;
   }
@@ -520,64 +534,64 @@ function launchRow(l: LaunchView, now: number, homeDir: string): Html {
   const age = ticking(now - Date.parse(l.startedAt));
   if (l.exitCode !== null)
     return html`<div class="panel running launch failed">
-<div class="what"><b>${firstLine(l.task)}</b><span class="meta">${l.workflow} · ${l.exitCode === 0 ? "ended without a run" : `failed to start (exit ${l.exitCode})`} · log ${home(l.log, homeDir)}</span>
+<div class="what"><b>${firstLine(l.task)}</b><span class="meta">${l.workflow} · ${l.exitCode === 0 ? t("ended without a run") : t("failed to start (exit {code})", { code: l.exitCode })} · ${t("log")} ${home(l.log, homeDir)}</span>
 ${l.tail ? html`<pre class="tail">${l.tail}</pre>` : ""}</div></div>`;
   return html`<div class="panel running launch">
-<div class="what"><b>${firstLine(l.task)}</b><span class="meta">${l.workflow} · starting ${age} · preparing the checkout (a workspace setup can take minutes) · log ${home(l.log, homeDir)}</span></div>
+<div class="what"><b>${firstLine(l.task)}</b><span class="meta">${l.workflow} · ${t("starting")} ${age} · ${t("preparing the checkout (a workspace setup can take minutes)")} · ${t("log")} ${home(l.log, homeDir)}</span></div>
 <span class="spin" aria-hidden="true"></span></div>`;
 }
 
 export function runsContent(page: RunsPage, now: number, actions?: Actions, start?: StartForm): Html {
   const waits = page.waiting.length + page.candidates.length;
   const sum = [
-    `${waits} wait${waits === 1 ? "s" : ""} for you`,
-    `${page.running.length} running`,
-    `${page.today.runs} today`,
-    `${page.today.modelCalls} model call${page.today.modelCalls === 1 ? "" : "s"} today`,
+    plural(waits, "waits for you", "wait for you"),
+    plural(page.running.length, "running", "running"),
+    t("{n} today", { n: page.today.runs }),
+    t("{calls} today", { calls: plural(page.today.modelCalls, "model call") }),
   ].join(" · ");
   const launches = start?.launches ?? [];
-  return html`<div class="lede" data-live="lede"><h1>Runs</h1><span class="muted">${sum}</span></div>
+  return html`<div class="lede" data-live="lede"><h1>${t("Runs")}</h1><span class="muted">${sum}</span></div>
 ${start?.notice ?? ""}
 ${start && actions ? newTaskHtml(start, actions) : ""}
 <section class="group" aria-labelledby="waits" data-live="waiting">
-<h2 id="waits">Waits for you</h2>
+<h2 id="waits">${t("Waits for you")}</h2>
 ${
   waits > 0
     ? html`<div class="cards">${page.waiting.map((w) => waitingCardHtml(w, now, actions))}${page.candidates.map((c) => candidateCardHtml(c, now))}</div>`
-    : html`<div class="panel empty">Nothing waits for you.</div>`
+    : html`<div class="panel empty">${t("Nothing waits for you.")}</div>`
 }
 </section>
 ${((w) =>
   w
     ? dockHtml(
-        html`<span class="pill wait">${String(waits)} wait${waits === 1 ? "s" : ""}</span><div class="what"><b>${firstLine(w.run.task, 120)}</b><span>${w.run.workflow} · ${w.run.currentStep ?? ""} · waiting ${ago(w.run.updatedAt, now)}</span></div><span class="grow"></span>${start && actions ? html`<span class="hint">New task <kbd class="key">N</kbd></span>` : ""}${actions && w.card.kind === "loop" ? form(actions, `${runHref(w.run)}/open`, html`<button type="submit" class="btn">Open in editor</button>`) : ""}<a class="btn primary" href="${runHref(w.run)}">Open the run</a>`,
+        html`<span class="pill wait">${plural(waits, "waits", "wait")}</span><div class="what"><b>${firstLine(w.run.task, 120)}</b><span>${w.run.workflow} · ${w.run.currentStep ?? ""} · ${t("waiting {ago}", { ago: ago(w.run.updatedAt, now) })}</span></div><span class="grow"></span>${start && actions ? html`<span class="hint">${t("New task")} <kbd class="key">N</kbd></span>` : ""}${actions && w.card.kind === "loop" ? form(actions, `${runHref(w.run)}/open`, html`<button type="submit" class="btn">${t("Open in editor")}</button>`) : ""}<a class="btn primary" href="${runHref(w.run)}">${t("Open the run")}</a>`,
       )
     : dockHtml(""))(page.waiting[0])}
 <section class="group" aria-labelledby="running" data-live="running">
-<h2 id="running">Running</h2>
+<h2 id="running">${t("Running")}</h2>
 ${launches.map((l) => launchHtml(l, now, start?.homeDir ?? ""))}
 ${
   page.running.length > 0 || launches.length > 0
     ? page.running.map((r) =>
         r.wait
           ? html`<div class="panel running paused">
-<div class="what"><a href="${runHref(r.run)}">${firstLine(r.run.task)}</a><span class="meta">${r.run.workflow} · ${shortRunId(r.run.id)} · ⏸ ${r.wait.kind === "model" ? `waits for the model ${r.wait.model ?? ""}` : `waits for the quota window${r.wait.pool ? ` of ${r.wait.pool}` : ""}`} · goes on ${whenText(r.wait.resumeAfter, now)}</span></div>
-<a href="${runHref(r.run)}">Open</a>
+<div class="what"><a href="${runHref(r.run)}">${firstLine(r.run.task)}</a><span class="meta">${r.run.workflow} · ${shortRunId(r.run.id)} · ⏸ ${r.wait.kind === "model" ? t("waits for the model {model}", { model: r.wait.model ?? "" }) : r.wait.pool ? t("waits for the quota window of {pool}", { pool: r.wait.pool }) : t("waits for the quota window")} · ${t("goes on {when}", { when: whenText(r.wait.resumeAfter, now) })}</span></div>
+<a href="${runHref(r.run)}">${t("Open")}</a>
 </div>`
           : html`<div class="panel running">
-<div class="what"><a href="${runHref(r.run)}">${firstLine(r.run.task)}</a><span class="meta">${cancelling(r.run) ? html`<span class="bad">cancelling…</span> · ` : ""}${r.run.workflow} · ${shortRunId(r.run.id)} · ${activityText(r.activity, r.position)}${r.planProgress ? html` · <b class="planat">plan ${planAt(r.planProgress)}</b>${r.planProgress.current !== undefined ? ` ${cut(r.planProgress.steps[r.planProgress.current]?.description ?? "", 70)}` : ""}` : ""}</span></div>
+<div class="what"><a href="${runHref(r.run)}">${firstLine(r.run.task)}</a><span class="meta">${cancelling(r.run) ? html`<span class="bad">${t("cancelling…")}</span> · ` : ""}${r.run.workflow} · ${shortRunId(r.run.id)} · ${activityText(r.activity, r.position)}${r.planProgress ? html` · <b class="planat">${t("plan {at}", { at: planAt(r.planProgress) })}</b>${r.planProgress.current !== undefined ? ` ${cut(r.planProgress.steps[r.planProgress.current]?.description ?? "", 70)}` : ""}` : ""}</span></div>
 <div class="budget">${toolBudget(r.activity, now)}</div>
-<a href="${runHref(r.run)}">Follow</a>
+<a href="${runHref(r.run)}">${t("Follow")}</a>
 </div>`,
       )
-    : html`<div class="panel empty">Nothing runs now.</div>`
+    : html`<div class="panel empty">${t("Nothing runs now.")}</div>`
 }
 </section>
 <section class="group" aria-labelledby="recent">
-<div class="group-head"><h2 id="recent">Recent</h2>
+<div class="group-head"><h2 id="recent">${t("Recent")}</h2>
 <form class="search" role="search" method="get" action="/">
-<input type="search" name="q" value="${page.recent.query}" placeholder="Search runs: id, task, state…" title="Every word in some field: id, task, workflow, state and its reason, author, repository, branch, step, date; a quoted phrase as a whole" aria-label="Search runs" autocomplete="off" data-search>
-<input type="hidden" name="repo" value="${page.repo ?? ""}"><button type="submit" class="btn sr">Search</button>
+<input type="search" name="q" value="${page.recent.query}" placeholder="${t("Search runs: id, task, state…")}" title="${t("Every word in some field: id, task, workflow, state and its reason, author, repository, branch, step, date; a quoted phrase as a whole")}" aria-label="${t("Search runs")}" autocomplete="off" data-search>
+<input type="hidden" name="repo" value="${page.repo ?? ""}"><button type="submit" class="btn sr">${t("Search")}</button>
 </form></div>
 ${recentHtml(page)}
 </section>`;
@@ -600,7 +614,7 @@ function recentHtml(page: RunsPage): Html {
   // how many rows: shown while there is more than the smallest page, the page goes back to the first
   const sizes =
     list.total > RECENT_SIZES[0]
-      ? html`<div class="sizes" role="group" aria-label="Rows per page">${RECENT_SIZES.map((n) =>
+      ? html`<div class="sizes" role="group" aria-label="${t("Rows per page")}">${RECENT_SIZES.map((n) =>
           n === list.pageSize
             ? html`<a href="${href(1, n)}" data-size="${String(n)}" aria-current="true">${String(n)}</a>`
             : html`<a href="${href(1, n)}" data-size="${String(n)}">${String(n)}</a>`,
@@ -608,25 +622,25 @@ function recentHtml(page: RunsPage): Html {
       : html``;
   const pages =
     list.total > list.pageSize
-      ? html`<span class="pages">${list.page > 1 ? html`<a href="${href(list.page - 1)}" rel="prev">← Newer</a>` : html`<span class="muted">← Newer</span>`}<span class="muted">${from}–${to} of ${list.total}</span>${list.page < last ? html`<a href="${href(list.page + 1)}" rel="next">Older →</a>` : html`<span class="muted">Older →</span>`}</span>`
+      ? html`<span class="pages">${list.page > 1 ? html`<a href="${href(list.page - 1)}" rel="prev">${t("← Newer")}</a>` : html`<span class="muted">${t("← Newer")}</span>`}<span class="muted">${t("{from}–{to} of {total}", { from, to, total: list.total })}</span>${list.page < last ? html`<a href="${href(list.page + 1)}" rel="next">${t("Older →")}</a>` : html`<span class="muted">${t("Older →")}</span>`}</span>`
       : list.query && list.total > 0
-        ? html`<span class="pages muted">${list.total} found</span>`
+        ? html`<span class="pages muted">${t("{n} found", { n: list.total })}</span>`
         : html``;
   const pager =
     list.total > RECENT_SIZES[0] || (list.query && list.total > 0)
-      ? html`<nav class="pager" aria-label="Recent runs, pages">${sizes}${pages}</nav>`
+      ? html`<nav class="pager" aria-label="${t("Recent runs, pages")}">${sizes}${pages}</nav>`
       : html``;
   const body =
     list.runs.length > 0
       ? html`<div class="panel scroll recent"><table>
-<thead><tr><th scope="col">Run</th><th scope="col">Task</th><th scope="col">Workflow</th><th scope="col">State</th><th scope="col">Took</th><th scope="col">Model</th></tr></thead>
+<thead><tr><th scope="col">Run</th><th scope="col">${t("Task")}</th><th scope="col">Workflow</th><th scope="col">${t("State")}</th><th scope="col">${t("Took")}</th><th scope="col">${t("Model")}</th></tr></thead>
 <tbody>${list.runs.map(
           (r) =>
-            html`<tr><td class="mono"><a href="${runHref(r.run)}">${marked(shortRunId(r.run.id), list.terms)}</a></td><td>${marked(firstLine(r.run.task, 90), list.terms)}</td><td>${marked(r.run.workflow === "sdd-cross" ? "sdd (cross-repos)" : r.run.workflow, list.terms)}${r.run.options?.parent ? html` <span class="meta" title="a subtask of a task across services">· subtask ${r.run.options.parent.key} of <a href="/runs/${shortRunId(r.run.options.parent.runId)}">${shortRunId(r.run.options.parent.runId)}</a></span>` : ""}</td><td>${recentState(r.run)}</td><td>${duration(r.tookMs)}</td><td class="muted">${r.modelCalls} call${r.modelCalls === 1 ? "" : "s"}</td></tr>`,
+            html`<tr><td class="mono"><a href="${runHref(r.run)}">${marked(shortRunId(r.run.id), list.terms)}</a></td><td>${marked(firstLine(r.run.task, 90), list.terms)}</td><td>${marked(r.run.workflow === "sdd-cross" ? "sdd (cross-repos)" : r.run.workflow, list.terms)}${r.run.options?.parent ? html` <span class="meta" title="${t("a subtask of a task across services")}">· ${t("subtask {key} of", { key: r.run.options.parent.key })} <a href="/runs/${shortRunId(r.run.options.parent.runId)}">${shortRunId(r.run.options.parent.runId)}</a></span>` : ""}</td><td>${recentState(r.run)}</td><td>${duration(r.tookMs)}</td><td class="muted">${plural(r.modelCalls, "call")}</td></tr>`,
         )}</tbody></table></div>`
       : list.query
-        ? html`<div class="panel empty">No runs match «${list.query}».</div>`
-        : html`<div class="panel empty">No runs yet.</div>`;
+        ? html`<div class="panel empty">${t("No runs match «{q}».", { q: list.query })}</div>`
+        : html`<div class="panel empty">${t("No runs yet.")}</div>`;
   return html`<div data-live="recent">${body}${pager}</div>`;
 }
 
@@ -655,7 +669,7 @@ export function marked(text: string, terms: readonly string[]): Html {
 
 /** `⇉ 2.6 tools per model call`: how much an agent asks for at once (the fewer model calls, the faster). */
 function perCall(tools: number, calls: number, label: string): Html {
-  return html`<span class="kpi" title="tool calls per model call: independent reads in one turn">⇉ ${(tools / calls).toFixed(1)} ${label}</span>`;
+  return html`<span class="kpi" title="${t("tool calls per model call: independent reads in one turn")}">⇉ ${(tools / calls).toFixed(1)} ${label}</span>`;
 }
 
 /** `repo.read` → `read`, `confluence.get` → `confluence`: what a lane did, short. */
@@ -677,10 +691,10 @@ function quick(ms: number): string {
 function batchHtml(b: ToolBatch): Html {
   const total = Math.max(1, b.ms);
   const done = b.calls.filter((c) => c.ok !== undefined).length;
-  const head = b.parallel ? `⇉ ${b.size} in parallel` : `${b.size} in a row`;
+  const head = b.parallel ? `⇉ ${t("{n} in parallel", { n: b.size })}` : t("{n} in a row", { n: b.size });
   const state = b.running
-    ? `· ${quick(b.ms)} so far · ${done} done`
-    : `· the last batch, model call ${b.modelCall} · ${quick(b.ms)}`;
+    ? `· ${t("{t} so far", { t: quick(b.ms) })} · ${t("{n} done", { n: done })}`
+    : `· ${t("the last batch, model call {n}", { n: b.modelCall })} · ${quick(b.ms)}`;
   return html`<div class="batch${b.running ? "" : " past"}" role="group" aria-label="${head}">
 <div class="bh"><b>${head}</b><span>${state}</span></div>
 ${b.calls.slice(0, 12).map((c) => {
@@ -712,33 +726,40 @@ function stepRow(s: StepRow, now: number, plan?: PlanProgress): Html {
   const iteration = r && r.iteration > 1 ? `#${r.iteration}` : "";
   const notes: string[] = [];
   if (r && s.status !== "skipped") {
-    if (r.quick?.used) notes.push(`${r.quick.tool}, no model call`);
+    if (r.quick?.used) notes.push(`${r.quick.tool}, ${t("no model call")}`);
     else if (r.agent) notes.push(r.agent);
-    if (r.modelCalls > 0) notes.push(`${r.modelCalls} call${r.modelCalls === 1 ? "" : "s"}`);
+    if (r.modelCalls > 0) notes.push(plural(r.modelCalls, "call"));
     if (r.tools && Object.keys(r.tools).length > 0) notes.push(toolMix(r.tools));
     const tools = r.tools ? Object.values(r.tools).reduce((n, k) => n + k, 0) : 0;
-    if (tools > 0 && r.modelCalls > 1) notes.push(`⇉ ${(tools / r.modelCalls).toFixed(1)} per call`);
+    if (tools > 0 && r.modelCalls > 1) notes.push(`⇉ ${(tools / r.modelCalls).toFixed(1)} ${t("per call")}`);
     if (r.contradictions)
-      notes.push(
-        `⚠ ${r.contradictions} contradiction${r.contradictions === 1 ? "" : "s"} in the requirements`,
-      );
+      notes.push(`⚠ ${t("{n} in the requirements", { n: plural(r.contradictions, "contradiction") })}`);
     if (r.budgetExhausted)
       notes.push(
-        `${r.budgetExhausted === "model" ? "model call" : r.budgetExhausted === "budget" ? "budget" : "tool"} limit reached`,
+        r.budgetExhausted === "model"
+          ? t("model call limit reached")
+          : r.budgetExhausted === "budget"
+            ? t("budget limit reached")
+            : t("tool limit reached"),
       );
     // the loop's line names the outcome already
     if (r.outcome && r.outcome !== "success" && s.loops.at(-1)?.outcome !== r.outcome) notes.push(r.outcome);
     if (r.status !== "success" && r.reason) notes.push(cut(r.reason, 120));
   }
-  if (s.status === "skipped" && r?.reason) notes.push(`skipped: ${r.reason}`);
-  if (s.carriedFrom) notes.unshift(`done in ${s.carriedFrom.workflow} ${shortRunId(s.carriedFrom.id)}`);
+  if (s.status === "skipped" && r?.reason) notes.push(`${t("skipped")}: ${r.reason}`);
+  if (s.carriedFrom)
+    notes.unshift(
+      t("done in {workflow} {id}", { workflow: s.carriedFrom.workflow, id: shortRunId(s.carriedFrom.id) }),
+    );
   const loop = s.loops.at(-1);
   if (loop)
     notes.push(
-      `sent the work back to ${loop.to} ${loop.iteration}${loop.max ? `/${loop.max}` : ""} — ${loop.outcome}`,
+      `${t("sent the work back to {to}", { to: loop.to })} ${loop.iteration}${loop.max ? `/${loop.max}` : ""} — ${loop.outcome}`,
     );
-  if (s.status === "waiting") notes.push(s.paused ? "paused · waits for the quota window" : "waits for you");
-  if (s.status === "running") notes.push(plan ? `running now · plan ${planAt(plan)}` : "running now");
+  if (s.status === "waiting")
+    notes.push(s.paused ? t("paused · waits for the quota window") : t("waits for you"));
+  if (s.status === "running")
+    notes.push(plan ? `${t("running now")} · ${t("plan {at}", { at: planAt(plan) })}` : t("running now"));
   const took =
     s.status === "running" && s.startedAt
       ? ticking(now - Date.parse(s.startedAt))
@@ -760,37 +781,37 @@ function loopCardHtml(card: LoopCard, page: RunPage, actions?: Actions): Html {
   const back = card.to && card.to !== card.step ? card.to : undefined;
   return html`<section class="panel decision" aria-labelledby="decision" data-live="card">
 <div class="row" style="flex-direction:column;align-items:flex-start;gap:4px">
-<span class="warn" style="font-size:13px;font-weight:500">Waits for you</span>
-<h2 id="decision" style="font-size:22px;line-height:28px">${card.step} sent the work back ${card.iterations ? `${card.iterations} times` : "too often"} — no rounds left</h2>
-<span class="muted" style="font-size:14px">${route}the last round's reasons:</span>
+<span class="warn" style="font-size:13px;font-weight:500">${t("Waits for you")}</span>
+<h2 id="decision" style="font-size:22px;line-height:28px">${card.iterations ? t("{step} sent the work back {times}", { step: card.step, times: plural(card.iterations, "time") }) : t("{step} sent the work back too often", { step: card.step })} — ${t("no rounds left")}</h2>
+<span class="muted" style="font-size:14px">${route}${t("the last round's reasons:")}</span>
 </div>
 ${
   card.reasons.length > 0
     ? html`<ul class="reasons">${card.reasons.map((r) => html`<li>${r.kind ? html`<span class="chip">${r.kind}</span>` : ""}<span>${r.text}</span></li>`)}</ul>`
-    : html`<p class="muted">No reason recorded.</p>`
+    : html`<p class="muted">${t("No reason recorded.")}</p>`
 }
 <div class="checkout">
-<span class="muted" style="font-size:14px">Fix it by hand in the run's checkout</span>
-<div class="row"><code class="path">${card.checkoutShown}</code>${actions ? form(actions, `${runHref(page.run)}/open`, html`<button type="submit" class="btn">Open in editor</button>`) : ""}<button type="button" class="btn" data-copy="${card.checkout}">Copy path</button></div>
-<div class="changed" aria-live="polite"><span class="hint">Changed in the checkout · live</span>${
+<span class="muted" style="font-size:14px">${t("Fix it by hand in the run's checkout")}</span>
+<div class="row"><code class="path">${card.checkoutShown}</code>${actions ? form(actions, `${runHref(page.run)}/open`, html`<button type="submit" class="btn">${t("Open in editor")}</button>`) : ""}<button type="button" class="btn" data-copy="${card.checkout}">${t("Copy path")}</button></div>
+<div class="changed" aria-live="polite"><span class="hint">${t("Changed in the checkout · live")}</span>${
     card.changes && card.changes.length > 0
       ? card.changes.slice(0, 12).map(changeLine)
-      : html`<span class="muted">nothing yet</span>`
+      : html`<span class="muted">${t("nothing yet")}</span>`
   }${card.changes && card.changes.length > 12 ? html`<span class="muted">+${card.changes.length - 12} more</span>` : ""}</div>
 </div>
 ${
   card.rerun
-    ? html`<div class="banner info">↻ ${card.rerun.step && card.rerun.step !== card.step ? `one more round of ${card.rerun.step}, then ${card.step}` : `${card.step} runs again`} — asked${card.rerun.actor ? ` by ${card.rerun.actor}` : ""}${card.rerun.channel === "ui" ? " from the page" : card.rerun.channel === "cli" ? " in the terminal" : ""}</div><div class="actions">${goesOn(page, actions)}</div>`
+    ? html`<div class="banner info">↻ ${card.rerun.step && card.rerun.step !== card.step ? t("one more round of {step}, then {next}", { step: card.rerun.step, next: card.step }) : t("{step} runs again", { step: card.step })} — ${t("asked")}${card.rerun.actor ? ` ${t("by {who}", { who: card.rerun.actor })}` : ""}${card.rerun.channel === "ui" ? ` ${t("from the page")}` : card.rerun.channel === "cli" ? ` ${t("in the terminal")}` : ""}</div><div class="actions">${goesOn(page, actions)}</div>`
     : actions
       ? html`<div class="actions">${
           back
             ? form(
                 actions,
                 `${runHref(page.run)}/rerun`,
-                html`<input type="hidden" name="back" value="${back}"><button type="submit" class="btn primary big">One more round of ${back}</button>`,
+                html`<input type="hidden" name="back" value="${back}"><button type="submit" class="btn primary big">${t("One more round of {step}", { step: back })}</button>`,
               )
             : ""
-        }${form(actions, `${runHref(page.run)}/rerun`, html`<button type="submit" class="btn${back ? "" : " primary"} big">Run ${card.step} again</button>`)}<span class="hint">${back ? html`one more round: ${back} with the reasons above and your notes, then ${card.step}; run again: only ${card.step}, after you fixed the checkout yourself (as <code>r</code>)` : html`same as <code>r</code> on the terminal's card`}; ${page.terminal ? "the terminal waiting there goes on" : html`no terminal waits: <code>jarvis continue ${shortRunId(page.run.id)}</code> does it`}</span></div>
+        }${form(actions, `${runHref(page.run)}/rerun`, html`<button type="submit" class="btn${back ? "" : " primary"} big">${t("Run {step} again", { step: card.step })}</button>`)}<span class="hint">${back ? html`${t("one more round: {back} with the reasons above and your notes, then {step}; run again: only {step}, after you fixed the checkout yourself", { back, step: card.step })} (<code>r</code>)` : html`${t("same as")} <code>r</code> ${t("on the terminal's card")}`}; ${page.terminal ? t("the terminal waiting there goes on") : html`${t("no terminal waits:")} <code>jarvis continue ${shortRunId(page.run.id)}</code> ${t("does it")}`}</span></div>
 ${notesBox(page, back ?? card.step, actions)}`
       : terminalHint(card, page.terminal, page.run)
 }
@@ -803,26 +824,28 @@ const TESTS_TITLE: Record<TestsStop["why"], string> = {
   "every-failure": "Tests failed",
   "rounds-used-up": "Tests still fail — no rounds left",
 };
+// the keys of the titles, for the dictionary's check (tests/ui/i18n.test.ts)
+// t("Tests failed again the same way") t("The tests did not run") t("Tests failed") t("Tests still fail — no rounds left")
 
-function testsLead(t: TestsStop, card: LoopCard): Html {
+function testsLead(ts: TestsStop, card: LoopCard): Html {
   const back = card.to ?? "the implementation";
-  const left = Math.max(0, t.rounds - t.round);
-  switch (t.why) {
+  const left = Math.max(0, ts.rounds - ts.round);
+  switch (ts.why) {
     case "same-failure":
-      return html`Round ${t.round} failed exactly as round ${t.round - 1}: the same ${t.failures.length === 1 ? "test with the same assertion" : `${t.failures.length} failures`}. Another round with the same input is unlikely to help, so Jarvis asks you before spending it${left > 0 ? html` — ${left === 1 ? "one round is" : `${left} rounds are`} left` : ""}.`;
+      return html`${ts.failures.length === 1 ? t("Round {n} failed exactly as round {m}: the same test with the same assertion.", { n: ts.round, m: ts.round - 1 }) : t("Round {n} failed exactly as round {m}: the same {failures}.", { n: ts.round, m: ts.round - 1, failures: plural(ts.failures.length, "failure") })} ${t("Another round with the same input is unlikely to help, so Jarvis asks you before spending it")}${left > 0 ? html` — ${plural(left, "round left", "rounds left")}` : ""}.`;
     case "not-started":
-      return html`${t.notStarted.join(", ")} stopped before any test ran: the build or the environment broke, not a test. The output below says where; a model rarely fixes that by trying again.`;
+      return html`${t("{checks} stopped before any test ran: the build or the environment broke, not a test. The output below says where; a model rarely fixes that by trying again.", { checks: ts.notStarted.join(", ") })}`;
     case "every-failure":
-      return html`The project asks a person on every failed check (<code>human.checks.ask: every-failure</code>): decide what ${back} does with it.`;
+      return html`${t("The project asks a person on every failed check")} (<code>human.checks.ask: every-failure</code>): ${t("decide what {back} does with it.", { back })}`;
     default:
-      return html`${back} had ${t.rounds} rounds and the checks still fail. Decide what happens next.`;
+      return html`${t("{back} had {rounds} and the checks still fail. Decide what happens next.", { back, rounds: plural(ts.rounds, "round") })}`;
   }
 }
 
-function roundsStrip(t: TestsStop): Html {
-  return html`<div class="rounds-strip">${t.history.map(
+function roundsStrip(ts: TestsStop): Html {
+  return html`<div class="rounds-strip">${ts.history.map(
     (r) =>
-      html`<div class="rb${r.failed > 0 || r.notStarted ? " bad" : ""}"><b>Round ${r.round} · ${r.notStarted ? "no test ran" : r.failed > 0 ? `${r.failed} failed` : "passed"}</b><span class="meta">${r.same ? `the same as round ${r.round - 1}` : r.round === t.round ? "this round" : ""}</span></div>`,
+      html`<div class="rb${r.failed > 0 || r.notStarted ? " bad" : ""}"><b>${t("Round {n}", { n: r.round })} · ${r.notStarted ? t("no test ran") : r.failed > 0 ? t("{n} failed", { n: r.failed }) : t("passed")}</b><span class="meta">${r.same ? t("the same as round {n}", { n: r.round - 1 }) : r.round === ts.round ? t("this round") : ""}</span></div>`,
   )}</div>`;
 }
 
@@ -830,65 +853,65 @@ function roundFailureHtml(f: RoundFailure, repeated: boolean, round: number): Ht
   const title =
     [f.suite?.split(".").at(-1), f.name?.replace(/\(\)$/, "")].filter(Boolean).join(" › ") || f.check;
   return html`<article class="tf">
-<div class="tf-head"><h3>${title}</h3>${f.at ? html`<code class="meta">${f.at}</code>` : ""}<span class="grow"></span>${repeated ? html`<span class="pill bad">same as round ${round - 1}</span>` : ""}<span class="pill plain">${f.check}</span></div>
+<div class="tf-head"><h3>${title}</h3>${f.at ? html`<code class="meta">${f.at}</code>` : ""}<span class="grow"></span>${repeated ? html`<span class="pill bad">${t("same as round {n}", { n: round - 1 })}</span>` : ""}<span class="pill plain">${f.check}</span></div>
 <dl class="tf-facts">
-<dt>Failure</dt><dd><pre>${f.message || "—"}</pre></dd>
-${f.expected !== undefined && f.actual !== undefined ? html`<dt>Expected</dt><dd><code class="ok">${f.expected}</code></dd><dt>Got</dt><dd><code class="bad">${f.actual}</code></dd>` : ""}
+<dt>${t("Failure")}</dt><dd><pre>${f.message || "—"}</pre></dd>
+${f.expected !== undefined && f.actual !== undefined ? html`<dt>${t("Expected")}</dt><dd><code class="ok">${f.expected}</code></dd><dt>${t("Got")}</dt><dd><code class="bad">${f.actual}</code></dd>` : ""}
 </dl>
 </article>`;
 }
 
 /** The choices for failed checks: the person's words go with each (src/ui/server.ts, `/tests`). */
 function testsChoices(card: LoopCard, page: RunPage, actions: Actions): Html {
-  const t = card.tests as TestsStop;
+  const ts = card.tests as TestsStop;
   const back = card.to ?? "implementation";
   const choice = (value: string, title: string, about: string, go: string, checked = false) =>
     html`<label class="choice"><input type="radio" name="choice" value="${value}" data-go="${go}"${checked ? " checked" : ""}><span><b>${title}</b><span class="about">${about}</span></span></label>`;
   return form(
     actions,
     `${runHref(page.run)}/tests`,
-    html`<fieldset class="choices" data-choices><legend class="sr">What to do</legend>
-${choice("hint", `Send back with a hint`, `${back} gets your words as binding, with these failures and the whole output.`, `Send back to ${back}`, true)}
-${choice("test-wrong", "The test is wrong — let it change the test", `${back} changes the test, not the code, and says which and why; review sees it.`, `Send back: change the test`)}
-${choice("myself", "I fix it myself in the checkout", `Then the checks run again — not another round of ${back}.`, `Run ${card.step} again`)}
-${choice("go-on", "Not this task's — go on without it", `${card.step} counts as passed; the failures stay recorded and the next steps get your words.`, "Go on without it")}
-${choice("spec", "Back to the spec", "The task is not what the spec says: the spec gets your words and comes to you again.", "Back to the spec")}
+    html`<fieldset class="choices" data-choices><legend class="sr">${t("What to do")}</legend>
+${choice("hint", t("Send back with a hint"), t("{back} gets your words as binding, with these failures and the whole output.", { back }), t("Send back to {back}", { back }), true)}
+${choice("test-wrong", t("The test is wrong — let it change the test"), t("{back} changes the test, not the code, and says which and why; review sees it.", { back }), t("Send back: change the test"))}
+${choice("myself", t("I fix it myself in the checkout"), t("Then the checks run again — not another round of {back}.", { back }), t("Run {step} again", { step: card.step }))}
+${choice("go-on", t("Not this task's — go on without it"), t("{step} counts as passed; the failures stay recorded and the next steps get your words.", { step: card.step }), t("Go on without it"))}
+${choice("spec", t("Back to the spec"), t("The task is not what the spec says: the spec gets your words and comes to you again."), t("Back to the spec"))}
 </fieldset>
-<label class="field grow">Your words — needed for a hint; for the others, why<textarea name="text" rows="3" maxlength="4000" placeholder="${t.failures[0]?.at ? `«The value comes rounded from ${t.failures[0].at.split(":")[0]} — round once, at the end»` : "A hint, a decision, where to look"}"></textarea></label>
+<label class="field grow">${t("Your words — needed for a hint; for the others, why")}<textarea name="text" rows="3" maxlength="4000" placeholder="${ts.failures[0]?.at ? t("«The value comes rounded from {file} — round once, at the end»", { file: ts.failures[0].at.split(":")[0] ?? "" }) : t("A hint, a decision, where to look")}"></textarea></label>
 `,
     html` id="tests-form"`,
   );
 }
 
 function testsCardHtml(card: LoopCard, page: RunPage, actions?: Actions): Html {
-  const t = card.tests as TestsStop;
-  const repeated = new Set(t.repeated);
-  const command = t.logs[0]?.command;
+  const ts = card.tests as TestsStop;
+  const repeated = new Set(ts.repeated);
+  const command = ts.logs[0]?.command;
   return html`<section class="panel decision tests-stop" aria-labelledby="decision" data-live="card">
 <div class="row" style="flex-direction:column;align-items:flex-start;gap:4px">
-<span class="warn" style="font-size:13px;font-weight:500">Waits for you · ${card.step} · round ${t.round} of ${t.rounds}</span>
-<h2 id="decision" style="font-size:22px;line-height:28px">${TESTS_TITLE[t.why]}</h2>
-<p style="margin:0">${testsLead(t, card)}</p>
+<span class="warn" style="font-size:13px;font-weight:500">${t("Waits for you")} · ${card.step} · ${t("round {n} of {m}", { n: ts.round, m: ts.rounds })}</span>
+<h2 id="decision" style="font-size:22px;line-height:28px">${t(TESTS_TITLE[ts.why])}</h2>
+<p style="margin:0">${testsLead(ts, card)}</p>
 </div>
-${roundsStrip(t)}
-${t.failures.slice(0, 4).map((f) => roundFailureHtml(f, repeated.has(f.signature), t.round))}
-${t.failures.length > 4 ? html`<p class="hint">${t.failures.length - 4} more in <a href="${t.checksHref}">the checks of this round</a>.</p>` : ""}
-${t.said ? html`<blockquote class="said"><span class="hint">${card.to ?? "implementation"}, end of its last round</span>${t.said}</blockquote>` : ""}
-<div class="row" style="flex-wrap:wrap;gap:8px 16px">${t.logs.map((l) => html`<a href="${l.href}">Whole output of ${l.check}</a>`)}<a href="${t.checksHref}">The checks of round ${t.round}</a>${command ? html`<code class="meta">${command}</code><button type="button" class="btn small" data-copy="cd ${card.checkout} && ${command}">Copy to run it yourself</button>` : ""}</div>
+${roundsStrip(ts)}
+${ts.failures.slice(0, 4).map((f) => roundFailureHtml(f, repeated.has(f.signature), ts.round))}
+${ts.failures.length > 4 ? html`<p class="hint">${t("{n} more in", { n: ts.failures.length - 4 })} <a href="${ts.checksHref}">${t("the checks of this round")}</a>.</p>` : ""}
+${ts.said ? html`<blockquote class="said"><span class="hint">${t("{step}, end of its last round", { step: card.to ?? "implementation" })}</span>${ts.said}</blockquote>` : ""}
+<div class="row" style="flex-wrap:wrap;gap:8px 16px">${ts.logs.map((l) => html`<a href="${l.href}">${t("Whole output of {check}", { check: l.check })}</a>`)}<a href="${ts.checksHref}">${t("The checks of round {n}", { n: ts.round })}</a>${command ? html`<code class="meta">${command}</code><button type="button" class="btn small" data-copy="cd ${card.checkout} && ${command}">${t("Copy to run it yourself")}</button>` : ""}</div>
 ${
   card.rerun || card.goOn
-    ? html`<div class="banner info">↻ ${card.goOn ? `goes on without the failed checks` : card.rerun?.step && card.rerun.step !== card.step ? `one more round of ${card.rerun.step}, then ${card.step}` : `${card.step} runs again`} — decided${(card.goOn ?? card.rerun)?.actor ? ` by ${(card.goOn ?? card.rerun)?.actor}` : ""}</div><div class="actions">${goesOn(page, actions)}</div>`
+    ? html`<div class="banner info">↻ ${card.goOn ? t("goes on without the failed checks") : card.rerun?.step && card.rerun.step !== card.step ? t("one more round of {step}, then {next}", { step: card.rerun.step, next: card.step }) : t("{step} runs again", { step: card.step })} — ${t("decided")}${(card.goOn ?? card.rerun)?.actor ? ` ${t("by {who}", { who: (card.goOn ?? card.rerun)?.actor ?? "" })}` : ""}</div><div class="actions">${goesOn(page, actions)}</div>`
     : actions
       ? testsChoices(card, page, actions)
       : terminalHint(card, page.terminal, page.run)
 }
-<details class="checkout-fold"><summary class="meta">The run's checkout · ${card.checkoutShown}</summary>
+<details class="checkout-fold"><summary class="meta">${t("The run's checkout")} · ${card.checkoutShown}</summary>
 <div class="checkout">
-<div class="row"><code class="path">${card.checkoutShown}</code>${actions ? form(actions, `${runHref(page.run)}/open`, html`<button type="submit" class="btn">Open in editor</button>`) : ""}<button type="button" class="btn" data-copy="${card.checkout}">Copy path</button></div>
-<div class="changed" aria-live="polite"><span class="hint">Changed in the checkout · live</span>${
+<div class="row"><code class="path">${card.checkoutShown}</code>${actions ? form(actions, `${runHref(page.run)}/open`, html`<button type="submit" class="btn">${t("Open in editor")}</button>`) : ""}<button type="button" class="btn" data-copy="${card.checkout}">${t("Copy path")}</button></div>
+<div class="changed" aria-live="polite"><span class="hint">${t("Changed in the checkout · live")}</span>${
     card.changes && card.changes.length > 0
       ? card.changes.slice(0, 12).map(changeLine)
-      : html`<span class="muted">nothing yet</span>`
+      : html`<span class="muted">${t("nothing yet")}</span>`
   }</div>
 </div></details>
 </section>`;
@@ -898,10 +921,11 @@ const amount = (n: number) => n.toLocaleString("en-US");
 
 function grantText(s: BudgetStop, g: NonNullable<BudgetCard["granted"]>): string {
   const what = g.finish
-    ? `${s.stepId} finishes with what it has`
+    ? t("{step} finishes with what it has", { step: s.stepId })
     : `+${amount(g.amount ?? 0)} ${unitOf(s.dimension)}`;
-  const where = g.channel === "ui" ? " from the page" : g.channel === "cli" ? " in the terminal" : "";
-  return `↻ ${what} — decided${g.actor ? ` by ${g.actor}` : ""}${where}`;
+  const where =
+    g.channel === "ui" ? ` ${t("from the page")}` : g.channel === "cli" ? ` ${t("in the terminal")}` : "";
+  return `↻ ${what} — ${t("decided")}${g.actor ? ` ${t("by {who}", { who: g.actor })}` : ""}${where}`;
 }
 
 /** The run stopped on a budget: what ran out, then more and go on, or finish with what it has. */
@@ -911,17 +935,17 @@ function budgetCardHtml(card: BudgetCard, page: RunPage, actions?: Actions): Htm
   const action = `${runHref(page.run)}/budget`;
   return html`<section class="panel decision" aria-labelledby="decision" data-live="card">
 <div class="row" style="flex-direction:column;align-items:flex-start;gap:4px">
-<span class="warn" style="font-size:13px;font-weight:500">Waits for you</span>
-<h2 id="decision" style="font-size:22px;line-height:28px">${s.stepId} stopped: ${amount(s.used)} of ${amount(s.cap)} ${unit}</h2>
+<span class="warn" style="font-size:13px;font-weight:500">${t("Waits for you")}</span>
+<h2 id="decision" style="font-size:22px;line-height:28px">${t("{step} stopped: {used} of {cap} {unit}", { step: s.stepId, used: amount(s.used), cap: amount(s.cap), unit })}</h2>
 <span class="muted" style="font-size:14px">${sourceOf(s)} · ${
     s.scope === "agent"
-      ? "its conversation is kept: more calls go on from where it stopped"
-      : "the step goes on from its last model call; the cap grows for this run only"
+      ? t("its conversation is kept: more calls go on from where it stopped")
+      : t("the step goes on from its last model call; the cap grows for this run only")
   }</span>
 </div>
 ${
   card.changes && card.changes.length > 0
-    ? html`<div class="changed"><span class="hint">Changed in the checkout so far</span>${card.changes.slice(0, 12).map(changeLine)}${card.changes.length > 12 ? html`<span class="muted">+${card.changes.length - 12} more</span>` : ""}</div>`
+    ? html`<div class="changed"><span class="hint">${t("Changed in the checkout so far")}</span>${card.changes.slice(0, 12).map(changeLine)}${card.changes.length > 12 ? html`<span class="muted">+${card.changes.length - 12} more</span>` : ""}</div>`
     : ""
 }
 ${
@@ -931,18 +955,18 @@ ${
       ? html`<div class="actions">${form(
           actions,
           action,
-          html`<input type="hidden" name="choice" value="more"><input type="hidden" name="amount" value="${s.suggested}"><button type="submit" class="btn primary big">+${amount(s.suggested)} ${unit} and go on</button>`,
+          html`<input type="hidden" name="choice" value="more"><input type="hidden" name="amount" value="${s.suggested}"><button type="submit" class="btn primary big">${t("+{n} {unit} and go on", { n: amount(s.suggested), unit })}</button>`,
         )}${form(
           actions,
           action,
-          html`<input type="hidden" name="choice" value="more"><label class="sr" for="budget-amount">How many more ${unit}</label><input id="budget-amount" class="amount" type="number" name="amount" min="1" step="1" required placeholder="another amount"><button type="submit" class="btn">Grant</button>`,
+          html`<input type="hidden" name="choice" value="more"><label class="sr" for="budget-amount">${t("How many more {unit}", { unit })}</label><input id="budget-amount" class="amount" type="number" name="amount" min="1" step="1" required placeholder="${t("another amount")}"><button type="submit" class="btn">${t("Grant")}</button>`,
           html` class="row"`,
         )}${form(
           actions,
           action,
-          html`<input type="hidden" name="choice" value="finish"><button type="submit" class="btn">Finish with what it has</button>`,
+          html`<input type="hidden" name="choice" value="finish"><button type="submit" class="btn">${t("Finish with what it has")}</button>`,
         )}</div>
-<p class="hint">Finish: the step writes its result from what it has, marked incomplete for the steps after it. Same as <code>enter</code> / <code>m</code> / <code>f</code> on the terminal's card; ${page.terminal ? "the terminal waiting there goes on" : html`no terminal waits: <code>jarvis continue ${shortRunId(page.run.id)}</code> goes on`}.</p>`
+<p class="hint">${t("Finish: the step writes its result from what it has, marked incomplete for the steps after it.")} ${t("Same as")} <code>enter</code> / <code>m</code> / <code>f</code> ${t("on the terminal's card")}; ${page.terminal ? t("the terminal waiting there goes on") : html`${t("no terminal waits:")} <code>jarvis continue ${shortRunId(page.run.id)}</code> ${t("goes on")}`}.</p>`
       : terminalHint(card, page.terminal, page.run)
 }
 </section>`;
@@ -961,12 +985,12 @@ ${
       )}</p>`
     : ""
 }
-${f?.risks.slice(0, 2).map((r) => html`<p><span class="warn">risk</span> ${cut(r, 160)}</p>`) ?? ""}
+${f?.risks.slice(0, 2).map((r) => html`<p><span class="warn">${t("risk")}</span> ${cut(r, 160)}</p>`) ?? ""}
 ${card.excerpt ? html`<pre class="path" style="white-space:pre-wrap">${card.excerpt}</pre>` : ""}
-${partial ? html`<p class="warn">⚠ incomplete: agent ${partial.agentId} hit its ${partial.limit} limit</p>` : ""}
+${partial ? html`<p class="warn">⚠ ${t("incomplete: agent {agent} hit its {limit} limit", { agent: partial.agentId, limit: partial.limit })}</p>` : ""}
 ${
   card.files && card.files.length > 0
-    ? html`<div class="changed"><span class="hint">${card.files.length} file${card.files.length === 1 ? "" : "s"} changed</span>${card.files
+    ? html`<div class="changed"><span class="hint">${t("{n} changed", { n: plural(card.files.length, "file") })}</span>${card.files
         .slice(0, 8)
         .map(
           (x) =>
@@ -977,12 +1001,12 @@ ${
 }
 
 /** The run page's approval card: into the checkout and start, in one line to paste. */
-function tryLine(t: TryOut): Html {
-  return html`<div class="trybar"><span class="lbl">Try it before you decide</span><div class="row"><code class="path">${tryCommand(t)}</code><button type="button" class="btn" data-copy="${tryCommand(t)}">Copy</button></div>${
-    t.start.length === 0
-      ? html`<span class="hint">No start command known: set <code>workspace.try.run</code> in .jarvis/project.yaml</span>`
-      : t.guessed
-        ? html`<span class="hint">start command guessed from package.json — set <code>workspace.try.run</code> to be sure</span>`
+function tryLine(tr: TryOut): Html {
+  return html`<div class="trybar"><span class="lbl">${t("Try it before you decide")}</span><div class="row"><code class="path">${tryCommand(tr)}</code><button type="button" class="btn" data-copy="${tryCommand(tr)}">${t("Copy")}</button></div>${
+    tr.start.length === 0
+      ? html`<span class="hint">${t("No start command known: set")} <code>workspace.try.run</code> ${t("in .jarvis/project.yaml")}</span>`
+      : tr.guessed
+        ? html`<span class="hint">${t("start command guessed from package.json — set")} <code>workspace.try.run</code> ${t("to be sure")}</span>`
         : ""
   }</div>`;
 }
@@ -991,48 +1015,48 @@ function tryLine(t: TryOut): Html {
  * «Try it» on the implementation's page: where the result is, how to start it, what to check by hand,
  * what Accept and Send back lead to. Pilot: «there is no obviousness of the action to accept or not».
  */
-function tryHtml(t: TryOut, page: ArtifactPage, extras: ArtifactExtras): Html {
+function tryHtml(tr: TryOut, page: ArtifactPage, extras: ArtifactExtras): Html {
   const cmd = (c: string) =>
-    html`<div class="cmd"><code>${c}</code><button type="button" class="btn small" data-copy="${c}">Copy</button></div>`;
+    html`<div class="cmd"><code>${c}</code><button type="button" class="btn small" data-copy="${c}">${t("Copy")}</button></div>`;
   const back = `${artifactHref(page.run, page.artifact)}`;
   return html`<section id="try" class="panel tryit" aria-labelledby="try-h">
-<h2 id="try-h">Try it before you decide</h2>
+<h2 id="try-h">${t("Try it before you decide")}</h2>
 <ol class="trysteps">
-<li><b>Go to the run's checkout</b>${t.branch ? html` <span class="meta">branch ${t.branch}</span>` : ""}
-<span class="hint">${t.setup ? html`dependencies are there: <code>${t.setup}</code> ran when the run started` : "the run's own copy of the repository"}</span>
-${cmd(cdTo(t.checkoutShown))}</li>
-<li><b>Start the project</b>
+<li><b>${t("Go to the run's checkout")}</b>${tr.branch ? html` <span class="meta">branch ${tr.branch}</span>` : ""}
+<span class="hint">${tr.setup ? html`${t("dependencies are there:")} <code>${tr.setup}</code> ${t("ran when the run started")}` : t("the run's own copy of the repository")}</span>
+${cmd(cdTo(tr.checkoutShown))}</li>
+<li><b>${t("Start the project")}</b>
 ${
-  t.start.length > 0
-    ? html`${t.rebuild.length > 0 ? html`<span class="hint">the run changed what the project reads built — rebuild first (<code>tools.rebuild</code>)</span>${t.rebuild.map(cmd)}` : ""}<span class="hint">${t.guessed ? html`guessed from package.json — set <code>workspace.try.run</code> in .jarvis/project.yaml to be sure` : "from workspace.try in .jarvis/project.yaml"}</span>${t.start.map(cmd)}`
-    : html`<span class="hint warn">no start command known — set <code>workspace.try.run</code> in .jarvis/project.yaml (e.g. <code>yarn start-dev</code>)</span>`
-}${t.url ? html`<span class="hint">then open <a href="${t.url}" target="_blank" rel="noopener">${t.url}</a></span>` : ""}${t.note ? html`<span class="hint">${t.note}</span>` : ""}</li>
+  tr.start.length > 0
+    ? html`${tr.rebuild.length > 0 ? html`<span class="hint">${t("the run changed what the project reads built — rebuild first")} (<code>tools.rebuild</code>)</span>${tr.rebuild.map(cmd)}` : ""}<span class="hint">${tr.guessed ? html`${t("guessed from package.json — set")} <code>workspace.try.run</code> ${t("in .jarvis/project.yaml to be sure")}` : t("from workspace.try in .jarvis/project.yaml")}</span>${tr.start.map(cmd)}`
+    : html`<span class="hint warn">${t("no start command known — set")} <code>workspace.try.run</code> ${t("in .jarvis/project.yaml")} (<code>yarn start-dev</code>)</span>`
+}${tr.url ? html`<span class="hint">${t("then open")} <a href="${tr.url}" target="_blank" rel="noopener">${tr.url}</a></span>` : ""}${tr.note ? html`<span class="hint">${tr.note}</span>` : ""}</li>
 ${
-  t.checks.length > 0
-    ? html`<li><b>Check by hand</b> <span class="hint">the spec's acceptance criteria</span>
-<ul class="checks">${t.checks.map(
+  tr.checks.length > 0
+    ? html`<li><b>${t("Check by hand")}</b> <span class="hint">${t("the spec's acceptance criteria")}</span>
+<ul class="checks">${tr.checks.map(
         (c) =>
           html`<li><span class="rq">${c.id ? html`<b>${c.id}</b> ` : ""}${cut(c.text, 200)}</span><ul>${c.acceptance.map((x) => html`<li><label><input type="checkbox"> ${cut(x, 240)}</label></li>`)}</ul></li>`,
       )}</ul></li>`
     : ""
 }
 </ol>
-<div class="row tryact">${t.start.length > 0 ? html`<button type="button" class="btn primary" data-copy="${tryCommand(t)}">Copy: cd and start</button>` : ""}${
+<div class="row tryact">${tr.start.length > 0 ? html`<button type="button" class="btn primary" data-copy="${tryCommand(tr)}">${t("Copy: cd and start")}</button>` : ""}${
     extras.actions
       ? form(
           extras.actions,
           `${runHref(page.run)}/open`,
-          html`<input type="hidden" name="return" value="${back}"><button type="submit" class="btn">Open in editor</button>`,
+          html`<input type="hidden" name="return" value="${back}"><button type="submit" class="btn">${t("Open in editor")}</button>`,
         )
       : ""
-  }${t.range ? html`<button type="button" class="btn" data-copy="git diff ${t.range}">Copy git diff</button>` : ""}</div>
+  }${tr.range ? html`<button type="button" class="btn" data-copy="git diff ${tr.range}">${t("Copy git diff")}</button>` : ""}</div>
 ${
-  t.inRepo
-    ? html`<details class="inrepo"><summary>Or in your main repository</summary><span class="hint">a branch of your own from the run's branch (the run's branch itself is taken by its checkout); your uncommitted changes go along</span>${cmd(cdTo(t.inRepo.repoShown))}${t.inRepo.commands.map(cmd)}</details>`
+  tr.inRepo
+    ? html`<details class="inrepo"><summary>${t("Or in your main repository")}</summary><span class="hint">${t("a branch of your own from the run's branch (the run's branch itself is taken by its checkout); your uncommitted changes go along")}</span>${cmd(cdTo(tr.inRepo.repoShown))}${tr.inRepo.commands.map(cmd)}</details>`
     : ""
 }
-${t.verified ? html`<p class="hint">Jarvis already ran: tests ${t.verified.passed ? html`<span class="ok">✓ passed</span>` : html`<span class="bad">✗ ${t.verified.failures} failing</span>`}${t.verified.commands.length > 0 ? html` — ${t.verified.commands.slice(0, 3).map((c, i) => html`${i > 0 ? ", " : ""}<code>${cut(c, 80)}</code>`)}` : ""}</p>` : ""}
-<div class="facts after">${t.onAccept ? html`<span><b>Accept</b> → ${t.onAccept}; the branch stays — then <b>Apply</b> on the run's page (or <code>${t.apply}</code>) lands it on your branch as one commit</span>` : ""}${t.onSendBack ? html`<span><b>Send back</b> → ${t.onSendBack}</span>` : ""}<span><b>Fixed something yourself</b> in the checkout → it goes in as a <code>human edit</code> when the run goes on</span></div>
+${tr.verified ? html`<p class="hint">${t("Jarvis already ran: tests")} ${tr.verified.passed ? html`<span class="ok">✓ ${t("passed")}</span>` : html`<span class="bad">✗ ${t("{n} failing", { n: tr.verified.failures })}</span>`}${tr.verified.commands.length > 0 ? html` — ${tr.verified.commands.slice(0, 3).map((c, i) => html`${i > 0 ? ", " : ""}<code>${cut(c, 80)}</code>`)}` : ""}</p>` : ""}
+<div class="facts after">${tr.onAccept ? html`<span><b>${t("Accept")}</b> → ${tr.onAccept}; ${t("the branch stays — then")} <b>Apply</b> ${t("on the run's page (or")} <code>${tr.apply}</code>) ${t("lands it on your branch as one commit")}</span>` : ""}${tr.onSendBack ? html`<span><b>${t("Send back")}</b> → ${tr.onSendBack}</span>` : ""}<span><b>${t("Fixed something yourself")}</b> ${t("in the checkout → it goes in as a")} <code>human edit</code> ${t("when the run goes on")}</span></div>
 </section>`;
 }
 
@@ -1040,14 +1064,14 @@ function approvalCardHtml(card: ApprovalCard, page: RunPage, actions?: Actions):
   const title = card.facts?.title ?? `${card.type}/${card.artifact.name}`;
   return html`<section class="panel decision" aria-labelledby="decision" data-live="card">
 <div class="row" style="flex-direction:column;align-items:flex-start;gap:4px">
-<span class="warn" style="font-size:13px;font-weight:500">Waits for you · approve ${card.type}</span>
+<span class="warn" style="font-size:13px;font-weight:500">${t("Waits for you")} · ${t("approve {type}", { type: card.type })}</span>
 <h2 id="decision" style="font-size:22px;line-height:28px">${title}</h2>
 <span class="meta">${card.type}/${card.artifact.name}@${card.artifact.version}</span>
 </div>
 ${briefHtml(card)}
 ${card.decision ? html`<div class="banner ok">${decisionText(card)}</div><div class="actions">${goesOn(page, actions)}</div>` : ""}
 ${card.tryOut && !card.decision ? tryLine(card.tryOut) : ""}
-<div class="actions"><a class="btn primary big" href="${artifactHref(page.run, card.artifact)}">Review the ${card.type}</a></div>
+<div class="actions"><a class="btn primary big" href="${artifactHref(page.run, card.artifact)}">${t("Review the {type}", { type: card.type })}</a></div>
 ${card.decision ? "" : terminalHint(card, page.terminal, page.run)}
 </section>`;
 }
@@ -1056,14 +1080,14 @@ ${card.decision ? "" : terminalHint(card, page.terminal, page.run)}
 function cancelHtml(run: Run, actions: Actions): Html {
   const short = shortRunId(run.id);
   const busy = run.lease !== undefined && Date.parse(run.lease.until) >= Date.now();
-  return html`<details class="cancel" data-dismiss><summary class="btn small danger">Cancel run…</summary>
-<div class="cancel-pop" role="dialog" aria-label="Cancel run ${short}">
-<p><b>Cancel run ${short}?</b></p>
-<p class="hint">${busy ? "A process runs it: it stops after its current model or tool call." : "Nothing runs it now: it is cancelled at once."} The checkout and the artifacts stay; it cannot be resumed.</p>
+  return html`<details class="cancel" data-dismiss><summary class="btn small danger">${t("Cancel run…")}</summary>
+<div class="cancel-pop" role="dialog" aria-label="${t("Cancel run {id}", { id: short })}">
+<p><b>${t("Cancel run {id}?", { id: short })}</b></p>
+<p class="hint">${busy ? t("A process runs it: it stops after its current model or tool call.") : t("Nothing runs it now: it is cancelled at once.")} ${t("The checkout and the artifacts stay; it cannot be resumed.")}</p>
 ${form(
   actions,
   `/runs/${encodeURIComponent(short)}/cancel`,
-  html`<div class="row"><button type="submit" class="btn small danger-fill">Cancel the run</button><button type="button" class="btn small" data-close>Keep it</button></div>`,
+  html`<div class="row"><button type="submit" class="btn small danger-fill">${t("Cancel the run")}</button><button type="button" class="btn small" data-close>${t("Keep it")}</button></div>`,
 )}
 </div>
 </details>`;
@@ -1074,18 +1098,18 @@ function waitHtml(page: RunPage, wait: BudgetWait, now: number, actions?: Action
   const short = shortRunId(page.run.id);
   const what =
     wait.kind === "model"
-      ? html`Waits for the model <code>${wait.model ?? "?"}</code> to answer again`
-      : html`Waits for the quota window${wait.pool ? html` of pool <code>${wait.pool}</code>` : ""}`;
+      ? html`${t("Waits for the model")} <code>${wait.model ?? "?"}</code> ${t("to answer again")}`
+      : html`${t("Waits for the quota window")}${wait.pool ? html` ${t("of pool")} <code>${wait.pool}</code>` : ""}`;
   const who = page.driven
-    ? html`<span class="hint">This page resumes it then — keep <code>jarvis ui</code> open.</span>`
-    : html`<span class="hint">No process waits for it: resume it here, or <code>jarvis resume ${short}</code>.</span>`;
+    ? html`<span class="hint">${t("This page resumes it then — keep")} <code>jarvis ui</code> ${t("open.")}</span>`
+    : html`<span class="hint">${t("No process waits for it: resume it here, or")} <code>jarvis resume ${short}</code>.</span>`;
   return html`<section class="panel decision budgetwait" aria-labelledby="wait-h" data-live="card">
-<div class="row"><span class="pill wait">⏸ paused, not failed</span><h2 id="wait-h">${what}</h2></div>
-<p>Goes on by itself at <b>${whenText(wait.resumeAfter, now)}</b>.${wait.detail ? html` <span class="hint">Window: ${wait.detail}.</span>` : ""}</p>
+<div class="row"><span class="pill wait">⏸ ${t("paused, not failed")}</span><h2 id="wait-h">${what}</h2></div>
+<p>${t("Goes on by itself at")} <b>${whenText(wait.resumeAfter, now)}</b>.${wait.detail ? html` <span class="hint">${t("Window:")} ${wait.detail}.</span>` : ""}</p>
 <div class="actions">${who}${
     actions
-      ? html`<form method="post" action="/runs/${encodeURIComponent(short)}/resume"><input type="hidden" name="t" value="${actions.token}"><button type="submit" class="btn">Resume now</button></form><span class="hint">tries at once — if the window is still full, it waits again</span>`
-      : html`<button type="button" class="btn" data-copy="jarvis resume ${short}">Copy command</button>`
+      ? html`<form method="post" action="/runs/${encodeURIComponent(short)}/resume"><input type="hidden" name="t" value="${actions.token}"><button type="submit" class="btn">${t("Resume now")}</button></form><span class="hint">${t("tries at once — if the window is still full, it waits again")}</span>`
+      : html`<button type="button" class="btn" data-copy="jarvis resume ${short}">${t("Copy command")}</button>`
   }</div>
 </section>`;
 }
@@ -1096,38 +1120,38 @@ function nowHtml(page: RunPage, now: number, actions?: Actions): Html {
     const stopped =
       page.run.state === "SUSPENDED"
         ? page.run.stateReason?.startsWith("paused")
-          ? `${page.run.stateReason.split(";")[0]} — Resume goes on from where it stopped`
-          : "stopped with Ctrl-C — it goes on from where it stopped"
+          ? `${page.run.stateReason.split(";")[0]} — ${t("Resume goes on from where it stopped")}`
+          : t("stopped with Ctrl-C — it goes on from where it stopped")
         : page.run.state === "RUNNING"
-          ? "no process drives this run (interrupted or crashed)"
+          ? t("no process drives this run (interrupted or crashed)")
           : undefined;
     // failed on the model, not on its own work: when the model answers again, try the step again
     if (page.resumable === "retry") {
       const cmd = `jarvis resume ${shortRunId(page.run.id)}`;
-      return html`<section class="panel now" aria-label="Now" data-live="card"><div class="row"><span class="bad">✗ the model failed the run — its work is kept</span></div>
+      return html`<section class="panel now" aria-label="${t("Now")}" data-live="card"><div class="row"><span class="bad">✗ ${t("the model failed the run — its work is kept")}</span></div>
 <p class="muted" style="margin:0;font-size:14px;overflow-wrap:anywhere">${cut(page.run.stateReason ?? "", 300)}</p>
 <div class="actions">${
         actions
-          ? html`${resumeForm(actions, page.run, "Try again")}<span class="hint">once the model answers again: the step goes on from its last checkpoint; or <code>${cmd}</code></span>`
-          : html`<span class="hint">Once the model answers again: <code>${cmd}</code></span><button type="button" class="btn" data-copy="${cmd}">Copy command</button>`
+          ? html`${resumeForm(actions, page.run, t("Try again"))}<span class="hint">${t("once the model answers again: the step goes on from its last checkpoint; or")} <code>${cmd}</code></span>`
+          : html`<span class="hint">${t("Once the model answers again:")} <code>${cmd}</code></span><button type="button" class="btn" data-copy="${cmd}">${t("Copy command")}</button>`
       }</div></section>`;
     }
     // an empty region, not none: the live refresh replaces it, so a finished run's spinner goes away
     if (!stopped) return html`<div data-live="card" hidden></div>`;
     const cmd = `jarvis resume ${shortRunId(page.run.id)}`;
-    return html`<section class="panel now" aria-label="Now" data-live="card"><div class="row"><span class="warn">⏸ ${stopped}</span></div>
+    return html`<section class="panel now" aria-label="${t("Now")}" data-live="card"><div class="row"><span class="warn">⏸ ${stopped}</span></div>
 <div class="actions">${
       page.resumable && actions
-        ? html`${resumeForm(actions, page.run)}<span class="hint">goes on in the background, or <code>${cmd}</code> in a terminal</span>`
-        : html`<span class="hint">Go on with <code>${cmd}</code></span><button type="button" class="btn" data-copy="${cmd}">Copy command</button>`
+        ? html`${resumeForm(actions, page.run)}<span class="hint">${t("goes on in the background, or")} <code>${cmd}</code> ${t("in a terminal")}</span>`
+        : html`<span class="hint">${t("Go on with")} <code>${cmd}</code></span><button type="button" class="btn" data-copy="${cmd}">${t("Copy command")}</button>`
     }</div></section>`;
   }
   const last = a.lastTool
-    ? `last: ${a.lastTool.capability}${a.lastTool.detail ? ` ${a.lastTool.detail}` : ""}${a.lastTool.ok ? "" : " ✗"}`
+    ? `${t("last:")} ${a.lastTool.capability}${a.lastTool.detail ? ` ${a.lastTool.detail}` : ""}${a.lastTool.ok ? "" : " ✗"}`
     : "";
-  return html`<section class="panel now" aria-label="Now" data-live="card">
+  return html`<section class="panel now" aria-label="${t("Now")}" data-live="card">
 <div class="row"><span class="spin" aria-hidden="true"></span><b>${a.step.id}${a.step.iteration > 1 ? `#${a.step.iteration}` : ""}${a.step.agent && a.step.agent !== a.step.id ? ` · ${a.step.agent}` : ""}</b><span class="meta">${ticking(now - Date.parse(a.step.startedAt))} · ${callText(a)}</span></div>
-${a.resumed ? html`<span class="hint resumed">↻ resumed ${wallClock(a.resumed.at).slice(0, 5)} after ${a.resumed.after}${a.resumed.times > 1 ? ` (${a.resumed.times}× this round)` : ""} — the same round goes on from its checkpoint: its conversation, tool calls and plan marks are kept</span>` : ""}
+${a.resumed ? html`<span class="hint resumed">↻ ${t("resumed {at} after {after}", { at: wallClock(a.resumed.at).slice(0, 5), after: a.resumed.after })}${a.resumed.times > 1 ? ` (${t("{n}× this round", { n: a.resumed.times })})` : ""} — ${t("the same round goes on from its checkpoint: its conversation, tool calls and plan marks are kept")}</span>` : ""}
 ${page.fixing ? fixWidget(page.fixing) : page.planProgress ? planWidget(page.planProgress, page.planProgress.lastFile) : ""}
 ${a.batch ? batchHtml(a.batch) : ""}
 ${toolBudget(a, now)}
@@ -1160,11 +1184,11 @@ function steerHtml(
   return html`<div class="steer">${sw(
     "ask",
     s.askOnFailure,
-    "Ask me when tests fail",
+    t("Ask me when tests fail"),
     s.askOnFailure
-      ? "every failed check stops this run for you"
-      : `the project's setting: ${s.projectAsk === "same-failure" ? "asks when a round fails as the one before" : s.projectAsk === "every-failure" ? "asks on every failure" : "asks when the rounds are used up"}`,
-  )}${sw("stop-after", stopping, `Stop after ${step.id}`, stopping ? `it pauses when ${step.id} ends${after?.by ? ` — asked by ${after.by}` : ""}` : `pause when ${step.id} ends, before the next step`)}<span class="hint">for this run</span></div>`;
+      ? t("every failed check stops this run for you")
+      : `${t("the project's setting:")} ${s.projectAsk === "same-failure" ? t("asks when a round fails as the one before") : s.projectAsk === "every-failure" ? t("asks on every failure") : t("asks when the rounds are used up")}`,
+  )}${sw("stop-after", stopping, t("Stop after {step}", { step: step.id }), stopping ? `${t("it pauses when {step} ends", { step: step.id })}${after?.by ? ` — ${t("asked by {who}", { who: after.by })}` : ""}` : t("pause when {step} ends, before the next step", { step: step.id }))}<span class="hint">${t("for this run")}</span></div>`;
 }
 
 /** A step on its second round: what it fixes, folded into one line like the plan. */
@@ -1172,13 +1196,13 @@ function fixWidget(f: NonNullable<RunPage["fixing"]>): Html {
   const n = f.reasons.length;
   const r = f.review;
   const head = r
-    ? html`<span class="d">Fixing what ${r.by} sent back at ${f.from}${r.comment ? html`: <span class="muted">${cut(r.comment.split("\n").find((l) => l.trim()) ?? "", 120)}</span>` : " (no comment)"}</span>`
-    : html`<span class="d">Fixing ${n > 0 ? `${n} defect${n === 1 ? "" : "s"}` : "what"} ${f.from} found</span>`;
+    ? html`<span class="d">${t("Fixing what {who} sent back at {step}", { who: r.by, step: f.from })}${r.comment ? html`: <span class="muted">${cut(r.comment.split("\n").find((l) => l.trim()) ?? "", 120)}</span>` : ` (${t("no comment")})`}</span>`
+    : html`<span class="d">${n > 0 ? t("Fixing {defects} {step} found", { defects: plural(n, "defect"), step: f.from }) : t("Fixing what {step} found", { step: f.from })}</span>`;
   return html`<details class="planw fixw" data-keep="fixing"${r ? html` open` : ""}>
-<summary><span class="of">Round ${String(f.round)}${f.max ? ` of ${f.max}` : ""}</span>${head}</summary>
+<summary><span class="of">${f.max ? t("Round {n} of {m}", { n: f.round, m: f.max }) : t("Round {n}", { n: f.round })}</span>${head}</summary>
 ${
   r
-    ? html`<div class="planbox sentback"><span class="meta">${r.decision === "reject" ? "rejected" : "sent back"} ${r.ref} by ${r.by}${r.channel === "ui" ? " in the browser" : r.channel === "cli" ? " in the terminal" : ""} — the agent gets it as is, binding</span>${r.comment ? html`<div class="said">${cut(r.comment, 4000)}</div>` : html`<span class="muted">No comment was given.</span>`}</div>`
+    ? html`<div class="planbox sentback"><span class="meta">${r.decision === "reject" ? t("rejected") : t("sent back")} ${r.ref} ${t("by {who}", { who: r.by })}${r.channel === "ui" ? ` ${t("in the browser")}` : r.channel === "cli" ? ` ${t("in the terminal")}` : ""} — ${t("the agent gets it as is, binding")}</span>${r.comment ? html`<div class="said">${cut(r.comment, 4000)}</div>` : html`<span class="muted">${t("No comment was given.")}</span>`}</div>`
     : ""
 }
 ${
@@ -1199,11 +1223,11 @@ ${
 function notesBox(page: RunPage, step: string, actions?: Actions, hint = false): Html {
   const notes = page.notes ?? [];
   const add = actions
-    ? html`<details class="addnote" data-keep="${hint ? "hint" : "addnote"}"${hint ? " open" : ""}><summary>${hint ? `✎ A hint for ${step}` : `✎ Add a note for ${step}`}</summary>
+    ? html`<details class="addnote" data-keep="${hint ? "hint" : "addnote"}"${hint ? " open" : ""}><summary>✎ ${hint ? t("A hint for {step}", { step }) : t("Add a note for {step}", { step })}</summary>
 ${form(
   actions,
   `${runHref(page.run)}/note`,
-  html`<label class="field grow">The agent gets it before its next model call, as binding — and every step after it<textarea name="text" rows="3" maxlength="4000" required placeholder="A correction, a decision, a hint: «the slots method serves the courier app too»"></textarea></label><div class="actions"><button type="submit" class="btn primary">Send to the agent</button></div>`,
+  html`<label class="field grow">${t("The agent gets it before its next model call, as binding — and every step after it")}<textarea name="text" rows="3" maxlength="4000" required placeholder="${t("A correction, a decision, a hint: «the slots method serves the courier app too»")}"></textarea></label><div class="actions"><button type="submit" class="btn primary">${t("Send to the agent")}</button></div>`,
 )}</details>`
     : "";
   if (notes.length === 0) return html`${add}`;
@@ -1221,17 +1245,19 @@ ${form(
   // folded once the agents have them; open while one is on its way (a new key: the fold follows);
   // «Add a note» stays outside the fold — a new person would not look for it inside
   return html`<details class="planw notesw" data-keep="notes-${pending > 0 ? "pending" : "delivered"}"${pending > 0 ? html` open` : ""}>
-<summary><span class="of">Notes ${String(groups.length)}</span><span class="${pending > 0 ? "warn" : "ok"}">${pending > 0 ? `◌ ${pending} on its way` : "✓ the agents have them"}</span><span class="d muted">${cut(last.note.text.split("\n").find((l) => l.trim()) ?? "", 90)}</span></summary>
+<summary><span class="of">${t("Notes")} ${String(groups.length)}</span><span class="${pending > 0 ? "warn" : "ok"}">${pending > 0 ? `◌ ${t("{n} on its way", { n: pending })}` : `✓ ${t("the agents have them")}`}</span><span class="d muted">${cut(last.note.text.split("\n").find((l) => l.trim()) ?? "", 90)}</span></summary>
 <div class="planbox"><ul class="notes">${groups.map(
     (g) =>
-      html`<li><span class="${g.delivered ? "ok" : "warn"}">${g.delivered ? "✓ the agent got it" : "◌ goes with its next model call"}</span> <span class="meta">${g.note.by}${g.note.stepId ? ` · ${g.note.stepId}` : ""}${g.times > 1 ? ` · sent ${g.times} times` : ""}</span><div class="said">${g.note.text}</div></li>`,
+      html`<li><span class="${g.delivered ? "ok" : "warn"}">${g.delivered ? `✓ ${t("the agent got it")}` : `◌ ${t("goes with its next model call")}`}</span> <span class="meta">${g.note.by}${g.note.stepId ? ` · ${g.note.stepId}` : ""}${g.times > 1 ? ` · ${t("sent {times}", { times: plural(g.times, "time") })}` : ""}</span><div class="said">${g.note.text}</div></li>`,
   )}</ul></div>
 </details>
 ${add}`;
 }
 
 const planAt = (p: PlanProgress): string =>
-  p.current !== undefined ? `${p.current + 1} of ${p.steps.length}` : `${p.done} of ${p.steps.length} done`;
+  p.current !== undefined
+    ? t("{n} of {m}", { n: p.current + 1, m: p.steps.length })
+    : t("{n} of {m} done", { n: p.done, m: p.steps.length });
 
 /**
  * An implementation's place in its plan: one line folded («Plan 3 of 7: …»), the panel open — the step
@@ -1245,19 +1271,19 @@ function planWidget(p: PlanProgress, lastFile?: string): Html {
       : st === "on"
         ? html`<span class="spin" aria-hidden="true"></span>`
         : html`<span class="muted">·</span>`;
-  const files = (n: number) => `${n} file${n === 1 ? "" : "s"}`;
+  const files = (n: number) => plural(n, "file");
   return html`<details class="planw" data-keep="plan">
-<summary><span class="of">Plan ${planAt(p)}</span>${now ? html`<span class="d">${now.description}</span>` : html`<span class="d muted">every step of the plan is done; the result comes next</span>`}${p.outOfOrder ? html`<span class="warn" style="font-size:12px">out of plan order</span>` : ""}</summary>
+<summary><span class="of">${t("Plan {at}", { at: planAt(p) })}</span>${now ? html`<span class="d">${now.description}</span>` : html`<span class="d muted">${t("every step of the plan is done; the result comes next")}</span>`}${p.outOfOrder ? html`<span class="warn" style="font-size:12px">${t("out of plan order")}</span>` : ""}</summary>
 <div class="planbox">
-<div class="segs" aria-label="${String(p.done)} of ${String(p.steps.length)} done">${p.steps.map((s) => html`<i class="${s.status === "done" ? "ok" : s.status === "on" ? "on" : ""}"></i>`)}</div>
+<div class="segs" aria-label="${t("{n} of {m} done", { n: p.done, m: p.steps.length })}">${p.steps.map((s) => html`<i class="${s.status === "done" ? "ok" : s.status === "on" ? "on" : ""}"></i>`)}</div>
 ${
   now
-    ? html`<div class="pmeta">${now.files.length > 0 ? html`<span><span class="k">files</span> ${now.files.map((f, i) => html`${i > 0 ? " · " : ""}${fileRef(f)}`)}</span>` : ""}${now.verification ? html`<span><span class="k">check</span> ${now.verification}</span>` : ""}${lastFile || now.files.length > 0 ? html`<span><span class="k">now</span> ${lastFile ? html`edit ${fileRef(lastFile)}` : "reading"}${now.files.length > 0 ? ` · ${now.touched} of ${files(now.files.length)} touched` : ""}</span>` : ""}</div>`
+    ? html`<div class="pmeta">${now.files.length > 0 ? html`<span><span class="k">${t("files")}</span> ${now.files.map((f, i) => html`${i > 0 ? " · " : ""}${fileRef(f)}`)}</span>` : ""}${now.verification ? html`<span><span class="k">${t("check")}</span> ${now.verification}</span>` : ""}${lastFile || now.files.length > 0 ? html`<span><span class="k">${t("now")}</span> ${lastFile ? html`${t("edit")} ${fileRef(lastFile)}` : t("reading")}${now.files.length > 0 ? ` · ${t("{n} of {files} touched", { n: now.touched, files: files(now.files.length) })}` : ""}</span>` : ""}</div>`
     : ""
 }
 <ol class="plist">${p.steps.map(
     (s, i) =>
-      html`<li class="${s.status}">${glyph(s.status)}<span class="n">${String(i + 1)}</span><span class="d">${s.description}</span><span class="f">${s.status === "on" && lastFile && s.files.includes(lastFile) ? `editing ${lastFile.split("/").pop()}` : s.files.length > 0 ? files(s.files.length) : ""}</span></li>`,
+      html`<li class="${s.status}">${glyph(s.status)}<span class="n">${String(i + 1)}</span><span class="d">${s.description}</span><span class="f">${s.status === "on" && lastFile && s.files.includes(lastFile) ? t("editing {file}", { file: lastFile.split("/").pop() ?? "" }) : s.files.length > 0 ? files(s.files.length) : ""}</span></li>`,
   )}</ol>
 </div>
 </details>`;
@@ -1277,20 +1303,21 @@ function feedHtml(feed: readonly FeedItem[]): Html {
   const earlier = feed.slice(0, Math.max(0, feed.length - FEED_SHOWN));
   const recent = feed.slice(-FEED_SHOWN);
   return html`<section class="panel feed" aria-labelledby="activity" data-live="feed">
-<h2 id="activity">Activity</h2>
+<h2 id="activity">${t("Activity")}</h2>
 ${
   feed.length > 0
     ? html`${
         earlier.length > 0
-          ? html`<details class="earlier" data-keep="feed-earlier"><summary>${earlier.length} earlier</summary><ol>${earlier.map(feedLine)}</ol></details>`
+          ? html`<details class="earlier" data-keep="feed-earlier"><summary>${t("{n} earlier", { n: earlier.length })}</summary><ol>${earlier.map(feedLine)}</ol></details>`
           : ""
       }<ol>${recent.map(feedLine)}</ol>`
-    : html`<p class="muted">Nothing yet.</p>`
+    : html`<p class="muted">${t("Nothing yet.")}</p>`
 }
 </section>`;
 }
 
 const TIME_ROWS: ReadonlyArray<{ part: TimePart; cls: string; name: string; what?: string }> = [
+  // t("Working") t("steps ran, the model answered, tools worked") t("Waiting for you") t("Waiting on budget and the model") t("Paused or stopped")
   { part: "working", cls: "w", name: "Working", what: "steps ran, the model answered, tools worked" },
   { part: "human", cls: "h", name: "Waiting for you" },
   { part: "waiting", cls: "b", name: "Waiting on budget and the model" },
@@ -1312,15 +1339,15 @@ export function timeHtml(time: TimeSplit): Html {
     const items = time.parts[part].items;
     const shown = part === "working" ? items.slice(0, 3) : items;
     const list = `${shown.map((i) => one(part, i)).join(part === "working" ? ", " : " · ")}${items.length > shown.length ? "…" : ""}`;
-    const sub = [what, list].filter((x) => x).join(" · ");
+    const sub = [what ? t(what) : "", list].filter((x) => x).join(" · ");
     const ms = time.parts[part].ms;
-    return html`<tr><td class="k"><i class="${cls}"></i>${name}</td><td class="v">${ms > 0 ? duration(ms) : "—"}</td><td class="pc">${pc(ms)}</td></tr>${sub ? html`<tr><td colspan="3" class="sub">${sub}</td></tr>` : ""}`;
+    return html`<tr><td class="k"><i class="${cls}"></i>${t(name)}</td><td class="v">${ms > 0 ? duration(ms) : "—"}</td><td class="pc">${pc(ms)}</td></tr>${sub ? html`<tr><td colspan="3" class="sub">${sub}</td></tr>` : ""}`;
   });
   const bar = TIME_ROWS.filter(({ part }) => time.parts[part].ms > 0).map(
     ({ part, cls }) => html`<i class="${cls}" style="width:${share(time.parts[part].ms).toFixed(2)}%"></i>`,
   );
-  const when = `started ${wallClock(time.startedAt).slice(0, 5)} · ${time.endedAt ? `ended ${wallClock(time.endedAt).slice(0, 5)}` : "not over yet"}`;
-  return html`<span class="timew" tabindex="0" aria-describedby="tpop">${duration(total)}${total - working >= 60_000 ? html` <span class="work">· ${duration(working)} working</span>` : ""}<span class="tpop" id="tpop" role="tooltip"><b class="ttl">Time of this run</b><span class="bar">${bar}</span><table>${rows}<tr class="total"><td>Total</td><td class="v">${duration(total)}</td><td class="pc"></td></tr></table><span class="note">From the run's journal, ${when}. Working time is what the run cost in time; the rest is where it waited.</span></span></span>`;
+  const when = `${t("started {at}", { at: wallClock(time.startedAt).slice(0, 5) })} · ${time.endedAt ? t("ended {at}", { at: wallClock(time.endedAt).slice(0, 5) }) : t("not over yet")}`;
+  return html`<span class="timew" tabindex="0" aria-describedby="tpop">${duration(total)}${total - working >= 60_000 ? html` <span class="work">· ${t("{d} working", { d: duration(working) })}</span>` : ""}<span class="tpop" id="tpop" role="tooltip"><b class="ttl">${t("Time of this run")}</b><span class="bar">${bar}</span><table>${rows}<tr class="total"><td>${t("Total")}</td><td class="v">${duration(total)}</td><td class="pc"></td></tr></table><span class="note">${t("From the run's journal, {when}. Working time is what the run cost in time; the rest is where it waited.", { when })}</span></span></span>`;
 }
 
 export function runContent(
@@ -1334,7 +1361,7 @@ export function runContent(
   checkout?: Html,
 ): Html {
   const r = page.run;
-  const t = page.tokens;
+  const tk = page.tokens;
   const extra =
     r.state === "WAITING_HUMAN"
       ? (r.waitingFor?.kind ?? undefined)
@@ -1346,10 +1373,10 @@ export function runContent(
       r.workflow,
       `run ${shortRunId(r.id)}`,
       page.time ? timeHtml(page.time) : duration(page.workedMs),
-      `${t.calls} model call${t.calls === 1 ? "" : "s"}`,
-      ...(t.calls > 0
+      plural(tk.calls, "model call"),
+      ...(tk.calls > 0
         ? [
-            `in ${kilo(t.promptTokens)}${t.cachedTokens > 0 ? ` (${t.cachedEstimated ? "≈ " : ""}${kilo(t.cachedTokens)} cached)` : ""} · out ${kilo(t.outputTokens)} tok`,
+            `${t("in")} ${kilo(tk.promptTokens)}${tk.cachedTokens > 0 ? ` (${tk.cachedEstimated ? "≈ " : ""}${kilo(tk.cachedTokens)} ${t("cached")})` : ""} · ${t("out")} ${kilo(tk.outputTokens)} ${t("tok")}`,
           ]
         : []),
     ],
@@ -1365,17 +1392,17 @@ export function runContent(
 ${rest ? html`<p class="muted" style="white-space:pre-wrap">${cut(rest, 600)}</p>` : ""}
 ${r.stateReason && r.state !== "RUNNING" && r.state !== "WAITING_BUDGET" ? html`<p class="muted">${r.stateReason}</p>` : ""}
 ${page.continuedFrom ? continuedFromHtml(page.continuedFrom) : ""}
-${page.subtaskOf ? html`<p class="muted">subtask ${page.subtaskOf.key} of ${page.subtaskOf.of}${page.subtaskOf.service ? ` · ${page.subtaskOf.service}` : ""} of <a href="/runs/${shortRunId(page.subtaskOf.master.id)}">${firstLine(page.subtaskOf.master.task, 120)}</a> — the contract is the master's</p>` : ""}
+${page.subtaskOf ? html`<p class="muted">${t("subtask {key} of {of}", { key: page.subtaskOf.key, of: page.subtaskOf.of })}${page.subtaskOf.service ? ` · ${page.subtaskOf.service}` : ""} ${t("of")} <a href="/runs/${shortRunId(page.subtaskOf.master.id)}">${firstLine(page.subtaskOf.master.task, 120)}</a> — ${t("the contract is the master's")}</p>` : ""}
 </div>
-<div class="row headact">${actions && !isTerminal(r.state) ? (cancelling(r) ? html`<span class="btn small danger" aria-disabled="true">Cancelling…</span>` : cancelHtml(r, actions)) : ""}</div>
+<div class="row headact">${actions && !isTerminal(r.state) ? (cancelling(r) ? html`<span class="btn small danger" aria-disabled="true">${t("Cancelling…")}</span>` : cancelHtml(r, actions)) : ""}</div>
 </div>
 </div>
 ${notice ?? ""}
-${page.pausing && !cancelling(r) ? html`<div class="banner info" data-live="pausing" role="status"><span class="spin" aria-hidden="true"></span> Pausing${page.pausing.by ? ` (asked by ${page.pausing.by})` : ""} — the run stops after its current model or tool call and keeps its place; then <b>Resume</b> goes on from there</div>` : html`<div data-live="pausing" hidden></div>`}
-${cancelling(r) ? html`<div class="banner bad" data-live="cancelling" role="status"><span class="spin" aria-hidden="true"></span> Cancelling — the run stops after its current model or tool call (a model call can take a minute or two); then it is CANCELLED, its checkout and artifacts stay</div>` : html`<div data-live="cancelling" hidden></div>`}
+${page.pausing && !cancelling(r) ? html`<div class="banner info" data-live="pausing" role="status"><span class="spin" aria-hidden="true"></span> ${t("Pausing")}${page.pausing.by ? ` (${t("asked by {who}", { who: page.pausing.by })})` : ""} — ${t("the run stops after its current model or tool call and keeps its place; then Resume goes on from there")}</div>` : html`<div data-live="pausing" hidden></div>`}
+${cancelling(r) ? html`<div class="banner bad" data-live="cancelling" role="status"><span class="spin" aria-hidden="true"></span> ${t("Cancelling — the run stops after its current model or tool call (a model call can take a minute or two); then it is CANCELLED, its checkout and artifacts stay")}</div>` : html`<div data-live="cancelling" hidden></div>`}
 <div class="cols">
 <section class="panel side steps" aria-labelledby="steps" data-live="steps">
-<h2 id="steps">Steps</h2>
+<h2 id="steps">${t("Steps")}</h2>
 <ol style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:2px">${page.steps.map((s) => stepRow(s, now, s.status === "running" ? page.planProgress : undefined))}</ol>
 </section>
 <div class="mainc">
@@ -1386,14 +1413,14 @@ ${page.subtasks ? subtasksHtml(page, actions) : ""}
 ${page.contractCheck ? contractCheckHtml(page.contractCheck) : ""}
 ${feedHtml(page.feed)}
 <section class="panel arts" aria-labelledby="artifacts" data-live="arts">
-<h2 id="artifacts">Artifacts</h2>
+<h2 id="artifacts">${t("Artifacts")}</h2>
 ${
   page.artifacts.length > 0
     ? html`<ul>${page.artifacts.map(
         (a) =>
           html`<li><a href="${artifactHref(r, a)}">${a.type}/${a.name}@${a.version}</a><span class="meta">${a.stepId ?? "-"}${a.iteration && a.iteration > 1 ? `#${a.iteration}` : ""}</span>${a.state ? html`<span class="${a.state === "approved" ? "ok" : "warn"}" style="font-size:13px">${a.state}</span>` : ""}</li>`,
       )}</ul>`
-    : html`<p class="muted">No artifacts yet.</p>`
+    : html`<p class="muted">${t("No artifacts yet.")}</p>`
 }
 </section>
 ${checkout ?? ""}
@@ -1408,7 +1435,7 @@ ${runDock(page, actions)}`;
  */
 export function dockHtml(body: Html | string): Html {
   return body
-    ? html`<div class="dock" data-live="dock" role="region" aria-label="Actions"><div class="dock-in">${body}</div></div>`
+    ? html`<div class="dock" data-live="dock" role="region" aria-label="${t("Actions")}"><div class="dock-in">${body}</div></div>`
     : html`<div data-live="dock" hidden></div>`;
 }
 
@@ -1420,23 +1447,23 @@ function runDock(page: RunPage, actions?: Actions): Html {
   const card = page.card;
   if (!actions) return dockHtml("");
   if (card?.kind === "loop" && card.tests && !card.rerun && !card.goOn) {
-    const t = card.tests;
+    const ts = card.tests;
     const back = card.to ?? "implementation";
     return dockHtml(
-      html`<div class="what"><b data-choice-label>Send back with a hint</b><span>${card.step} · round ${String(t.round)} of ${String(t.rounds)}</span></div><span class="grow"></span>${form(actions, `${runHref(page.run)}/open`, html`<button type="submit" class="btn">Open in editor</button>`)}<button type="submit" form="tests-form" class="btn primary big" data-choice-go>Send back to ${back}</button>`,
+      html`<div class="what"><b data-choice-label>${t("Send back with a hint")}</b><span>${card.step} · ${t("round {n} of {m}", { n: ts.round, m: ts.rounds })}</span></div><span class="grow"></span>${form(actions, `${runHref(page.run)}/open`, html`<button type="submit" class="btn">${t("Open in editor")}</button>`)}<button type="submit" form="tests-form" class="btn primary big" data-choice-go>${t("Send back to {back}", { back })}</button>`,
     );
   }
   const a = page.activity;
   if (!card && a?.step && pausable(page)) {
     const pause = page.pausing
-      ? html`<span class="btn" aria-disabled="true">Pausing…</span>`
+      ? html`<span class="btn" aria-disabled="true">${t("Pausing…")}</span>`
       : form(
           actions,
           `/runs/${encodeURIComponent(shortRunId(page.run.id))}/pause`,
-          html`<button type="submit" class="btn" title="Stops after the current model or tool call, keeps its place; Resume goes on">Pause</button>`,
+          html`<button type="submit" class="btn" title="${t("Stops after the current model or tool call, keeps its place; Resume goes on")}">${t("Pause")}</button>`,
         );
     return dockHtml(
-      html`<span class="spin" aria-hidden="true"></span><div class="what"><b>${a.step.id}${a.step.iteration > 1 ? `#${a.step.iteration}` : ""}${page.planProgress ? ` · plan ${planAt(page.planProgress)}` : ""}</b><span>${callText(a)}</span></div><span class="grow"></span>${steerHtml(page, a.step, actions)}${pause}`,
+      html`<span class="spin" aria-hidden="true"></span><div class="what"><b>${a.step.id}${a.step.iteration > 1 ? `#${a.step.iteration}` : ""}${page.planProgress ? ` · ${t("plan {at}", { at: planAt(page.planProgress) })}` : ""}</b><span>${callText(a)}</span></div><span class="grow"></span>${steerHtml(page, a.step, actions)}${pause}`,
     );
   }
   return dockHtml("");
@@ -2240,7 +2267,7 @@ ${
 <p class="muted">A worktree of the repository and its workspace setup (installing, building) — for a monorepo that takes a few minutes. This page turns into the run's page by itself as soon as the run begins.</p></section>`
 }
 <section class="panel feed" aria-labelledby="output"><h2 id="output">Output</h2>
-${l.tail ? html`<pre class="tail">${l.tail}</pre>` : html`<p class="muted">Nothing yet.</p>`}
+${l.tail ? html`<pre class="tail">${l.tail}</pre>` : html`<p class="muted">${t("Nothing yet.")}</p>`}
 <span class="meta">log ${home(l.log, homeDir)}</span></section></div>`;
 }
 

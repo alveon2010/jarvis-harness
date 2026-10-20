@@ -871,7 +871,7 @@ export const SCRIPT = `
         const off = across && r.hasAttribute('data-one-only');
         r.disabled = off;
         const label = r.closest('label');
-        if (off) label.title = 'In one service only — pick it in Where';
+        if (off) label.title = newForm.dataset.oneOnlyTitle;
         else label.removeAttribute('title');
       }
       let h = how();
@@ -881,15 +881,15 @@ export const SCRIPT = `
       }
       if (!h) return;
       const acrossHere = across && h.dataset.acrossGo;
-      goBtn.textContent = acrossHere ? h.dataset.acrossGo : h.dataset.verb + ' in ' + (name || 'this repository');
+      goBtn.textContent = acrossHere ? h.dataset.acrossGo : h.dataset.oneGo.replace('{place}', name || newForm.dataset.here);
       const b = document.createElement('b');
       b.textContent = h.dataset.label;
       const key = keyOf(taskField.value || '');
       whatLine.replaceChildren(
         b,
-        (acrossHere ? ' across services — ' + h.dataset.acrossWhat : ' — ' + h.dataset.what) +
+        (acrossHere ? ' ' + newForm.dataset.acrossWord + ' — ' + h.dataset.acrossWhat : ' — ' + h.dataset.what) +
           '.' +
-          (key ? ' Reads ' + key + ' at the start, with its pages and frames.' : ''),
+          (key ? ' ' + newForm.dataset.reads.replace('{key}', key) : ''),
       );
       if (where && p) {
         const summary = where.querySelector('summary');

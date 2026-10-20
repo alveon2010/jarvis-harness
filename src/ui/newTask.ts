@@ -1,6 +1,7 @@
 import { basename } from "node:path";
 import type { CatalogLink, NamedService } from "../knowledge/catalog.ts";
 import { type Html, html } from "./html.ts";
+import { plural, t } from "./i18n.ts";
 import type { Actions, LaunchView } from "./pages.ts";
 
 /**
@@ -37,8 +38,8 @@ export type HowFar = "research" | "fix" | "sdd" | "spec";
 interface HowFarDef {
   readonly id: HowFar;
   readonly label: string;
-  /** In one service or repository: `<verb> in <name>`, and what it does. */
-  readonly one: { readonly verb: string; readonly what: string };
+  /** In one service or repository: the button (`{place}` is the place's name), and what it does. */
+  readonly one: { readonly go: string; readonly what: string };
   /** Across services; none when it runs in one service only. */
   readonly across?: { readonly go: string; readonly what: string };
 }
@@ -47,7 +48,10 @@ export const HOW_FAR: readonly HowFarDef[] = [
   {
     id: "research",
     label: "Research",
-    one: { verb: "Research", what: "find out what the task touches and what is unknown; nothing changes" },
+    one: {
+      go: "Research in {place}",
+      what: "find out what the task touches and what is unknown; nothing changes",
+    },
     across: {
       go: "Research across services",
       what: "which services the task touches and what each needs; nothing changes",
@@ -56,12 +60,15 @@ export const HOW_FAR: readonly HowFarDef[] = [
   {
     id: "fix",
     label: "Fix a bug",
-    one: { verb: "Fix", what: "research, a spec to approve, the fix, checks, review" },
+    one: { go: "Fix in {place}", what: "research, a spec to approve, the fix, checks, review" },
   },
   {
     id: "sdd",
     label: "Implement",
-    one: { verb: "Implement", what: "requirements, a spec to approve, impact, plan, code, checks, review" },
+    one: {
+      go: "Implement in {place}",
+      what: "requirements, a spec to approve, impact, plan, code, checks, review",
+    },
     across: {
       go: "Implement across services",
       what: "one spec, a subtask per service, the contract between them, delivery in order",
@@ -70,12 +77,19 @@ export const HOW_FAR: readonly HowFarDef[] = [
   {
     id: "spec",
     label: "Spec only",
-    one: { verb: "Write the spec", what: "up to an approved spec; implement later" },
+    one: { go: "Write the spec in {place}", what: "up to an approved spec; implement later" },
     across: { go: "Spec across services", what: "one spec for all the services, approved; split later" },
   },
 ];
 
 export const ONE_SERVICE_ONLY = "In one service only — pick it in Where";
+// t("Research") t("Fix a bug") t("Implement") t("Spec only") t("All services") t("In one service only — pick it in Where")
+// t("Research in {place}") t("Fix in {place}") t("Implement in {place}") t("Write the spec in {place}")
+// t("Research across services") t("Implement across services") t("Spec across services")
+// t("find out what the task touches and what is unknown; nothing changes") t("which services the task touches and what each needs; nothing changes")
+// t("research, a spec to approve, the fix, checks, review") t("requirements, a spec to approve, impact, plan, code, checks, review")
+// t("one spec, a subtask per service, the contract between them, delivery in order") t("up to an approved spec; implement later")
+// t("one spec for all the services, approved; split later") t("Across services") t("One service") t("Other repositories with runs")
 
 /**
  * The workflow a choice runs: Implement in the knowledge repository is the task across services;
@@ -128,14 +142,17 @@ export function placesOf(input: {
 
 const home = (path: string, dir: string) =>
   dir && path.startsWith(`${dir}/`) ? `~${path.slice(dir.length)}` : path;
-const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
 
 const goOf = (h: HowFarDef, place: StartPlace | undefined) =>
-  place?.across && h.across ? h.across.go : `${h.one.verb} in ${place?.name ?? "this repository"}`;
+  place?.across && h.across
+    ? t(h.across.go)
+    : t(h.one.go, { place: place?.name ? placeName(place) : t("this repository") });
 const whatOf = (h: HowFarDef, place: StartPlace | undefined) =>
   place?.across && h.across
-    ? html`<b>${h.label}</b> across services — ${h.across.what}.`
-    : html`<b>${h.label}</b> — ${h.one.what}.`;
+    ? html`<b>${t(h.label)}</b> ${t("across services")} — ${t(h.across.what)}.`
+    : html`<b>${t(h.label)}</b> — ${t(h.one.what)}.`;
+/** «All services» is a name of ours, the others are the repositories' own. */
+const placeName = (p: StartPlace): string => (p.across ? t(p.name) : p.name);
 
 function iconOf(place: StartPlace): Html {
   return place.across
@@ -144,7 +161,7 @@ function iconOf(place: StartPlace): Html {
 }
 
 function badgeOf(place: StartPlace): Html | string {
-  if (place.across) return html`<span class="badge">knowledge repo</span>`;
+  if (place.across) return html`<span class="badge">${t("knowledge repo")}</span>`;
   if (!place.kind) return "";
   return html`<span class="badge${place.kind === "library" ? " lib" : ""}">${place.kind}</span>`;
 }
@@ -157,28 +174,28 @@ const GROUPS: ReadonlyArray<[StartPlace["group"], string]> = [
 
 function whereHtml(places: readonly StartPlace[], chosen: StartPlace | undefined, homeDir: string): Html {
   const label = (p: StartPlace | undefined) =>
-    p ? html`${iconOf(p)}<span data-where-name>${p.name}</span>${badgeOf(p)}` : html`<span>—</span>`;
+    p ? html`${iconOf(p)}<span data-where-name>${placeName(p)}</span>${badgeOf(p)}` : html`<span>—</span>`;
   if (places.length < 2)
     return html`<input type="hidden" name="repo" value="${chosen?.root ?? ""}"><span class="pick still" title="${home(chosen?.root ?? "", homeDir)}">${label(chosen)}</span>`;
-  const groups = GROUPS.map(([g, title]) => [title, places.filter((p) => p.group === g)] as const).filter(
+  const groups = GROUPS.map(([g, title]) => [t(title), places.filter((p) => p.group === g)] as const).filter(
     ([, ps]) => ps.length > 0,
   );
   const option = (p: StartPlace) =>
-    html`<label class="opt" data-find="${`${p.name} ${p.root}`.toLowerCase()}"><input type="radio" name="repo" value="${p.root}" data-name="${p.name}"${p.across ? " data-across" : ""}${p === chosen ? " checked" : ""}><span class="ck" aria-hidden="true">✓</span><span class="nm">${p.name}</span>${badgeOf(p)}<span class="p">${home(p.root, homeDir)}${p.services !== undefined ? ` · ${plural(p.services, "service")}` : ""}</span></label>`;
+    html`<label class="opt" data-find="${`${p.name} ${p.root}`.toLowerCase()}"><input type="radio" name="repo" value="${p.root}" data-name="${placeName(p)}"${p.across ? " data-across" : ""}${p === chosen ? " checked" : ""}><span class="ck" aria-hidden="true">✓</span><span class="nm">${placeName(p)}</span>${badgeOf(p)}<span class="p">${home(p.root, homeDir)}${p.services !== undefined ? ` · ${plural(p.services, "service")}` : ""}</span></label>`;
   return html`<details class="where" data-where>
-<summary class="pick" title="Where it runs" aria-label="Where it runs">${label(chosen)}<span class="car" aria-hidden="true">▾</span></summary>
-<div class="pop" role="group" aria-label="Where it runs">
-${places.length > 6 ? html`<input type="search" class="find" data-where-find placeholder="Find a service or repository" aria-label="Find a service or repository">` : ""}
+<summary class="pick" title="${t("Where it runs")}" aria-label="${t("Where it runs")}">${label(chosen)}<span class="car" aria-hidden="true">▾</span></summary>
+<div class="pop" role="group" aria-label="${t("Where it runs")}">
+${places.length > 6 ? html`<input type="search" class="find" data-where-find placeholder="${t("Find a service or repository")}" aria-label="${t("Find a service or repository")}">` : ""}
 ${groups.map(([title, ps]) => html`<div class="grp">${title}</div>${ps.map(option)}`)}
-<p class="none" data-where-none hidden>Nothing found</p>
+<p class="none" data-where-none hidden>${t("Nothing found")}</p>
 </div>
 </details>`;
 }
 
 function howFarHtml(chosen: StartPlace | undefined, on: HowFar): Html {
-  return html`<div class="seg" role="radiogroup" aria-label="How far">${HOW_FAR.map((h) => {
+  return html`<div class="seg" role="radiogroup" aria-label="${t("How far")}">${HOW_FAR.map((h) => {
     const off = chosen?.across === true && !h.across;
-    return html`<label${off ? html` title="${ONE_SERVICE_ONLY}"` : ""}><input type="radio" name="workflow" value="${h.id}" data-label="${h.label}" data-verb="${h.one.verb}" data-what="${h.one.what}"${h.across ? html` data-across-go="${h.across.go}" data-across-what="${h.across.what}"` : " data-one-only"}${h.id === on ? " checked" : ""}${off ? " disabled" : ""}><span>${h.label}</span></label>`;
+    return html`<label${off ? html` title="${t(ONE_SERVICE_ONLY)}"` : ""}><input type="radio" name="workflow" value="${h.id}" data-label="${t(h.label)}" data-one-go="${t(h.one.go)}" data-what="${t(h.one.what)}"${h.across ? html` data-across-go="${t(h.across.go)}" data-across-what="${t(h.across.what)}"` : " data-one-only"}${h.id === on ? " checked" : ""}${off ? " disabled" : ""}><span>${t(h.label)}</span></label>`;
   })}</div>`;
 }
 
@@ -188,18 +205,18 @@ export function newTaskHtml(start: StartForm, actions: Actions): Html {
   const on: HowFar = "research";
   const h = HOW_FAR.find((x) => x.id === on) as HowFarDef;
   return html`<section class="panel newtask" aria-labelledby="new-title" id="new">
-<form method="post" action="/runs/new" data-newtask><input type="hidden" name="t" value="${actions.token}">
-<h2 id="new-title">New task</h2>
+<form method="post" action="/runs/new" data-newtask data-here="${t("this repository")}" data-across-word="${t("across services")}" data-reads="${t("Reads {key} at the start, with its pages and frames.")}" data-one-only-title="${t(ONE_SERVICE_ONLY)}"><input type="hidden" name="t" value="${actions.token}">
+<h2 id="new-title">${t("New task")}</h2>
 <div class="composer">
-<textarea name="task" rows="3" required maxlength="4000" aria-label="What to do" placeholder="ABC-123 — or in words: what to find out, the bug, the change"></textarea>
+<textarea name="task" rows="3" required maxlength="4000" aria-label="${t("What to do")}" placeholder="${t("ABC-123 — or in words: what to find out, the bug, the change")}"></textarea>
 <div class="cbar">${whereHtml(start.places, chosen, start.homeDir)}${howFarHtml(chosen, on)}<span class="grow"></span><button type="submit" class="btn primary" data-go>${goOf(h, chosen)}</button></div>
 </div>
 <p class="what" data-said aria-live="polite">${whatOf(h, chosen)}</p>
 <div class="startfrom" data-from aria-live="polite"></div>
-<details class="more"><summary>More options</summary>
-<label class="check"><input type="checkbox" name="fresh" value="design"> Read the Figma frames again <span class="meta">— the design changed at the same link; past Jarvis's one-day cache, each frame is a Figma API call</span></label>
+<details class="more"><summary>${t("More options")}</summary>
+<label class="check"><input type="checkbox" name="fresh" value="design"> ${t("Read the Figma frames again")} <span class="meta">— ${t("the design changed at the same link; past Jarvis's one-day cache, each frame is a Figma API call")}</span></label>
 </details>
-<p class="hint">Runs in the background, as <code>jarvis research "…"</code> (or the one chosen) would without a terminal; where it needs you, it waits here — decide on the page and it goes on.</p>
+<p class="hint">${t("Runs in the background, as")} <code>jarvis research "…"</code> ${t("(or the one chosen) would without a terminal; where it needs you, it waits here — decide on the page and it goes on.")}</p>
 </form>
 </section>`;
 }
@@ -210,5 +227,5 @@ export function newTaskHtml(start: StartForm, actions: Actions): Html {
  */
 export function crossNoteHtml(named: readonly NamedService[], link: CatalogLink, metaRoot: string): Html {
   const names = named.map((n) => n.service);
-  return html`<div class="cnote"><span aria-hidden="true">ⓘ</span><span>The task names ${names.map((n, i) => html`${i === 0 ? "" : i === names.length - 1 ? " and " : ", "}<b>${n}</b>`)}, linked by <code>${link.what}</code>. If ${names.length === 2 ? "both" : "they"} must change, run it in <button type="button" class="linkish" data-cross data-repo="${metaRoot}">All services</button>.</span></div>`;
+  return html`<div class="cnote"><span aria-hidden="true">ⓘ</span><span>${t("The task names")} ${names.map((n, i) => html`${i === 0 ? "" : i === names.length - 1 ? ` ${t("and")} ` : ", "}<b>${n}</b>`)}, ${t("linked by")} <code>${link.what}</code>. ${names.length === 2 ? t("If both must change, run it in") : t("If they must change, run it in")} <button type="button" class="linkish" data-cross data-repo="${metaRoot}">${t("All services")}</button>.</span></div>`;
 }

@@ -102,6 +102,7 @@ import { git } from "../tools/local/exec.ts";
 import { type AskView, askContent, askOfRun, recentAsks } from "./ask.ts";
 import { SCRIPT, STYLE } from "./assets.ts";
 import { type DiffFile, type Html, html, parseDiff } from "./html.ts";
+import { inLang, LANG_COOKIE, langOf } from "./i18n.ts";
 import {
   ARCHITECTURE,
   docsContent,
@@ -2299,7 +2300,19 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
         return send(r, 403, "403 — unexpected origin", "text/plain; charset=utf-8");
     } else if (req.method !== "GET")
       return send(r, 405, "405 — method not allowed", "text/plain; charset=utf-8");
-    routes(r).catch((error: unknown) => {
+    // the language of the page (src/ui/i18n.ts): EN | RU in the top bar sets the cookie and comes back
+    if (req.method === "GET" && url.pathname === "/lang") {
+      const to = langOf(url.searchParams.get("to") ?? undefined);
+      const back = url.searchParams.get("back") ?? "/";
+      res.writeHead(303, {
+        ...SECURITY_HEADERS,
+        Location: back.startsWith("/") && !back.startsWith("//") ? back : "/",
+        "Set-Cookie": `${LANG_COOKIE}=${to}; SameSite=Strict; Path=/; Max-Age=31536000`,
+      });
+      res.end();
+      return;
+    }
+    inLang(langOf(cookieOf(req, LANG_COOKIE)), () => routes(r)).catch((error: unknown) => {
       runtime.log.error("ui.error", {
         path: url.pathname,
         message: String((error as Error)?.message ?? error),
