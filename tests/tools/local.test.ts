@@ -231,6 +231,26 @@ describe("local tools", () => {
     expect(event?.payload).toMatchObject({ capability: "repo.read", truncated: true });
   });
 
+  it("code.diagnostics: the typecheck's and lint's errors in the files asked, as facts", async () => {
+    const tsc = [
+      "src/index.ts(2,17): error TS2322: Type string is not assignable to type number.",
+      "src/other.ts(9,1): error TS2304: Cannot find name 'x'.",
+    ].join("\\n");
+    const { bind, registry } = await setup(
+      `version: 1\ntools:\n  local:\n    typecheck: "printf '${tsc}\\n'; exit 2"\n    lint: "printf 'src/index.ts:3:1: warning: no-console Unexpected console\\n'"\n`,
+    );
+    expect(registry.get("code.diagnostics")).toBeDefined();
+    const r = await bind().invoke("code.diagnostics", { files: ["index.ts"] });
+    expect(r.ok).toBe(true);
+    expect(r.text).toContain("typecheck: failed · lint: passed");
+    expect(r.text).toContain("1 error(s), 1 other in 1 file(s)");
+    expect(r.text).toContain(
+      "src/index.ts:2:17 error TS2322 Type string is not assignable to type number. (typecheck)",
+    );
+    expect(r.text).toContain("src/index.ts:3:1 warning no-console Unexpected console (lint)");
+    expect(r.text).not.toContain("other.ts");
+  });
+
   it("runs project commands from tools.local and exposes shell.run only when enabled", async () => {
     const { bind, registry } = await setup();
     expect(registry.get("shell.run")).toBeUndefined();

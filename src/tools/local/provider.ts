@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
+import type { Diagnostic } from "../../core/capabilities/contracts.ts";
 import type { ResolvedConfig } from "../../core/config/schema.ts";
 import { changedFiles } from "../../knowledge/check.ts";
 import { globMatches } from "../../knowledge/frontmatter.ts";
@@ -13,6 +14,7 @@ import {
 import { readByRef } from "../../knowledge/resolver.ts";
 import { refreshIndex, search } from "../../knowledge/retrieval/service.ts";
 import { knowledgeRootsOf } from "../../knowledge/sources.ts";
+import { diagnosticsIn, diagnosticsText, parseDiagnostics } from "../../orchestration/tools/diagnostics.ts";
 import { gitIdentityEnv } from "../../orchestration/worktree.ts";
 import { effectMarker } from "../../storage/effects.ts";
 import type { Capability, ToolContext, ToolOutput, ToolProvider } from "../types.ts";
@@ -727,6 +729,45 @@ export class LocalToolProvider implements ToolProvider {
         },
       },
     ];
+
+    // ADR-0021 §4: what the typecheck and lint say about some files, as facts (file, line, code, message)
+    const checkers = Object.keys(this.config.tools.local).filter((n) => /^(typecheck|lint)/.test(n));
+    if (checkers.length > 0)
+      caps.push({
+        name: "code.diagnostics",
+        description: `Errors and warnings of the project's ${checkers.join(", ")} for some files (or all): file:line, code, message — one call instead of running the commands and reading their logs.`,
+        network: "none",
+        access: "read",
+        effect: false,
+        parameters: {
+          type: "object",
+          properties: {
+            files: {
+              type: "array",
+              items: { type: "string" },
+              description: "files to report on (a file may be named by its end); none = everything",
+            },
+          },
+        },
+        handler: async (args, ctx) => {
+          const files = Array.isArray(args.files) ? args.files.map(String) : [];
+          const found: Diagnostic[] = [];
+          const ran: string[] = [];
+          for (const name of checkers) {
+            const command = this.config.tools.local[name] as string;
+            const out = await this.projectCommand(name, command, ctx);
+            ran.push(`${name}: ${out.ok ? "passed" : "failed"}`);
+            const text = `${out.text ?? ""}\n${out.error ?? ""}`;
+            found.push(...parseDiagnostics(text, name));
+          }
+          const shown = diagnosticsIn(found, files);
+          return {
+            ok: true,
+            text: `${ran.join(" · ")}\n${diagnosticsText(shown)}`,
+            data: { ran, total: found.length, shown: shown.length, diagnostics: shown.slice(0, 200) },
+          };
+        },
+      });
 
     for (const [name, command] of Object.entries(this.config.tools.local)) {
       caps.push({

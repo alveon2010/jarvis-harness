@@ -7,6 +7,7 @@ export interface Range {
   readonly file: string;
   readonly startLine: number;
   readonly endLine: number;
+  readonly startColumn?: number;
 }
 
 export type SymbolKind =
