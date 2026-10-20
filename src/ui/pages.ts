@@ -7,6 +7,7 @@ import type { McpHealth, McpServerHealth } from "../app/mcpHealth.ts";
 import type { HealthState, ModelHealth, ModelPerf, ModelsHealth, Unlimited } from "../app/modelHealth.ts";
 import type { PlanProgress } from "../app/planProgress.ts";
 import type { RestartPlan } from "../app/restart.ts";
+import type { RoundFailure } from "../app/rounds.ts";
 import type { SubtaskView } from "../app/subtasks.ts";
 import type { TimeItem, TimePart, TimeSplit } from "../app/timeSplit.ts";
 import { cdTo, type TryOut, tryCommand } from "../app/tryOut.ts";
@@ -17,7 +18,7 @@ import { incompleteOf } from "../cli/style.ts";
 import { isTerminal, type Run } from "../core/domain/run.ts";
 import type { EgressNotice, ModelEgressNotice } from "../security/policy/egress.ts";
 import { shortRunId } from "../storage/runStore.ts";
-import { checksHtml, checksOf } from "./checks.ts";
+import { checkLogHtml, checksHtml, checksOf } from "./checks.ts";
 import { type DiffFile, escapeHtml, type Html, html, join, markdownToHtml, type Part, raw } from "./html.ts";
 import type {
   ApprovalCard,
@@ -30,6 +31,7 @@ import type {
   RunsPage,
   ScopeCard,
   StepRow,
+  TestsStop,
   WaitCard,
   WaitingCandidate,
   WaitingRun,
@@ -732,6 +734,7 @@ function stepRow(s: StepRow, now: number, plan?: PlanProgress): Html {
 }
 
 function loopCardHtml(card: LoopCard, page: RunPage, actions?: Actions): Html {
+  if (card.tests) return testsCardHtml(card, page, actions);
   const route = card.from ? `${card.from} → ${card.to} · ${card.outcome} · ` : "";
   // the step the used-up edge went back to, when it is another step than the one that stopped
   const back = card.to && card.to !== card.step ? card.to : undefined;
@@ -771,6 +774,102 @@ ${
 ${notesBox(page, back ?? card.step, actions)}`
       : terminalHint(card, page.terminal, page.run)
 }
+</section>`;
+}
+
+const TESTS_TITLE: Record<TestsStop["why"], string> = {
+  "same-failure": "Tests failed again the same way",
+  "not-started": "The tests did not run",
+  "every-failure": "Tests failed",
+  "rounds-used-up": "Tests still fail — no rounds left",
+};
+
+function testsLead(t: TestsStop, card: LoopCard): Html {
+  const back = card.to ?? "the implementation";
+  const left = Math.max(0, t.rounds - t.round);
+  switch (t.why) {
+    case "same-failure":
+      return html`Round ${t.round} failed exactly as round ${t.round - 1}: the same ${t.failures.length === 1 ? "test with the same assertion" : `${t.failures.length} failures`}. Another round with the same input is unlikely to help, so Jarvis asks you before spending it${left > 0 ? html` — ${left === 1 ? "one round is" : `${left} rounds are`} left` : ""}.`;
+    case "not-started":
+      return html`${t.notStarted.join(", ")} stopped before any test ran: the build or the environment broke, not a test. The output below says where; a model rarely fixes that by trying again.`;
+    case "every-failure":
+      return html`The project asks a person on every failed check (<code>human.checks.ask: every-failure</code>): decide what ${back} does with it.`;
+    default:
+      return html`${back} had ${t.rounds} rounds and the checks still fail. Decide what happens next.`;
+  }
+}
+
+function roundsStrip(t: TestsStop): Html {
+  return html`<div class="rounds-strip">${t.history.map(
+    (r) =>
+      html`<div class="rb${r.failed > 0 || r.notStarted ? " bad" : ""}"><b>Round ${r.round} · ${r.notStarted ? "no test ran" : r.failed > 0 ? `${r.failed} failed` : "passed"}</b><span class="meta">${r.same ? `the same as round ${r.round - 1}` : r.round === t.round ? "this round" : ""}</span></div>`,
+  )}</div>`;
+}
+
+function roundFailureHtml(f: RoundFailure, repeated: boolean, round: number): Html {
+  const title =
+    [f.suite?.split(".").at(-1), f.name?.replace(/\(\)$/, "")].filter(Boolean).join(" › ") || f.check;
+  return html`<article class="tf">
+<div class="tf-head"><h3>${title}</h3>${f.at ? html`<code class="meta">${f.at}</code>` : ""}<span class="grow"></span>${repeated ? html`<span class="pill bad">same as round ${round - 1}</span>` : ""}<span class="pill plain">${f.check}</span></div>
+<dl class="tf-facts">
+<dt>Failure</dt><dd><pre>${f.message || "—"}</pre></dd>
+${f.expected !== undefined && f.actual !== undefined ? html`<dt>Expected</dt><dd><code class="ok">${f.expected}</code></dd><dt>Got</dt><dd><code class="bad">${f.actual}</code></dd>` : ""}
+</dl>
+</article>`;
+}
+
+/** The choices for failed checks: the person's words go with each (src/ui/server.ts, `/tests`). */
+function testsChoices(card: LoopCard, page: RunPage, actions: Actions): Html {
+  const t = card.tests as TestsStop;
+  const back = card.to ?? "implementation";
+  const choice = (value: string, title: string, about: string, go: string, checked = false) =>
+    html`<label class="choice"><input type="radio" name="choice" value="${value}" data-go="${go}"${checked ? " checked" : ""}><span><b>${title}</b><span class="about">${about}</span></span></label>`;
+  return form(
+    actions,
+    `${runHref(page.run)}/tests`,
+    html`<fieldset class="choices" data-choices><legend class="sr">What to do</legend>
+${choice("hint", `Send back with a hint`, `${back} gets your words as binding, with these failures and the whole output.`, `Send back to ${back}`, true)}
+${choice("test-wrong", "The test is wrong — let it change the test", `${back} changes the test, not the code, and says which and why; review sees it.`, `Send back: change the test`)}
+${choice("myself", "I fix it myself in the checkout", `Then the checks run again — not another round of ${back}.`, `Run ${card.step} again`)}
+${choice("go-on", "Not this task's — go on without it", `${card.step} counts as passed; the failures stay recorded and the next steps get your words.`, "Go on without it")}
+${choice("spec", "Back to the spec", "The task is not what the spec says: the spec gets your words and comes to you again.", "Back to the spec")}
+</fieldset>
+<label class="field grow">Your words — needed for a hint; for the others, why<textarea name="text" rows="3" maxlength="4000" placeholder="${t.failures[0]?.at ? `«The value comes rounded from ${t.failures[0].at.split(":")[0]} — round once, at the end»` : "A hint, a decision, where to look"}"></textarea></label>
+<div class="actions"><button type="submit" class="btn primary big" data-choice-go>Send back to ${back}</button><span class="hint">or Cancel run… at the top</span></div>`,
+  );
+}
+
+function testsCardHtml(card: LoopCard, page: RunPage, actions?: Actions): Html {
+  const t = card.tests as TestsStop;
+  const repeated = new Set(t.repeated);
+  const command = t.logs[0]?.command;
+  return html`<section class="panel decision tests-stop" aria-labelledby="decision" data-live="card">
+<div class="row" style="flex-direction:column;align-items:flex-start;gap:4px">
+<span class="warn" style="font-size:13px;font-weight:500">Waits for you · ${card.step} · round ${t.round} of ${t.rounds}</span>
+<h2 id="decision" style="font-size:22px;line-height:28px">${TESTS_TITLE[t.why]}</h2>
+<p style="margin:0">${testsLead(t, card)}</p>
+</div>
+${roundsStrip(t)}
+${t.failures.slice(0, 4).map((f) => roundFailureHtml(f, repeated.has(f.signature), t.round))}
+${t.failures.length > 4 ? html`<p class="hint">${t.failures.length - 4} more in <a href="${t.checksHref}">the checks of this round</a>.</p>` : ""}
+${t.said ? html`<blockquote class="said"><span class="hint">${card.to ?? "implementation"}, end of its last round</span>${t.said}</blockquote>` : ""}
+<div class="row" style="flex-wrap:wrap;gap:8px 16px">${t.logs.map((l) => html`<a href="${l.href}">Whole output of ${l.check}</a>`)}<a href="${t.checksHref}">The checks of round ${t.round}</a>${command ? html`<code class="meta">${command}</code><button type="button" class="btn small" data-copy="cd ${card.checkout} && ${command}">Copy to run it yourself</button>` : ""}</div>
+${
+  card.rerun || card.goOn
+    ? html`<div class="banner info">↻ ${card.goOn ? `goes on without the failed checks` : card.rerun?.step && card.rerun.step !== card.step ? `one more round of ${card.rerun.step}, then ${card.step}` : `${card.step} runs again`} — decided${(card.goOn ?? card.rerun)?.actor ? ` by ${(card.goOn ?? card.rerun)?.actor}` : ""}</div><div class="actions">${goesOn(page, actions)}</div>`
+    : actions
+      ? testsChoices(card, page, actions)
+      : terminalHint(card, page.terminal, page.run)
+}
+<details class="checkout-fold"><summary class="meta">The run's checkout · ${card.checkoutShown}</summary>
+<div class="checkout">
+<div class="row"><code class="path">${card.checkoutShown}</code>${actions ? form(actions, `${runHref(page.run)}/open`, html`<button type="submit" class="btn">Open in editor</button>`) : ""}<button type="button" class="btn" data-copy="${card.checkout}">Copy path</button></div>
+<div class="changed" aria-live="polite"><span class="hint">Changed in the checkout · live</span>${
+    card.changes && card.changes.length > 0
+      ? card.changes.slice(0, 12).map(changeLine)
+      : html`<span class="muted">nothing yet</span>`
+  }</div>
+</div></details>
 </section>`;
 }
 
@@ -1840,7 +1939,7 @@ ${
 ${questionsHtml(page, extras)}
 ${extras.tryOut ? tryHtml(extras.tryOut, page, extras) : ""}
 ${extras.startOrder?.some((x) => x.library) ? startOrderHtml(extras.startOrder) : ""}
-<section id="document" class="panel doc" aria-label="Document">${((checks) => (checks ? checksHtml(page.run, checks) : documentHtml(a.name, page.text, f?.doc)))(a.type === "checks" ? checksOf(parseJson(page.text)) : undefined)}</section>
+<section id="document" class="panel doc" aria-label="Document">${a.type === "check-log" ? checkLogHtml(page.text) : ((checks) => (checks ? checksHtml(page.run, checks) : documentHtml(a.name, page.text, f?.doc)))(a.type === "checks" ? checksOf(parseJson(page.text)) : undefined)}</section>
 ${
   diff
     ? html`<section id="files" class="group" aria-labelledby="files-h"><h2 id="files-h">Files changed <span class="muted" style="font-weight:400">${diff.length}</span></h2>${

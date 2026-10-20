@@ -216,6 +216,25 @@ tr:last-child td{border-bottom:0}
 .reasons li{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}
 .reasons li span:last-child{flex:1 1 300px;font-size:14px;line-height:21px;overflow-wrap:anywhere}
 .checkout{border-top:1px solid var(--line-soft);padding-top:16px;display:flex;flex-direction:column;gap:10px}
+.tests-stop .rounds-strip{display:flex;gap:8px;flex-wrap:wrap}
+.tests-stop .rb{display:flex;flex-direction:column;gap:2px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px;min-width:150px}
+.tests-stop .rb.bad{border-color:var(--bad-bg);background:var(--bad-bg)}
+.tests-stop .said{margin:0;border-left:3px solid var(--field-line);padding:6px 0 6px 12px;font-size:14px;line-height:1.5;color:var(--ink-2);display:flex;flex-direction:column;gap:2px}
+.tests-stop form{display:flex;flex-direction:column;gap:12px}
+.tests-stop .choices{border:0;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.tests-stop .choice{display:grid;grid-template-columns:20px minmax(0,1fr);gap:10px;align-items:start;padding:10px 14px;border:1px solid var(--field-line);border-radius:10px;cursor:pointer}
+.tests-stop .choice input{margin:3px 0 0;accent-color:var(--accent)}
+.tests-stop .choice>span{display:flex;flex-direction:column;gap:2px;font-size:14px}
+.tests-stop .choice .about{font-size:13px;color:var(--muted)}
+.tests-stop .choice:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
+.tests-stop .checkout-fold summary{cursor:pointer}
+.tf-log{display:flex;flex-direction:column;gap:10px}
+.tf-log .log{margin:0;padding:12px 14px;border-radius:10px;background:var(--sunken);border:1px solid var(--line);font-family:var(--mono);font-size:12px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere;max-height:none}
+.tf-log mark{background:var(--bad-bg);color:var(--bad)}
+.tf-log .fold{display:block;margin:2px 0}
+.tf-log .fold>summary{cursor:pointer;color:var(--muted);list-style:none}
+.tf-log .fold>summary::-webkit-details-marker{display:none}
+.tf-log .fold[open]>summary{margin-bottom:2px}
 .path{flex:1 1 320px;min-width:0;padding:10px 12px;border-radius:8px;background:var(--chip);font-size:13px;overflow-x:auto;white-space:nowrap}
 .changed{display:flex;flex-direction:column;gap:6px;padding:12px;border-radius:8px;background:var(--sunken);border:1px dashed var(--field-line);font-family:var(--mono);font-size:13px;overflow-wrap:anywhere}
 .changed .hint{font-family:var(--sans)}
@@ -930,6 +949,24 @@ export const SCRIPT = `
     sync();
     look();
   }
+
+  // a check's whole output: every fold open at once
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest && e.target.closest('[data-unfold]');
+    if (!b) return;
+    const folds = [...b.closest('.tf-log').querySelectorAll('details.fold')];
+    const open = folds.some((d) => !d.open);
+    for (const d of folds) d.open = open;
+    b.textContent = open ? 'Fold the rest' : 'Show every line';
+  });
+
+  // failed checks: the button says what the chosen way does
+  document.addEventListener('change', (e) => {
+    const r = e.target;
+    if (!r || r.name !== 'choice' || !r.closest('[data-choices]')) return;
+    const go = r.form && r.form.querySelector('[data-choice-go]');
+    if (go && r.dataset.go) go.textContent = r.dataset.go;
+  });
 
   // an open question answered in one's own words: that answer is the one picked
   document.addEventListener('input', (e) => {

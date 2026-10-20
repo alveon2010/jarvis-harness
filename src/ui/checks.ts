@@ -1,4 +1,5 @@
 import type { Run } from "../core/domain/run.ts";
+import { brokeLine, excerptOf } from "../orchestration/tools/excerpt.ts";
 import { type Html, html, raw } from "./html.ts";
 import { fileRefHtml } from "./refs.ts";
 
@@ -114,5 +115,25 @@ export function checksHtml(run: Pick<Run, "id">, results: readonly Result[]): Ht
 <p>${lead}</p>
 <div class="row" style="flex-wrap:wrap;gap:8px">${results.map(chip)}</div>
 ${failed.map((r) => resultHtml(run, r))}
+</div>`;
+}
+
+/**
+ * A check's whole output (the `check-log` artifact) as a person reads it: the lines that say what
+ * broke and the end kept, marked; the rest folded where it was, a click away — the same lines the
+ * agent got when the runner wrote no report (src/orchestration/tools/excerpt.ts).
+ */
+export function checkLogHtml(text: string): Html {
+  const ex = excerptOf(text);
+  const lines = text.replace(/\r\n?/g, "\n").replace(/\n$/, "").split("\n");
+  const show = (ls: readonly string[]) =>
+    ls.map((l) => (brokeLine(l) ? html`<mark>${l}</mark>\n` : html`${l}\n`));
+  return html`<div class="tf-log">
+<div class="row" style="flex-wrap:wrap;gap:8px 14px"><span class="meta">${ex.total.toLocaleString("en-US")} lines · ${ex.hits} say what broke, marked · the rest folded</span><span class="grow"></span><button type="button" class="btn small" data-unfold>Show every line</button><button type="button" class="btn small" data-copy="${text.length <= 2_000_000 ? text : text.slice(-2_000_000)}">Copy all</button></div>
+<pre class="log">${ex.parts.map((p) =>
+    p.kind === "lines"
+      ? show(p.lines)
+      : html`<details class="fold"><summary>… ${p.count.toLocaleString("en-US")} lines (${p.from + 1}–${p.from + p.count}) — show</summary>${show(lines.slice(p.from, p.from + p.count))}</details>`,
+  )}</pre>
 </div>`;
 }

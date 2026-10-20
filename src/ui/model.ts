@@ -5,7 +5,14 @@ import { type BudgetWait, budgetWaitOf } from "../app/budgetWait.ts";
 import { candidatesOf } from "../app/candidates.ts";
 import { type Continuation, continuationOf, continuedFromOf, contradictionsOf } from "../app/continuation.ts";
 import { crossContinuationOf, type ScopeReport, scopeOf } from "../app/crossScope.ts";
-import { awaitedArtifact, type Decision, decisionOn, rerunRequested, waitingCard } from "../app/decide.ts";
+import {
+  awaitedArtifact,
+  type Decision,
+  decisionOn,
+  goOnRequested,
+  rerunRequested,
+  waitingCard,
+} from "../app/decide.ts";
 import { continuedBy } from "../app/handoff.ts";
 import { Journey, type LoopReport, type StepReport } from "../app/journey.ts";
 import { pauseRequested } from "../app/pause.ts";
@@ -13,6 +20,7 @@ import { type PlanProgress, planProgressOf } from "../app/planProgress.ts";
 import { redoableInPlace, redoTargets } from "../app/redo.ts";
 import { type RestartPlan, restartPlanOf } from "../app/restart.ts";
 import { type Resumable, resumableOf } from "../app/resumable.ts";
+import { type RoundFailure, roundsOf, type StopWhy } from "../app/rounds.ts";
 import type { Runtime } from "../app/runtime.ts";
 import type { RunTokens } from "../app/status.ts";
 import { MASTER_WORKFLOW, masterOf, type SubtaskView, splitOf, subtasksOf } from "../app/subtasks.ts";
@@ -71,6 +79,112 @@ export interface LoopCard {
   readonly changes?: readonly Change[];
   /** "Run again" asked since the run stopped (the page, the card's `r`): it goes on, or waits for `jarvis continue`. */
   readonly rerun?: ReturnType<typeof rerunRequested>;
+  /** «Go on without it» asked since the run stopped. */
+  readonly goOn?: ReturnType<typeof goOnRequested>;
+  /** The step's checks failed: the rounds, this round's failures, the whole output (src/app/rounds.ts). */
+  readonly tests?: TestsStop;
+}
+
+/** Why failed checks stopped the run, and what the person needs to decide. */
+export interface TestsStop {
+  /** `rounds-used-up`: the back edge has no rounds left. */
+  readonly why: StopWhy | "rounds-used-up";
+  readonly round: number;
+  /** How many rounds the step gets by itself: the first and the back edge's. */
+  readonly rounds: number;
+  readonly history: ReadonlyArray<{
+    readonly round: number;
+    readonly failed: number;
+    readonly notStarted: boolean;
+    /** Failed exactly as the round before. */
+    readonly same: boolean;
+  }>;
+  readonly failures: readonly RoundFailure[];
+  /** Failures of this round already failing in the round before. */
+  readonly repeated: readonly string[];
+  readonly notStarted: readonly string[];
+  /** The checks document of the round, and each failed check's whole output. */
+  readonly checksHref: string;
+  readonly logs: ReadonlyArray<{ readonly check: string; readonly href: string; readonly command?: string }>;
+  /** What the implementation said at the end of its last round. */
+  readonly said?: string;
+}
+
+/** The checks of the round a loop stopped at, when they failed. */
+function testsStopOf(
+  runtime: Runtime,
+  run: Run,
+  doc: Record<string, unknown> | undefined,
+  max: number | undefined,
+): TestsStop | undefined {
+  const rounds = roundsOf(runtime, run.id);
+  const round =
+    typeof doc?.round === "number" ? doc.round : (run.currentIteration ?? rounds.at(-1)?.round ?? 0);
+  const now = rounds.find((r) => r.round === round);
+  if (!now || (now.failures.length === 0 && now.notStarted.length === 0)) return undefined;
+  const why =
+    doc?.why === "same-failure" || doc?.why === "not-started" || doc?.why === "every-failure"
+      ? doc.why
+      : "rounds-used-up";
+  const history = rounds
+    .filter((r) => r.round <= round)
+    .map((r, i, all) => {
+      const before = all[i - 1];
+      const was = new Set(before?.failures.map((f) => f.signature) ?? []);
+      const same =
+        before !== undefined &&
+        r.failures.length > 0 &&
+        r.failures.length === was.size &&
+        r.failures.every((f) => was.has(f.signature));
+      return { round: r.round, failed: r.failures.length, notStarted: r.notStarted.length > 0, same };
+    });
+  const before = [...rounds].reverse().find((r) => r.round < round);
+  const was = new Set(before?.failures.map((f) => f.signature) ?? []);
+  const short = shortRunId(run.id);
+  let results: Array<{ check?: unknown; log?: unknown; command?: unknown; ok?: unknown }> = [];
+  try {
+    const parsed = JSON.parse(runtime.artifacts.text(now.checks)) as { results?: typeof results };
+    results = Array.isArray(parsed.results) ? parsed.results : [];
+  } catch {
+    results = [];
+  }
+  const logs = results.flatMap((r) => {
+    const v = typeof r.log === "string" ? Number(r.log.split("@")[1]) : Number.NaN;
+    if (r.ok !== false || typeof r.check !== "string" || !Number.isFinite(v)) return [];
+    const name = `${r.check.replace(/[^\w.-]+/g, "-")}.log`;
+    return [
+      {
+        check: r.check,
+        href: `/runs/${short}/artifacts/check-log/${encodeURIComponent(name)}?v=${v}`,
+        ...(typeof r.command === "string" ? { command: r.command } : {}),
+      },
+    ];
+  });
+  const impl = runtime.artifacts.listLatest(run.id, "implementation")[0];
+  let said: string | undefined;
+  try {
+    const d = impl
+      ? (JSON.parse(runtime.artifacts.text(impl)) as { summary?: unknown; notes?: unknown })
+      : {};
+    const notes = Array.isArray(d.notes) ? d.notes.filter((n): n is string => typeof n === "string") : [];
+    said =
+      [typeof d.summary === "string" ? d.summary : "", ...notes.slice(0, 2)].filter(Boolean).join(" ") ||
+      undefined;
+  } catch {
+    said = undefined;
+  }
+  return {
+    why,
+    round,
+    rounds: (max ?? 2) + 1,
+    history,
+    failures: now.failures.slice(0, 8),
+    repeated: now.failures.filter((f) => was.has(f.signature)).map((f) => f.signature),
+    notStarted: now.notStarted,
+    checksHref: `/runs/${short}/artifacts/checks/checks.json?v=${now.checks.version}`,
+    logs,
+    ...(said ? { said: said.slice(0, 600) } : {}),
+  };
 }
 
 export interface ApprovalCard {
@@ -280,8 +394,17 @@ export async function waitCardOf(runtime: Runtime, run: Run, homeDir: string): P
     const reasonText = typeof doc?.reason === "string" ? doc.reason : "";
     const changes = changesIn(run.workspace.path);
     const rerun = rerunRequested(runtime, run.id);
+    const goOn = goOnRequested(runtime, run.id);
+    const tests = testsStopOf(
+      runtime,
+      run,
+      doc,
+      typeof doc?.maxIterations === "number" ? doc.maxIterations : undefined,
+    );
     return {
       kind: "loop",
+      ...(goOn ? { goOn } : {}),
+      ...(tests ? { tests } : {}),
       step: run.currentStep ?? "the step",
       ...(typeof doc?.iterations === "number" ? { iterations: doc.iterations } : {}),
       edge,

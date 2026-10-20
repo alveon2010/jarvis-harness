@@ -286,8 +286,9 @@ steps:
     expect((checks.results[0] as { log?: string }).log).toBeUndefined();
     // jest on the related tests only, and no related test is not a failure
     expect(checks.results[1]?.command).toBe("cd pkg && echo jest --passWithNoTests --findRelatedTests a.ts");
+    // what the command printed, not only its last lines: the agent's reason
     expect(checks.reasons[0]?.summary).toContain(
-      "test-pkg failed: $ cd pkg && echo tests ran in pkg && exit 3 | tests ran in pkg",
+      "test-pkg failed:\n$ cd pkg && echo tests ran in pkg && exit 3\ntests ran in pkg",
     );
   });
 

@@ -472,8 +472,18 @@ async function loopGate(
   const env = ctx.env ?? {};
   const width = ctx.out.columns - 1;
   ctx.out.line();
+  // failed checks stopped it before the rounds were used up (src/app/rounds.ts)
+  const why = doc?.why;
+  const title =
+    why === "same-failure"
+      ? `${step}: the checks failed again the same way`
+      : why === "not-started"
+        ? `${step}: no test ran — the build or the environment broke`
+        : why === "every-failure"
+          ? `${step}: the checks failed`
+          : `${step} sent the work back ${typeof doc?.iterations === "number" ? `${doc.iterations} times` : "too often"}`;
   ctx.out.line(
-    `${st.warn("⏸")} ${st.heading(`${step} sent the work back ${typeof doc?.iterations === "number" ? `${doc.iterations} times` : "too often"}`)} ${st.muted(`— ${route ? `${route[1]} → ${route[2]}, ${route[3]}` : edge}; no rounds left`)}`,
+    `${st.warn("⏸")} ${st.heading(title)} ${st.muted(`— ${route ? `${route[1]} → ${route[2]}, ${route[3]}` : edge}; ${why ? "asks you before the next round · a hint, the test is wrong, go on: on the run's page" : "no rounds left"}`)}`,
   );
   // kinds in a column, so the reasons start at one place
   const pad = Math.min(16, Math.max(0, ...reasons.map((r) => r.kind?.length ?? 0)));

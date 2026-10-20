@@ -140,6 +140,43 @@ export function requestRerun(
   });
 }
 
+/**
+ * «Not this task's — go on without it» on failed checks (src/app/rounds.ts): the step that failed is
+ * taken as passed, the run goes on to the step after it; what failed is kept with the person's words.
+ */
+export function requestGoOn(
+  runtime: Runtime,
+  run: Run,
+  actor: Actor,
+  channel: DecisionChannel,
+  failures: readonly string[],
+  note?: string,
+): void {
+  runtime.events.emit({
+    kind: "loop.goOn",
+    runId: run.id,
+    ...(run.currentStep ? { stepId: run.currentStep } : {}),
+    actor: `${actor.kind}:${actor.id}`,
+    payload: { step: run.currentStep, channel, failures, ...(note?.trim() ? { note: note.trim() } : {}) },
+  });
+}
+
+/** A «go on without it» asked since the run stopped, if any. */
+export function goOnRequested(
+  runtime: Runtime,
+  runId: string,
+): { actor?: string; failures: string[]; note?: string; seq: number } | undefined {
+  const asked = lastOf(runtime, runId, "loop.goOn");
+  if (!asked || asked.seq < parkedAt(runtime, runId)) return undefined;
+  const p = (asked.payload ?? {}) as { failures?: unknown; note?: unknown };
+  return {
+    seq: asked.seq,
+    failures: Array.isArray(p.failures) ? p.failures.filter((f): f is string => typeof f === "string") : [],
+    ...(typeof p.note === "string" ? { note: p.note } : {}),
+    ...(asked.actor ? { actor: asked.actor.replace(/^(user|service|ci):/, "") } : {}),
+  };
+}
+
 /** The step a «one more round» asked for since the run stopped, if any. */
 export function rerunBackTo(runtime: Runtime, runId: string): string | undefined {
   const asked = lastOf(runtime, runId, "loop.rerun");

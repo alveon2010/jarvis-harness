@@ -1,7 +1,8 @@
 import { reasonOf } from "../app/activity.ts";
-import { rerunBackTo } from "../app/decide.ts";
+import { goOnRequested, rerunBackTo } from "../app/decide.ts";
 import { pausedText, pauseRequested } from "../app/pause.ts";
 import { pendingRedo } from "../app/redo.ts";
+import { roundStop } from "../app/rounds.ts";
 import type { Runtime } from "../app/runtime.ts";
 import { BudgetExceededError, BudgetedGateway } from "../budget/runBudget.ts";
 import { EXIT } from "../cli/output.ts";
@@ -399,7 +400,13 @@ export class LocalWorkflowEngine {
     if (transition.edgeId) {
       const count = (iterations[transition.edgeId] ?? 0) + 1;
       const max = transition.maxIterations ?? 2;
-      if (count > max) {
+      // the round's checks failed as the round before, or no test ran: the person decides before the
+      // next round is spent (src/app/rounds.ts); the rounds left stay for after their decision
+      const stop =
+        count > max || !this.runsChecks(run, step)
+          ? undefined
+          : roundStop(this.rt, run, iteration, this.rt.loaded.config.human.checks.ask);
+      if (count > max || stop) {
         const exhausted = this.rt.artifacts.put({
           runId: run.id,
           type: "loop-exhausted",
@@ -411,6 +418,7 @@ export class LocalWorkflowEngine {
               maxIterations: max,
               lastOutcome: outcome.outcome,
               reason: outcome.reason,
+              ...(stop ? { why: stop.why, round: stop.round, same: stop.same } : {}),
             },
             null,
             2,
@@ -429,12 +437,15 @@ export class LocalWorkflowEngine {
           state: { loopExhausted: transition.edgeId },
         });
         const parked = this.rt.runs.transition(run.id, "WAITING_HUMAN", {
-          reason: `back edge ${transition.edgeId} exhausted after ${max} iteration(s) (ADR-0004 §3)`,
+          reason: stop
+            ? `checks of round ${iteration} ${stop.why === "not-started" ? "ran no test" : stop.why === "same-failure" ? "failed as the round before" : "failed"}: a person decides before ${transition.edgeId} is taken again`
+            : `back edge ${transition.edgeId} exhausted after ${max} iteration(s) (ADR-0004 §3)`,
           waitingFor: { kind: "loop", detail: transition.edgeId },
         });
         this.emit(parked, "workflow.loopExhausted", {
           edge: transition.edgeId,
           artifact: `${exhausted.artifactId}@${exhausted.version}`,
+          ...(stop ? { why: stop.why } : {}),
         });
         this.emit(parked, "run.state", { state: parked.state, reason: parked.stateReason });
         return { run: parked, stop: true };
@@ -526,13 +537,44 @@ export class LocalWorkflowEngine {
       // or the person asked the step the loop went back to for one more round
       const edge = run.waitingFor.detail ?? "";
       const back = rerunBackTo(this.rt, run.id);
-      const to = back && edge.includes(`->${back}#`) ? back : run.currentStep;
+      // «go on without it»: the step is taken as passed, the run goes where its success goes
+      const goOn = goOnRequested(this.rt, run.id);
+      const onSuccess = goOn
+        ? workflow.steps.find((s) => s.id === run.currentStep)?.transitions.onSuccess
+        : undefined;
+      if (goOn && onSuccess === STEP_DONE) {
+        const done = this.rt.runs.transition(run.id, "COMPLETED", {
+          reason: "went on without the failed checks",
+        });
+        this.emit(done, "run.state", { state: done.state });
+        return done;
+      }
+      const to =
+        goOn && onSuccess && workflow.steps.some((s) => s.id === onSuccess)
+          ? onSuccess
+          : back && edge.includes(`->${back}#`)
+            ? back
+            : run.currentStep;
       const fresh = this.rt.history.nextIteration(run.id, to);
       this.rt.runs.update(run.id, { currentStep: to, currentIteration: fresh });
     }
     const resumed = this.rt.runs.transition(run.id, "RUNNING", { reason: `resumed from ${run.state}` });
     this.emit(resumed, "run.state", { state: resumed.state, reason: resumed.stateReason });
     return resumed;
+  }
+
+  /** The step runs the project's checks (writes `checks`): itself, or one of its children. */
+  private runsChecks(run: Run, step: StepDefinition): boolean {
+    const checks = (s: StepDefinition | undefined) =>
+      s !== undefined && (s.tool === "project.checks" || s.outputs.includes("checks"));
+    if (checks(step)) return true;
+    if (step.kind !== "composite") return false;
+    try {
+      const wf = this.workflow(run.workflow);
+      return (step.children ?? []).some((id) => checks(wf.steps.find((s) => s.id === id)));
+    } catch {
+      return false;
+    }
   }
 
   /** ADR-0019 §5: review comments move with the workflow. */

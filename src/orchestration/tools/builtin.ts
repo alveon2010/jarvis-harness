@@ -12,6 +12,7 @@ import { filesFor, packageDirOf, rulesFor } from "../../tools/local/fix.ts";
 import type { DeterministicTool } from "../executors.ts";
 import { failingOnBase, junitFailures } from "./baseline.ts";
 import { CROSS_TOOLS } from "./cross.ts";
+import { excerptText } from "./excerpt.ts";
 import { rebuildsFor } from "./rebuild.ts";
 import { classSelection, coveringTests, testRunnerOf } from "./relatedTests.ts";
 import {
@@ -393,6 +394,10 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
       /** Why the tests failed, from the runner's reports (src/orchestration/tools/testReport.ts). */
       failures?: Array<TestFailure & { preexisting?: boolean }>;
       tests?: { failed: number; total?: number };
+      /** A test check that ran no test: the build or the environment broke before (src/app/rounds.ts). */
+      notStarted?: boolean;
+      /** What broke, from the whole output, when the runner wrote no report: the agent's reason. */
+      excerpt?: string;
     }> = [];
     const tools = ctx.runtime.loaded.config.tools;
     const tail = (r: { text?: string; denied?: string }): string =>
@@ -568,6 +573,7 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
       }
       const jsReport =
         js && !r.ok ? js.reporter.failures(js.runner, reportFile, r.text ?? "", workspace) : undefined;
+      const wroteReport = reportFile ? existsSync(reportFile) : false;
       if (reportFile) rmSync(reportFile, { force: true });
       // failing tests that fail on the base commit too are not this run's defects
       // why the tests failed, from the reports the runner wrote
@@ -583,11 +589,21 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
       const failures = (report?.failures ?? [])
         .map((f) => (f.suite && excused.has(f.suite) ? { ...f, preexisting: true } : f))
         .slice(0, MAX_FAILURES);
+      // no report at all from a runner that writes one: no test ran
+      const notStarted =
+        !r.ok &&
+        !preexisting?.excused &&
+        (((runner === "gradle" || runner === "maven") && report === undefined) ||
+          (js !== undefined && reportFile !== undefined && !wroteReport));
       results.push({
         check: name,
         command: `${command}${related}`,
         ok: r.ok || preexisting?.excused === true,
         ...(r.ok || preexisting?.excused ? {} : { tail: tail(r), ...logOf(name, r) }),
+        ...(notStarted ? { notStarted: true } : {}),
+        ...(!r.ok && !preexisting?.excused && failures.length === 0
+          ? { excerpt: excerptText(r.text ?? r.denied ?? "") }
+          : {}),
         ...(preexisting && preexisting.classes.length > 0 ? { preexisting: preexisting.classes } : {}),
         ...(failures.length > 0 && !(r.ok || preexisting?.excused)
           ? {
@@ -609,7 +625,12 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
         continue;
       }
       const r = await ctx.tools.invoke(`project.${run}`, {});
-      results.push({ check: run, command, ok: r.ok, ...(r.ok ? {} : { tail: tail(r), ...logOf(run, r) }) });
+      results.push({
+        check: run,
+        command,
+        ok: r.ok,
+        ...(r.ok ? {} : { tail: tail(r), excerpt: excerptText(r.text ?? r.denied ?? ""), ...logOf(run, r) }),
+      });
     }
     // failed tests placed in the project: their frames in its files, the lines the run changed
     if (results.some((r) => r.failures && r.failures.length > 0)) {
@@ -629,7 +650,8 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
         : [
             {
               kind: "defects_found",
-              summary: `${r.check} failed: ${(r.tail ?? "").split("\n").filter(Boolean).slice(-3).join(" | ").slice(0, 400)}`,
+              // what broke, from the whole output — not the runner's last summary lines
+              summary: `${r.check} failed${r.notStarted ? " before any test ran (the build or the environment)" : ""}:\n${r.excerpt ?? (r.tail ?? "").split("\n").filter(Boolean).slice(-3).join(" | ").slice(0, 400)}`,
               sourceRefs: [`check:${r.check}`],
             },
           ];

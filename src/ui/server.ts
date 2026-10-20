@@ -21,8 +21,10 @@ import { crossContinuationOf, crossStartOf, goCross, goSingle } from "../app/cro
 import {
   awaitedArtifact,
   DecisionTakenError,
+  goOnRequested,
   parkedAt,
   recordDecision,
+  requestGoOn,
   requestRerun,
   rerunRequested,
   waitingCard,
@@ -45,6 +47,7 @@ import { pauseRequested, requestPause } from "../app/pause.ts";
 import { requestRedo } from "../app/redo.ts";
 import { restartPlanOf } from "../app/restart.ts";
 import { resumableOf } from "../app/resumable.ts";
+import { roundsOf } from "../app/rounds.ts";
 import type { Runtime } from "../app/runtime.ts";
 import { servicesOf } from "../app/servicesView.ts";
 import {
@@ -501,6 +504,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       "no-answer": html`<div class="banner bad">Write the answer first</div>`,
       clarified: html`<div class="banner ok">The rule is recorded — the step goes on with it in the background</div>`,
       "no-rule": html`<div class="banner bad">Nothing to accept yet: Jarvis has not proposed a rule — answer, or write the rule yourself</div>`,
+      "no-hint": html`<div class="banner bad">A hint needs your words: what to look at, what to do</div>`,
       "cannot-continue": html`<div class="banner bad">This run cannot go on: it has not finished, has nowhere to go or went on already</div>`,
       "no-repo": html`<div class="banner bad">Not a repository this page knows: start <code>jarvis ui</code> in it</div>`,
     };
@@ -1503,7 +1507,7 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       });
     }
     const m =
-      /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|restart|redo|clarify|eval|note|pause|cleanup|apply|restore-branch|subtask|scope)$/.exec(
+      /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|restart|redo|clarify|eval|note|pause|cleanup|apply|restore-branch|subtask|scope|tests)$/.exec(
         r.url.pathname,
       );
     const run = m ? resolveRun(m[1] as string) : undefined;
@@ -1862,6 +1866,61 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       }
       goOn(run);
       return redirect(r, `/runs/${short}`);
+    }
+    if (m[2] === "tests") {
+      // failed checks stopped the run (src/app/rounds.ts): the person's choice, with their words
+      if (run.state !== "WAITING_HUMAN" || run.waitingFor?.kind !== "loop")
+        return redirect(r, `/runs/${short}?notice=not-waiting`);
+      if (rerunRequested(runtime, run.id) || goOnRequested(runtime, run.id))
+        return redirect(r, `/runs/${short}`);
+      const who = await actor();
+      if (!who) return redirect(r, `/runs/${short}?notice=actor`);
+      const choice = form.get("choice") ?? "";
+      const text = (form.get("text") ?? "").trim().slice(0, 4000);
+      const edge = run.waitingFor.detail ?? "";
+      const back = /->(.+)#/.exec(edge)?.[1];
+      const failing =
+        roundsOf(runtime, run.id)
+          .find((x) => x.round === run.currentIteration)
+          ?.failures.map(
+            (f) => [f.suite?.split(".").at(-1), f.name].filter(Boolean).join(" › ") || f.check,
+          ) ?? [];
+      const named = failing.slice(0, 6).join("; ") || "the failed checks";
+      const redoTo = (step: string, note: string) => {
+        const workflow = engine.workflow(run.workflow);
+        requestRedo(runtime, run, workflow, step, who, "ui", note);
+      };
+      try {
+        if (choice === "hint") {
+          if (!text || !back) return redirect(r, `/runs/${short}?notice=no-hint`);
+          redoTo(back, `The checks failed (${named}). A person looked at it: ${text}`);
+        } else if (choice === "test-wrong") {
+          if (!back) return redirect(r, `/runs/${short}?notice=cannot-continue`);
+          redoTo(
+            back,
+            `A person decided the failing test is wrong, not the code: ${named}. Change the test so it checks what the specification asks — not the code to fit the test — and say in notes which test you changed and why.${text ? ` Their words: ${text}` : ""}`,
+          );
+        } else if (choice === "myself") {
+          requestRerun(runtime, run, who, "ui");
+        } else if (choice === "go-on") {
+          requestGoOn(runtime, run, who, "ui", failing, text);
+          addNote(
+            runtime,
+            run,
+            `${who.id} took these failing checks as not this task's and let the run go on: ${named}.${text ? ` Why: ${text}` : ""} Do not treat them as defects of this change; review: say so in the summary.`,
+            who.id,
+          );
+        } else if (choice === "spec") {
+          redoTo(
+            "spec",
+            `Back from the checks (${named}): ${text || "the task is not what the specification says"}`,
+          );
+        } else return redirect(r, `/runs/${short}`);
+      } catch {
+        return redirect(r, `/runs/${short}?notice=cannot-continue`);
+      }
+      goOn(runtime.runs.get(run.id) ?? run);
+      return redirect(r, `/runs/${short}?notice=resumed`);
     }
     if (m[2] === "rerun") {
       if (run.state !== "WAITING_HUMAN" || run.waitingFor?.kind !== "loop")

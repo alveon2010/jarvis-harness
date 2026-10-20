@@ -433,6 +433,150 @@ describe("a used-up loop on the page", () => {
   });
 });
 
+describe("failed checks stop the run: the card and the choices", () => {
+  const failing = {
+    check: "test",
+    command: "./gradlew test",
+    ok: false,
+    failures: [
+      {
+        suite: "com.example.OrderTotalTest",
+        name: "discount is rounded once()",
+        message: "expected: 99.90 but was: 99.89",
+        expected: "99.90",
+        actual: "99.89",
+        stack: [{ file: "src/main/kotlin/OrderTotal.kt", line: 41, changed: true }],
+      },
+    ],
+    tests: { failed: 1, total: 14 },
+  };
+  function stopped() {
+    const r = rt.runs.create({
+      task: "ABC-142 the order total is rounded twice after a discount",
+      workflow: "fix",
+      owner: DEV,
+      workspace: { mode: "cwd", repoRoot: sb.project, path: sb.project, baseRef: "HEAD" },
+      dataClass: "internal",
+    });
+    for (const [step, i] of [
+      ["spec", 1],
+      ["implementation", 1],
+      ["verify", 1],
+      ["implementation", 2],
+      ["verify", 2],
+    ] as const)
+      rt.history.start(r.id, step, i);
+    for (const i of [1, 2])
+      rt.artifacts.put({
+        runId: r.id,
+        type: "checks",
+        name: "checks.json",
+        content: JSON.stringify({ results: [failing] }),
+        provenance: { kind: "tool", capability: "project.checks" },
+        stepId: "checks",
+        iteration: i,
+      });
+    rt.artifacts.put({
+      runId: r.id,
+      type: "implementation",
+      name: "implementation.json",
+      content: JSON.stringify({
+        summary: "Moved the rounding after the discount.",
+        notes: ["Could not find where the discount is rounded."],
+      }),
+      provenance: { kind: "agent", agentId: "implementation" },
+      stepId: "implementation",
+      iteration: 2,
+    });
+    rt.artifacts.put({
+      runId: r.id,
+      type: "loop-exhausted",
+      name: "verify->implementation#defects_found.json",
+      content: JSON.stringify({
+        edge: "verify->implementation#defects_found",
+        iterations: 1,
+        maxIterations: 2,
+        why: "same-failure",
+        round: 2,
+      }),
+      provenance: { kind: "tool", capability: "runtime.loop" },
+      stepId: "verify",
+      iteration: 2,
+    });
+    rt.runs.update(r.id, { currentStep: "verify", currentIteration: 2 });
+    rt.runs.transition(r.id, "RUNNING");
+    rt.runs.transition(r.id, "WAITING_HUMAN", {
+      reason: "checks of round 2 failed as the round before",
+      waitingFor: { kind: "loop", detail: "verify->implementation#defects_found" },
+    });
+    rt.events.emit({ kind: "run.state", runId: r.id, payload: { state: "WAITING_HUMAN" } });
+    return { r, short: r.id.slice(4, 12) };
+  }
+
+  it("says why it asks, the rounds, the failure, what the implementation said, the whole output", async () => {
+    const { short } = stopped();
+    const page = await getPage(`/runs/${short}`);
+    expect(page).toContain("Waits for you · verify · round 2 of 3");
+    expect(page).toContain("Tests failed again the same way");
+    expect(page).toContain("Round 2 failed exactly as round 1");
+    expect(page).toContain("<b>Round 1 · 1 failed</b>");
+    expect(page).toContain('<span class="meta">the same as round 1</span>');
+    expect(page).toContain("<h3>OrderTotalTest › discount is rounded once</h3>");
+    expect(page).toContain('<span class="pill bad">same as round 1</span>');
+    expect(page).toContain(
+      "Moved the rounding after the discount. Could not find where the discount is rounded.",
+    );
+    expect(page).toContain('value="hint" data-go="Send back to implementation" checked');
+    expect(page).toContain('value="go-on"');
+    expect(page).toContain(`action="/runs/${short}/tests"`);
+    expect(page).toContain(`href="/runs/${short}/artifacts/checks/checks.json?v=2"`);
+  });
+
+  it("a hint goes back to implementation as a redo with the person's words; empty, it is asked for", async () => {
+    const { r, short } = stopped();
+    expect((await post(`/runs/${short}/tests`, { t: ui.token, choice: "hint", text: " " })).location).toBe(
+      `/runs/${short}?notice=no-hint`,
+    );
+    await post(`/runs/${short}/tests`, {
+      t: ui.token,
+      choice: "hint",
+      text: "PromoClient.percentOf rounds the discount",
+    });
+    const redo = rt.events.list({ runId: r.id, kind: "step.redo" })[0]?.payload as {
+      step: string;
+      note: string;
+    };
+    expect(redo.step).toBe("implementation");
+    expect(redo.note).toBe(
+      "The checks failed (OrderTotalTest › discount is rounded once()). A person looked at it: PromoClient.percentOf rounds the discount",
+    );
+  });
+
+  it("the test is wrong, I fix it myself, go on without it", async () => {
+    const a = stopped();
+    await post(`/runs/${a.short}/tests`, { t: ui.token, choice: "test-wrong" });
+    expect(
+      (rt.events.list({ runId: a.r.id, kind: "step.redo" })[0]?.payload as { note?: string } | undefined)
+        ?.note,
+    ).toContain("Change the test so it checks what the specification asks");
+    const b = stopped();
+    await post(`/runs/${b.short}/tests`, { t: ui.token, choice: "myself" });
+    expect(rt.events.list({ runId: b.r.id, kind: "loop.rerun" })[0]?.payload).toEqual({
+      step: "verify",
+      channel: "ui",
+    });
+    const c = stopped();
+    await post(`/runs/${c.short}/tests`, { t: ui.token, choice: "go-on", text: "flaky on CI, ABC-150" });
+    expect(rt.events.list({ runId: c.r.id, kind: "loop.goOn" })[0]?.payload).toMatchObject({
+      failures: ["OrderTotalTest › discount is rounded once()"],
+      note: "flaky on CI, ABC-150",
+    });
+    expect(await getPage(`/runs/${c.short}`)).toContain(
+      "goes on without the failed checks — decided by dev@example.com",
+    );
+  });
+});
+
 describe("a stop on a budget, decided on the page", () => {
   function budgetStop(budget: Record<string, unknown>) {
     const run = rt.runs.create({

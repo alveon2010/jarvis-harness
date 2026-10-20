@@ -453,6 +453,16 @@ export const HumanConfigSchema = z.strictObject({
     .prefault({}),
   /** Before a gate: answers to the document's open questions from what the run collected (one model call). */
   suggestAnswers: z.boolean().default(true),
+  /**
+   * When failed checks stop the run for a person instead of the next round (src/app/rounds.ts):
+   * `same-failure` — the round failed as the one before, or no test ran; `every-failure`;
+   * `when-rounds-end` — only when the back edge's rounds are used up.
+   */
+  checks: z
+    .strictObject({
+      ask: z.enum(["same-failure", "every-failure", "when-rounds-end"]).default("same-failure"),
+    })
+    .prefault({}),
 });
 export type HumanConfig = z.infer<typeof HumanConfigSchema>;
 

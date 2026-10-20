@@ -1,6 +1,6 @@
 import { isTerminal, type Run } from "../core/domain/run.ts";
 import { budgetGranted } from "./budgetStop.ts";
-import { awaitedArtifact, decisionOn, rerunRequested, waitingCard } from "./decide.ts";
+import { awaitedArtifact, decisionOn, goOnRequested, rerunRequested, waitingCard } from "./decide.ts";
 import type { Runtime } from "./runtime.ts";
 
 /**
@@ -51,7 +51,8 @@ export function resumableOf(runtime: Runtime, run: Run, now = Date.now()): Resum
 function decidedOn(runtime: Runtime, run: Run): boolean {
   const kind = run.waitingFor?.kind;
   if (kind === "budget") return budgetGranted(runtime, run.id) !== undefined;
-  if (kind === "loop") return rerunRequested(runtime, run.id) !== undefined;
+  if (kind === "loop")
+    return rerunRequested(runtime, run.id) !== undefined || goOnRequested(runtime, run.id) !== undefined;
   const awaited = kind === "approval" || !kind ? awaitedArtifact(runtime, run) : undefined;
   return awaited ? decisionOn(runtime, awaited.artifact) !== undefined : false;
 }

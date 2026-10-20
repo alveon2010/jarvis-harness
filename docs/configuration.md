@@ -223,6 +223,10 @@ human:                         # ADR-0019 §9
     removeMarkersAfterApproval: true
   clarification: { multiTurn: true, maxTurns: 8 }
   suggestAnswers: true                   # перед гейтом — ответы на открытые вопросы документа (один вызов модели)
+  checks:
+    ask: same-failure                    # когда упавшие проверки останавливают прогон до следующего круга:
+                                         # same-failure — упали так же, как в прошлом круге, или тесты не запустились;
+                                         # every-failure — при любом падении; when-rounds-end — только когда круги кончились
 
 knowledge:                     # ADR-0020 §3, §5; ADR-0015
   maxSkills: 2                 # навыков на вызов агента; остальные — «по запросу»
