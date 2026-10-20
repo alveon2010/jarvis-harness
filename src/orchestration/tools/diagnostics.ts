@@ -85,6 +85,7 @@ function stylish(lines: readonly string[], source: string): Diagnostic[] {
 export function parseDiagnostics(output: string, source: string): Diagnostic[] {
   const lines = output
     .replace(/\r\n?/g, "\n")
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: the colour codes of a terminal are what is removed
     .replace(/\x1b\[[0-9;]*m/g, "")
     .split("\n");
   const out: Diagnostic[] = [];
