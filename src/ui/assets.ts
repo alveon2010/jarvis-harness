@@ -790,14 +790,18 @@ p.sv-pair{margin:0;font-size:14px}
 .magain form{padding:0 14px 14px}
 .field.inline{flex-direction:row;align-items:center;gap:8px;flex-wrap:wrap}
 .field.inline select{width:auto;height:36px;flex:none}
-.kindline{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;font-size:13px;color:var(--muted);margin-top:-4px}
-.kindline b{color:var(--ink);font-weight:600}
-.kindpick{display:contents}
-.kindpick summary{cursor:pointer;color:var(--accent);list-style:none;text-decoration:underline;text-underline-offset:2px}
-.kindpick summary::-webkit-details-marker{display:none}
-.kindpick[open] summary{color:var(--muted)}
-.kindpick .seg{margin-top:6px}
-.kindpick[open]::after{content:"";flex-basis:100%}
+.kindline{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;font-size:13px;color:var(--muted);margin-top:-4px}
+.kchip{display:inline-flex;align-items:center;gap:2px;padding:2px;border:1px solid var(--field-line);border-radius:999px;background:var(--sunken);cursor:pointer}
+.kchip label{display:none;cursor:pointer}
+.kchip label:has(input:checked),.kchip:hover label,.kchip:focus-within label{display:inline-flex}
+.kchip input{position:absolute;opacity:0;pointer-events:none}
+.kchip label>span{padding:3px 10px;border-radius:999px;color:var(--ink-2);white-space:nowrap}
+.kchip input:checked+span{background:var(--panel);color:var(--ink);font-weight:600;box-shadow:0 0 0 1px var(--line)}
+.kchip label:hover>span{color:var(--ink)}
+.kchip input:focus-visible+span{outline:2px solid var(--accent);outline-offset:1px}
+.kchip .ak{display:none}
+.kchip:hover .ak,.kchip:focus-within .ak{display:inline}
+.kchip:not(:hover):not(:focus-within) label:has(input:checked)>span::after{content:" ▸";color:var(--faint)}
 .field.inline input{height:40px;padding:0 10px;border:1px solid var(--field-line);border-radius:8px;font-family:var(--mono);font-size:13px;background:var(--panel);color:var(--ink)}
 .mdrafts{margin-top:20px;padding:16px 20px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 20px}
 .mdrafts>div{display:flex;flex-direction:column;gap:4px}

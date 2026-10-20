@@ -23,14 +23,3 @@ export const KIND_NAME: Record<TaskKind, string> = {
   test: "tests",
   docs: "docs",
 };
-
-/** The kinds of task as the form names them (run.ts TASK_KINDS). */
-export const KIND_LABEL: Record<TaskKind, string> = {
-  // t("Feature") t("Change") t("Bug fix") t("Refactoring") t("Tests") t("Docs")
-  feature: "Feature",
-  change: "Change",
-  fix: "Bug fix",
-  refactor: "Refactoring",
-  test: "Tests",
-  docs: "Docs",
-};

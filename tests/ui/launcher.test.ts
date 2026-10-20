@@ -249,7 +249,7 @@ describe("New task on the page", () => {
     // research first and chosen: find out before changing anything; the button names it and the place
     expect(runs).toContain('<input type="radio" name="workflow" value="research" data-label="Research"');
     expect(runs).toMatch(/value="research"[^>]* checked><span>Research<\/span>/);
-    expect(runs).toMatch(/value="fix"[^>]* data-one-only><span>Fix a bug<\/span>/);
+    expect(runs).toMatch(/value="fix"[^>]* data-one-only><span>Bugfix<\/span>/);
     expect(runs).toContain(`data-go>Research in ${basename(sb.project)}</button>`);
     expect((await post("/runs/new", { task: "x", workflow: "fix" })).status).toBe(403); // no token
     const token = ui.token;

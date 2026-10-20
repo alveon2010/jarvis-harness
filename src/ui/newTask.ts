@@ -4,7 +4,7 @@ import { TASK_KINDS } from "../core/domain/run.ts";
 import type { CatalogLink, NamedService } from "../knowledge/catalog.ts";
 import { type Html, html } from "./html.ts";
 import { plural, t, th } from "./i18n.ts";
-import { KIND_LABEL, KIND_NAME, kindWhy } from "./kinds.ts";
+import { KIND_NAME, kindWhy } from "./kinds.ts";
 import type { Actions, LaunchView } from "./pages.ts";
 
 /**
@@ -47,6 +47,10 @@ interface HowFarDef {
   readonly across?: { readonly go: string; readonly what: string };
 }
 
+/**
+ * The four as the team names them, in English in every language and in the order a task grows: find
+ * out, specify, build; a bug fix on its own.
+ */
 export const HOW_FAR: readonly HowFarDef[] = [
   {
     id: "research",
@@ -61,13 +65,14 @@ export const HOW_FAR: readonly HowFarDef[] = [
     },
   },
   {
-    id: "fix",
-    label: "Fix a bug",
-    one: { go: "Fix in {place}", what: "research, a spec to approve, the fix, checks, review" },
+    id: "spec",
+    label: "Specification",
+    one: { go: "Write the spec in {place}", what: "up to an approved spec; implement later" },
+    across: { go: "Spec across services", what: "one spec for all the services, approved; split later" },
   },
   {
     id: "sdd",
-    label: "Implement",
+    label: "Implementation",
     one: {
       go: "Implement in {place}",
       what: "requirements, a spec to approve, impact, plan, code, checks, review",
@@ -78,15 +83,14 @@ export const HOW_FAR: readonly HowFarDef[] = [
     },
   },
   {
-    id: "spec",
-    label: "Spec only",
-    one: { go: "Write the spec in {place}", what: "up to an approved spec; implement later" },
-    across: { go: "Spec across services", what: "one spec for all the services, approved; split later" },
+    id: "fix",
+    label: "Bugfix",
+    one: { go: "Fix in {place}", what: "research, a spec to approve, the fix, checks, review" },
   },
 ];
 
 export const ONE_SERVICE_ONLY = "In one service only — pick it in Where";
-// t("Research") t("Fix a bug") t("Implement") t("Spec only") t("All services") t("In one service only — pick it in Where")
+// t("Research") t("Specification") t("Implementation") t("Bugfix") t("All services") t("In one service only — pick it in Where")
 // t("Research in {place}") t("Fix in {place}") t("Implement in {place}") t("Write the spec in {place}")
 // t("Research across services") t("Implement across services") t("Spec across services")
 // t("find out what the task touches and what is unknown; nothing changes") t("which services the task touches and what each needs; nothing changes")
@@ -209,8 +213,7 @@ function howFarHtml(chosen: StartPlace | undefined, on: HowFar): Html {
  */
 function kindLineHtml(): Html {
   const first = kindOfTask({ task: "" });
-  return html`<div class="kindline" data-kind-line><span>${t("Kind of task:")} <b data-kind-name>${t(KIND_NAME[first.kind])}</b> <span class="meta" data-kind-why>— ${kindWhy(first)}</span></span>
-<details class="kindpick"><summary title="${t("picks the skills and standards written for this kind of work")}">${t("Pick another")}</summary><div class="seg" role="radiogroup" aria-label="${t("Kind of task")}"><label><input type="radio" name="kind" value="" checked><span>${t("Auto")}</span></label>${TASK_KINDS.map((k) => html`<label><input type="radio" name="kind" value="${k}" data-name="${t(KIND_NAME[k])}"><span>${t(KIND_LABEL[k])}</span></label>`)}</div></details></div>`;
+  return html`<div class="kindline" data-kind-line><span>${t("Kind of task")}</span><div class="kchip" role="radiogroup" aria-label="${t("Kind of task")}" title="${t("picks the skills and standards written for this kind of work")}"><label><input type="radio" name="kind" value="" checked><span><span class="ak">${t("Auto")} · </span><span data-kind-name>${t(KIND_NAME[first.kind])}</span></span></label>${TASK_KINDS.map((k) => html`<label><input type="radio" name="kind" value="${k}"><span>${t(KIND_NAME[k])}</span></label>`)}</div><span class="meta" data-kind-why>— ${kindWhy(first)}</span></div>`;
 }
 
 /** The form; research first and chosen in every place: find out before changing anything. */
