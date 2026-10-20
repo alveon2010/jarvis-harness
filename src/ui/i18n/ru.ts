@@ -1515,6 +1515,27 @@ export const RU: Readonly<Record<string, string>> = {
   "Pushed the run's branch and opened the PR": "Ветка прогона запушена, PR открыт",
   "The project wants the PR approved first: check it below and approve it":
     "В проекте PR сначала одобряют: проверьте его ниже и одобрите",
+  // ---- the checkout block
+  Checkout: "Рабочая копия",
+  "Removed: no folder and no branch of this run are left.":
+    "Убрано: ни папки, ни ветки этого прогона не осталось.",
+  "Its branch's last commit is kept as {ref}.": "Последний коммит его ветки сохранён как {ref}.",
+  "Restore the branch": "Вернуть ветку",
+  "then Apply, or remove it again": "потом Apply или снова убрать",
+  "folder {path}": "папка {path}",
+  "branch {name}": "ветка {name}",
+  "The run has ended; its {what} are still there.": "Прогон закончился, но его {what} ещё на месте.",
+  "The run has ended; its {what} is still there.": "Прогон закончился, но его {what} ещё на месте.",
+  "Apply to {branch}": "Применить в {branch}",
+  "the run's changes as one commit on the branch checked out in the repository, as {cmd}; not pushed":
+    "изменения прогона одним коммитом на текущую ветку репозитория, как {cmd}; без push",
+  "also delete the branch {name}": "заодно удалить ветку {name}",
+  "its changes are not applied": "её изменения не применены",
+  "The branch is the only copy of the run's work: Apply it first, or keep the branch. Deleted, its last commit stays under {ref} and can be restored here.":
+    "Ветка — единственная копия работы прогона: сначала примените её или оставьте ветку. После удаления её последний коммит остаётся в {ref}, и его можно вернуть здесь.",
+  "Remove the checkout": "Убрать рабочую копию",
+  "Delete the branch": "Удалить ветку",
+  "as {cmd} for this run": "как {cmd} для этого прогона",
 };
 
 /**

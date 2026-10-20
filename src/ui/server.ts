@@ -767,11 +767,11 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
         (await git(["rev-parse", "--verify", "-q", `refs/jarvis/removed/${branch}`], ws.repoRoot)).code === 0;
       if (!cleaned && !kept)
         return delivered
-          ? html`<section class="panel" aria-labelledby="checkout"><h2 id="checkout">Checkout</h2>${delivered}</section>`
+          ? html`<section class="panel" aria-labelledby="checkout"><h2 id="checkout">${t("Checkout")}</h2>${delivered}</section>`
           : undefined;
-      return html`<section class="panel" aria-labelledby="checkout"><h2 id="checkout">Checkout</h2>${delivered ?? ""}
-<p class="muted">Removed: no folder and no branch of this run are left.${kept ? html` Its branch's last commit is kept as <code>refs/jarvis/removed/${branch}</code>.` : ""}</p>
-${kept && actions ? html`<form method="post" action="/runs/${encodeURIComponent(shortRunId(run.id))}/restore-branch"><input type="hidden" name="t" value="${actions.token}"><div class="row"><button type="submit" class="btn">Restore the branch</button><span class="hint">then Apply, or remove it again</span></div></form>` : ""}
+      return html`<section class="panel" aria-labelledby="checkout"><h2 id="checkout">${t("Checkout")}</h2>${delivered ?? ""}
+<p class="muted">${t("Removed: no folder and no branch of this run are left.")}${kept ? html` ${th("Its branch's last commit is kept as {ref}.", { ref: html`<code>refs/jarvis/removed/${branch}</code>` })}` : ""}</p>
+${kept && actions ? html`<form method="post" action="/runs/${encodeURIComponent(shortRunId(run.id))}/restore-branch"><input type="hidden" name="t" value="${actions.token}"><div class="row"><button type="submit" class="btn">${t("Restore the branch")}</button><span class="hint">${t("then Apply, or remove it again")}</span></div></form>` : ""}
 </section>`;
     }
     // its work taken (applied, or the branch merged into what is checked out): the branch can go
@@ -782,22 +782,23 @@ ${kept && actions ? html`<form method="post" action="/runs/${encodeURIComponent(
     const keepWork = run.state === "COMPLETED" && !taken;
     const current = (await git(["rev-parse", "--abbrev-ref", "HEAD"], ws.repoRoot)).stdout.trim();
     const what = [
-      exists ? html`folder <code>${ws.path}</code>` : "",
-      branchExists ? html`branch <code>${branch}</code>` : "",
+      exists ? th("folder {path}", { path: html`<code>${ws.path}</code>` }) : "",
+      branchExists ? th("branch {name}", { name: html`<code>${branch}</code>` }) : "",
     ].filter(Boolean);
-    return html`<section class="panel" aria-labelledby="checkout"><h2 id="checkout">Checkout</h2>
-<p class="muted">The run has ended; its ${what.map((w, i) => html`${i > 0 ? " and " : ""}${w}`)} ${what.length > 1 ? "are" : "is"} still there.</p>
+    // t("The run has ended; its {what} are still there.") t("The run has ended; its {what} is still there.")
+    return html`<section class="panel" aria-labelledby="checkout"><h2 id="checkout">${t("Checkout")}</h2>
+<p class="muted">${th(what.length > 1 ? "The run has ended; its {what} are still there." : "The run has ended; its {what} is still there.", { what: html`${what.map((w, i) => html`${i > 0 ? ` ${t("and")} ` : ""}${w}`)}` })}</p>
 ${
   actions && branchExists && !taken && run.state === "COMPLETED"
-    ? html`<form method="post" action="/runs/${encodeURIComponent(shortRunId(run.id))}/apply"><input type="hidden" name="t" value="${actions.token}"><div class="row"><button type="submit" class="btn primary">Apply to <code>${current}</code></button><span class="hint">the run's changes as one commit on the branch checked out in the repository, as <code>jarvis apply</code>; not pushed</span></div></form>`
+    ? html`<form method="post" action="/runs/${encodeURIComponent(shortRunId(run.id))}/apply"><input type="hidden" name="t" value="${actions.token}"><div class="row"><button type="submit" class="btn primary">${th("Apply to {branch}", { branch: html`<code>${current}</code>` })}</button><span class="hint">${th("the run's changes as one commit on the branch checked out in the repository, as {cmd}; not pushed", { cmd: html`<code>jarvis apply</code>` })}</span></div></form>`
     : ""
 }
 ${delivered ?? (actions && branchExists && run.state === "COMPLETED" && prPolicy(runtime) !== "deny" ? createPrHtml(run, actions.token, pendingPrRequest(runtime, run)?.request) : "")}
 ${
   actions
     ? html`<form method="post" action="/runs/${encodeURIComponent(shortRunId(run.id))}/cleanup"><input type="hidden" name="t" value="${actions.token}">
-${branchExists ? html`<label class="row"><input type="checkbox" name="branch" value="1"${keepWork ? "" : " checked"}> also delete the branch <code>${branch}</code>${keepWork ? html` — <b>its changes are not applied</b>` : ""}</label>${keepWork ? html`<p class="hint">The branch is the only copy of the run's work: Apply it first, or keep the branch. Deleted, its last commit stays under <code>refs/jarvis/removed/</code> and can be restored here.</p>` : ""}` : ""}
-<div class="row"><button type="submit" class="btn">${exists ? "Remove the checkout" : "Delete the branch"}</button><span class="hint">as <code>jarvis gc</code> for this run</span></div>
+${branchExists ? html`<label class="row"><input type="checkbox" name="branch" value="1"${keepWork ? "" : " checked"}> ${th("also delete the branch {name}", { name: html`<code>${branch}</code>` })}${keepWork ? html` — <b>${t("its changes are not applied")}</b>` : ""}</label>${keepWork ? html`<p class="hint">${th("The branch is the only copy of the run's work: Apply it first, or keep the branch. Deleted, its last commit stays under {ref} and can be restored here.", { ref: html`<code>refs/jarvis/removed/</code>` })}</p>` : ""}` : ""}
+<div class="row"><button type="submit" class="btn">${exists ? t("Remove the checkout") : t("Delete the branch")}</button><span class="hint">${th("as {cmd} for this run", { cmd: html`<code>jarvis gc</code>` })}</span></div>
 </form>`
     : ""
 }
