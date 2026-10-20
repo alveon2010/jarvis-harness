@@ -15,6 +15,27 @@
   эмбеддер `src/knowledge/semantic/embedder/{port,local,openaiCompatible}.ts`, FTS
   `src/knowledge/lexical/fts.ts`, глоссарий `.jarvis/knowledge/glossary.md` + `src/knowledge/glossary.ts`,
   evals-набор `evals/cases/retrieval/*`
+- Код: `src/knowledge/retrieval/{index,service,retriever,glossary,embedder}.ts` (FTS5, RRF, порт
+  `Embedder` с `openaiCompatible`), `code.ts` (код в индексе), `termLinks.ts` (глоссарий из прогонов),
+  `src/evals/retrieval.ts` + `jarvis knowledge eval` (метрики §6)
+- Сделано: §2 v0.1–v0.3½ — FTS5 по знанию, стандартам, навыкам и артефактам, глоссарий с расширением
+  запроса и пометкой в trace. §2 v0.4 — код в FTS5: отслеживаемые git файлы исходников единицами-символами
+  (объявление верхнего уровня, у длинного — его члены; окна строк — только у файла без объявлений и у
+  слишком длинного члена), ссылка `путь:начало-конец`, версия единицы — `blobSha` (у файла, изменённого в
+  рабочей копии, — хеш содержимого), переиндексируются только изменённые файлы; vendored, сгенерированные,
+  бинарные, большие и запрещённые (ADR-0010) файлы не берутся, содержимое проходит Redactor; настройка
+  `knowledge.retrieval.code` (`false` или `{ include, exclude, maxFiles, maxFileBytes }`), фильтр `kinds`
+  у `knowledge.search`. §3 — `termLinks[]` в схемах research и impact; по завершении прогона связи «термин →
+  символы», которых нет в глоссарии, становятся кандидатами вида `glossary` (без модели; версия, правленная
+  человеком, важнее агентской; уже предложенное не предлагается снова); принятие дописывает строку или
+  символы в строку термина. §6 — набор «запрос → обязательные ссылки» (`evals/retrieval/cases.yaml`),
+  Recall@5/@10, MRR, irrelevant-context ratio, retrieved tokens, гейт Recall@10 ≥ 0.9, baseline и сравнение
+  с ним (`--no-glossary` показывает вклад глоссария)
+- Не сделано: §4–5 для кода — векторов у кода нет до решения гейта, локальный эмбеддер, `sqlite-vec` и
+  reranker не внедрены (векторы знания лежат JSON в `knowledge_vectors`, поиск полным перебором); кейсы
+  retrieval из human-версий завершённых Run (§6) автоматически не создаются; метрики required-dependency
+  recall и task success / human corrections; Documentation-агент не пополняет глоссарий при
+  `jarvis knowledge update`; результат гейта к ADR не приложен — нет измерения на настоящем наборе
 
 ## Контекст
 

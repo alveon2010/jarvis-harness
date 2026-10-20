@@ -218,6 +218,23 @@ describe("local tools", () => {
     expect(search.text).not.toContain(".env");
   });
 
+  it("knowledge.search finds code by symbol and knowledge.read reads the hit (ADR-0015 §2 v0.4)", async () => {
+    const { bind } = await setup();
+    const tools = bind();
+    const found = await tools.invoke("knowledge.search", { query: "restart onboarding", kinds: ["code"] });
+    expect(found.ok).toBe(true);
+    expect(found.text).toContain("1. src/index.ts:2-4  [code] src/index.ts — canRestartOnboarding");
+    const read = await tools.invoke("knowledge.read", { ref: "src/index.ts:2-4" });
+    expect(read.text).toBe(
+      "src/index.ts:2-4\n    2  export function canRestartOnboarding() {\n    3    return true;\n    4  }",
+    );
+    // a key in a source file is redacted before it is indexed
+    const key = await tools.invoke("knowledge.search", { query: "AKIAIOSFODNN7EXAMPLE", kinds: ["code"] });
+    expect(key.text).toBe("no matches");
+    const denied = await tools.invoke("knowledge.read", { ref: ".env:1-1" });
+    expect(denied.ok).toBe(false);
+  });
+
   it("caps output and keeps the full redacted text as a blob", async () => {
     const { bind } = await setup("version: 1\ntools:\n  maxOutputBytes: 200\n");
     writeFileSync(join(sb.project, "big.txt"), "x".repeat(2000));

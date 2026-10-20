@@ -543,3 +543,36 @@ export function addGlossaryTerm(root: string, t: NewTerm, today = new Date()): {
   writeFileSync(file, `${lines.join("\n")}\n`);
   return { line: last + 2 };
 }
+
+/**
+ * Adds code symbols to a term's row (ADR-0015 §3, a glossary candidate of a run): its symbols cell
+ * gets the new ones after its own, its `updated` cell today's date; every other cell stays as written.
+ */
+export function extendGlossaryTerm(
+  root: string,
+  term: string,
+  symbols: readonly string[],
+  today = new Date(),
+): { readonly line: number } {
+  const file = layoutOf(root).glossaryFile;
+  const lines = readFileSync(file, "utf8").split("\n");
+  const at = lines.findIndex((l) => {
+    const cells = l.trim().startsWith("|") ? l.split("|").slice(1, -1) : [];
+    return (cells[0] ?? "").trim().toLowerCase() === term.trim().toLowerCase();
+  });
+  if (at < 0) throw new Error(`«${term}» is not in the glossary`);
+  const cells = (lines[at] as string)
+    .split("|")
+    .slice(1, -1)
+    .map((c) => c.trim());
+  const have = (cells[2] ?? "")
+    .split(/[,;]/)
+    .map((s) => cleanSymbol(s.trim().replace(/^`|`$/g, "")))
+    .filter(Boolean);
+  const added = symbols.map((s) => cleanSymbol(s)).filter((s) => s && !have.includes(s));
+  cells[2] = [cells[2] ?? "", ...added.map((s) => `\`${cell(s)}\``)].filter(Boolean).join(", ");
+  if (cells.length >= 5) cells[4] = today.toISOString().slice(0, 10);
+  lines[at] = `| ${cells.join(" | ")} |`;
+  writeFileSync(file, lines.join("\n"));
+  return { line: at + 1 };
+}

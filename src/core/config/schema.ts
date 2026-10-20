@@ -409,6 +409,23 @@ export const KnowledgeSourceSchema = z.preprocess(
 );
 export type KnowledgeSource = z.infer<typeof KnowledgeSourceSchema>;
 
+/** ADR-0015 §2 v0.4: which source files the full-text index takes, and how much of them. */
+export const CodeIndexSchema = z.strictObject({
+  enabled: z.boolean().default(true),
+  /** Globs from the repository root; empty = every tracked source file. */
+  include: z.array(z.string().min(1)).default([]),
+  /** Globs left out on top of vendored, generated and denied paths. */
+  exclude: z.array(z.string().min(1)).default([]),
+  /** Files at most; the rest are reported as skipped (a monorepo does not fill the database). */
+  maxFiles: z.int().positive().default(5000),
+  /** A larger file is generated or data more often than code: skipped. */
+  maxFileBytes: z
+    .int()
+    .positive()
+    .default(256 * 1024),
+});
+export type CodeIndexConfig = z.infer<typeof CodeIndexSchema>;
+
 /** ADR-0020 §3, §5 — how standards, skills and knowledge are selected and budgeted. */
 export const KnowledgeConfigSchema = z.strictObject({
   /** Documentation read in place (see KnowledgeSourceSchema); `AGENTS.md` below the root is scoped to its directory. */
@@ -422,6 +439,10 @@ export const KnowledgeConfigSchema = z.strictObject({
       rankAbove: z.int().nonnegative().default(4),
       /** Model id (from `models`) with an OpenAI-compatible /embeddings endpoint; off by default (§6 gate). */
       embeddings: z.string().min(1).optional(),
+      /** ADR-0015 §2 v0.4: tracked source files in the index as symbol units; `false` leaves code to repo.search. */
+      code: z
+        .union([z.boolean().transform((enabled) => CodeIndexSchema.parse({ enabled })), CodeIndexSchema])
+        .prefault(true),
     })
     .prefault({}),
   /** Share of the context budget for L4 split among skills / standards / knowledge. */

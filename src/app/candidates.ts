@@ -5,10 +5,13 @@ import type { Actor } from "../core/domain/actor.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import type { Run } from "../core/domain/run.ts";
 import { layoutOf } from "../core/paths.ts";
+import { loadGlossary, parseGlossary } from "../knowledge/retrieval/glossary.ts";
+import { type GlossaryProposal, proposeGlossary, termLinksIn } from "../knowledge/retrieval/termLinks.ts";
 import { BUILTIN_SKILLS, type Skill } from "../knowledge/skills.ts";
 import { MODULE_MARKER, markSweeping, ONBOARD_MARKER } from "../onboarding/render.ts";
 import type { Dropped } from "../onboarding/verify.ts";
 import { newRunId, shortRunId } from "../storage/runStore.ts";
+import { addGlossaryTerm, extendGlossaryTerm } from "./knowledgeView.ts";
 import type { Runtime } from "./runtime.ts";
 
 /**
@@ -19,7 +22,7 @@ import type { Runtime } from "./runtime.ts";
  * what it is about (`shared-lib/billing`).
  */
 export interface CandidateDoc {
-  kind: "knowledge" | "standard" | "skill-improvement";
+  kind: "knowledge" | "standard" | "skill-improvement" | "glossary";
   title: string;
   rationale: string;
   evidence?: string[];
@@ -40,6 +43,8 @@ export interface CandidateDoc {
   skill?: string;
   /** A finding review repeated in runs (src/app/repeatedFindings.ts): its key and the runs. */
   finding?: { key: string; runs: string[] };
+  /** glossary (ADR-0015 §3): the term and the code symbols a run linked to it. */
+  glossary?: GlossaryProposal;
 }
 
 export interface Candidate {
@@ -158,6 +163,7 @@ export function targetOf(root: string, c: Candidate, id: string | undefined): st
       ? `module-${slug(c.name.replace(/@.*$/, ""))}`
       : slug(c.doc.title));
   const layout = layoutOf(root);
+  if (c.doc.kind === "glossary") return layout.glossaryFile;
   if (c.doc.kind === "standard") return join(layout.jarvisDir, "standards", `${fileId}.md`);
   // a service's knowledge goes to its folder of the knowledge repository (ADR-0025 §1)
   if (c.doc.kind === "knowledge") return join(layout.knowledgeDir, `${fileId}.md`);
@@ -328,6 +334,7 @@ export interface Promoted {
 export function promoteCandidate(runtime: Runtime, input: PromoteInput): Promoted {
   const c = input.candidate;
   if (c.doc.kind === "skill-improvement") return promoteSkillEdit(runtime, input);
+  if (c.doc.kind === "glossary") return promoteGlossary(runtime, input);
   const file = targetOf(input.root, c, input.id);
   const id = file.replace(/^.*[\\/]/, "").replace(/\.md$/, "");
   const before = existingAt(file);
@@ -391,6 +398,111 @@ function promoteSkillEdit(runtime: Runtime, input: PromoteInput): Promoted {
     payload: { artifact: c.artifact.artifactId, file: path, skill: e.skill, version: e.version.to },
   });
   return { file: e.instructions, path, skill: { id: e.skill, ...e.version, fromBuiltin: e.fromBuiltin } };
+}
+
+/** Accepting a glossary candidate: a new row for a new term, the new symbols added to a known one's row. */
+function promoteGlossary(runtime: Runtime, input: PromoteInput): Promoted {
+  const c = input.candidate;
+  const g = c.doc.glossary;
+  if (!g) throw new CandidateNotPromotable("this glossary candidate carries no term");
+  const file = layoutOf(input.root).glossaryFile;
+  const known = parseGlossary(existsSync(file) ? readFileSync(file, "utf8") : "").some(
+    (e) => e.term.toLowerCase() === g.term.toLowerCase(),
+  );
+  if (known) extendGlossaryTerm(input.root, g.term, g.symbols);
+  else addGlossaryTerm(input.root, { term: g.term, synonyms: [], symbols: g.symbols, sources: g.sources });
+  const path = relative(input.root, file).split("\\").join("/");
+  runtime.artifacts.approve({
+    runId: c.artifact.runId,
+    stepId: c.artifact.stepId ?? "candidates",
+    artifactId: c.artifact.artifactId,
+    version: c.artifact.version,
+    actor: input.actor,
+    decision: "approve",
+    comment: [
+      `${known ? "added symbols to" : "added"} «${g.term}» in ${path}`,
+      input.channel ? `from the ${input.channel === "ui" ? "page" : "terminal"}` : "",
+    ]
+      .filter(Boolean)
+      .join("; "),
+  });
+  runtime.events.emit({
+    kind: "knowledge.promoted",
+    runId: c.artifact.runId,
+    actor: `${input.actor.kind}:${input.actor.id}`,
+    payload: { artifact: c.artifact.artifactId, file: path, term: g.term },
+  });
+  return { file, path };
+}
+
+/** The newest version a person edited of each artifact of these types, else the latest. */
+function preferredVersions(runtime: Runtime, runId: string, types: readonly string[]): ArtifactVersion[] {
+  return types.flatMap((type) =>
+    runtime.artifacts.listLatest(runId, type).map((latest) => {
+      const versions = runtime.artifacts.versions(latest.artifactId);
+      return [...versions].reverse().find((v) => v.provenance.kind === "human") ?? latest;
+    }),
+  );
+}
+
+/**
+ * ADR-0015 §3: after a completed run, the terms its research and impact linked to code become
+ * glossary candidates — one per term, only symbols the glossary lacks, none proposed (or decided)
+ * before. Deterministic, no model call; a person accepts them with `jarvis candidates promote`.
+ */
+export function proposeGlossaryCandidates(runtime: Runtime, run: Run): ArtifactVersion[] {
+  const artifacts = preferredVersions(runtime, run.id, ["research", "impact"]).map((a) => ({
+    ref: `${a.artifactId}@${a.version}`,
+    human: a.provenance.kind === "human",
+    termLinks: termLinksIn(runtime.artifacts.text(a)),
+  }));
+  if (artifacts.every((a) => a.termLinks.length === 0)) return [];
+  const proposals = proposeGlossary(artifacts, loadGlossary(run.workspace.repoRoot));
+  // a term with these symbols proposed before (open, accepted or declined) is not proposed again
+  const seen = new Set(
+    candidatesOf(runtime)
+      .filter((c) => c.doc.kind === "glossary" && c.doc.glossary)
+      .flatMap((c) =>
+        (c.doc.glossary as GlossaryProposal).symbols.map(
+          (s) => `${c.doc.glossary?.term.toLowerCase()}\0${s}`,
+        ),
+      ),
+  );
+  const out: ArtifactVersion[] = [];
+  proposals.forEach((p) => {
+    const symbols = p.symbols.filter((s) => !seen.has(`${p.term.toLowerCase()}\0${s}`));
+    if (symbols.length === 0) return;
+    const g: GlossaryProposal = { ...p, symbols };
+    const doc: CandidateDoc = {
+      kind: "glossary",
+      title: `glossary ${p.term}`,
+      rationale: `${p.existing ? `«${p.term}» is in the glossary without` : `«${p.term}» is not in the glossary; the run linked it to`} ${symbols.join(", ")} (${p.from.join(", ")})`,
+      proposal: `| ${p.term} |  | ${symbols.map((s) => `\`${s}\``).join(", ")} | ${p.sources.join(", ")} |`,
+      evidence: p.sources,
+      from: p.from.join(", "),
+      status: "proposed",
+      glossary: g,
+    };
+    out.push(
+      runtime.artifacts.put({
+        runId: run.id,
+        type: "candidate",
+        name: `glossary-${out.length + 1}.json`,
+        content: JSON.stringify(doc, null, 2),
+        mediaType: "application/json",
+        provenance: { kind: "tool", capability: "glossary.termLinks" },
+        sourceRefs: p.from,
+        stepId: "glossary",
+      }),
+    );
+  });
+  if (out.length > 0)
+    runtime.events.emit({
+      kind: "glossary.proposed",
+      runId: run.id,
+      payload: { terms: out.length },
+    });
+  return out;
 }
 
 export function rejectCandidate(runtime: Runtime, c: Candidate, actor: Actor, comment?: string): void {

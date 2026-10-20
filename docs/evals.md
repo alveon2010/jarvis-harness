@@ -106,6 +106,14 @@ jarvis evals diff --tolerance 0.05            # ненулевой код при
 `max(tolerance·|baseline|, tolerance)`. `evals run` выходит с кодом 1, если хоть один кейс не успешен. Удобно в CI
 после изменения промптов или навыков.
 
+## Поиск отдельно: `jarvis knowledge eval` (ADR-0015 §6)
+
+Качество поиска меряется без прогона workflow и без модели: `evals/retrieval/cases.yaml` — кейсы «запрос →
+ссылки, которые должны найтись» (файл кода, `путь:строка`, `knowledge:…`, `standard:…`). Метрики: Recall@5,
+Recall@10, MRR, доля нерелевантного в первой десятке, токены выдачи; гейт перед embeddings и reranker — Recall@10 ≥
+0.9. Результаты и базовая линия лежат рядом с остальными (`evals/results/<дата>-retrieval.json`,
+`evals/baseline/retrieval.json`), сравнение — тем же правилом допуска. Подробнее — [knowledge.md](knowledge.md#поиск-adr-0015).
+
 ## Кейс из реального run
 
 ```sh

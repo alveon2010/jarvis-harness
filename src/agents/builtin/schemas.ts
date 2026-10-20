@@ -64,6 +64,21 @@ const Dependency = z.object({
   sources: z.array(Source).default([]),
 });
 
+/** ADR-0015 §3: a business term of the task and the code it led to; after the run, a glossary proposal. */
+const TermLinks = z
+  .array(
+    z.object({
+      term: z.string().min(1).describe("the business term as the task or its sources say it"),
+      symbols: z
+        .array(z.string().min(1))
+        .min(1)
+        .describe("the code symbols or module paths it names here, verified in files"),
+      sources: z.array(Source).default([]),
+    }),
+  )
+  .default([])
+  .describe("business terms whose code goes by another name (e.g. a term in the issue's language → a class)");
+
 export const ResearchResult = z.object({
   ...Base,
   findings: z.array(
@@ -84,6 +99,7 @@ export const ResearchResult = z.object({
     .describe(
       "requirements that contradict each other or the design — never resolved silently; code that differs from a requirement is the change, not a contradiction",
     ),
+  termLinks: TermLinks,
   outcome: z.enum(["ok"]).default("ok"),
 });
 
@@ -163,6 +179,7 @@ export const ImpactResult = z.object({
     .describe("requirements another service of the knowledge repository must implement, not this one"),
   risks: z.array(z.string()).default([]),
   unknowns: z.array(z.string()).default([]),
+  termLinks: TermLinks,
   outcome: z.enum(["ok", "needs_research"]).default("ok"),
 });
 

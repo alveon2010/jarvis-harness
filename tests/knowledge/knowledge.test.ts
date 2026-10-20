@@ -15,7 +15,10 @@ let sb: Sandbox;
 const CONFIG = {
   sources: [],
   maxSkills: 2,
-  retrieval: { rankAbove: 4 },
+  retrieval: {
+    rankAbove: 4,
+    code: { enabled: true, include: [], exclude: [], maxFiles: 5000, maxFileBytes: 262144 },
+  },
   split: { skills: 0.4, standards: 0.35, knowledge: 0.25 },
 };
 

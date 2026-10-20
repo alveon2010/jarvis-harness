@@ -12,6 +12,7 @@ import {
   outlineText,
 } from "../../knowledge/graph/outline.ts";
 import { readByRef } from "../../knowledge/resolver.ts";
+import { UNIT_KINDS } from "../../knowledge/retrieval/index.ts";
 import { refreshIndex, search } from "../../knowledge/retrieval/service.ts";
 import { knowledgeRootsOf } from "../../knowledge/sources.ts";
 import { diagnosticsIn, diagnosticsText, parseDiagnostics } from "../../orchestration/tools/diagnostics.ts";
@@ -271,7 +272,7 @@ export class LocalToolProvider implements ToolProvider {
       {
         name: "knowledge.read",
         description:
-          "Read in full by ref: a standard, skill or knowledge document listed as available on request (standard:ID@v, skill:id@v, knowledge:name), an artifact of this run (artifactId@version), or the original of trimmed/compacted context (blob:<ref>).",
+          "Read in full by ref: a standard, skill or knowledge document listed as available on request (standard:ID@v, skill:id@v, knowledge:name), an artifact of this run (artifactId@version), a code hit of knowledge.search (path:start-end), or the original of trimmed/compacted context (blob:<ref>).",
         network: "none",
         access: "read",
         effect: false,
@@ -291,6 +292,25 @@ export class LocalToolProvider implements ToolProvider {
           }
           const artifact = artifactByRef(ctx, ref);
           if (artifact) return { ok: true, text: ctx.runtime.artifacts.text(artifact) };
+          // a code hit of knowledge.search: `path:start-end` (ADR-0015 §2 v0.4)
+          const code = ctx.run.workflow === "ask" ? null : /^(.+):(\d+)-(\d+)$/.exec(ref);
+          if (code) {
+            try {
+              const { absolute, relative: rel } = resolveInWorkspace(ctx, code[1] as string);
+              if (existsSync(absolute) && statSync(absolute).isFile()) {
+                const start = Number(code[2]);
+                const lines = readFileSync(absolute, "utf8")
+                  .split("\n")
+                  .slice(start - 1, Number(code[3]));
+                return {
+                  ok: true,
+                  text: `${rel}:${start}-${start + lines.length - 1}\n${lines.map((l, i) => `${String(start + i).padStart(5)}  ${l}`).join("\n")}`,
+                };
+              }
+            } catch (error) {
+              return fail(error);
+            }
+          }
           const roots = knowledgeRootsOf(ctx.runtime.loaded, ctx.workspacePath);
           // a knowledge document named without its prefix or extension (pilot: 13 failed reads)
           for (const candidate of refCandidates(ref)) {
@@ -303,20 +323,35 @@ export class LocalToolProvider implements ToolProvider {
       {
         name: "knowledge.search",
         description:
-          "Search project knowledge, standards, skills and this run's artifacts by meaning and words (FTS + glossary expansion); returns refs for knowledge.read.",
+          "Search project knowledge, standards, skills, this run's artifacts and the code (by symbol) by words, with business terms expanded through the project glossary; returns refs for knowledge.read (code: path:start-end).",
         network: "none",
         access: "read",
         effect: false,
         parameters: {
           type: "object",
-          properties: { query: { type: "string" }, limit: { type: "integer" } },
+          properties: {
+            query: { type: "string" },
+            limit: { type: "integer" },
+            kinds: {
+              type: "array",
+              items: { type: "string", enum: [...UNIT_KINDS] },
+              description: 'only these kinds of source, e.g. ["code"]',
+            },
+          },
           required: ["query"],
         },
         handler: async (args, ctx) => {
           const roots = knowledgeRootsOf(ctx.runtime.loaded, ctx.workspacePath);
           await refreshIndex(ctx.runtime, roots, ctx.run.id);
+          // `jarvis ask` answers from the knowledge base alone: its answerer is never shown code
+          const allowed = ctx.run.workflow === "ask" ? UNIT_KINDS.filter((k) => k !== "code") : UNIT_KINDS;
+          const asked = Array.isArray(args.kinds)
+            ? allowed.filter((k) => (args.kinds as unknown[]).includes(k))
+            : [];
+          const kinds = asked.length > 0 || ctx.run.workflow !== "ask" ? asked : allowed;
           const result = await search(ctx.runtime, roots, str(args, "query"), {
             limit: num(args, "limit", 10),
+            ...(kinds.length > 0 ? { kinds } : {}),
           });
           const lines = result.evidence.map(
             (e, i) =>
@@ -366,7 +401,7 @@ export class LocalToolProvider implements ToolProvider {
       {
         name: "repo.search",
         description:
-          "Search file contents (ripgrep when available). `pattern` is a regex unless literal=true.",
+          "Search file contents (ripgrep when available). `pattern` is a regex unless literal=true. For code by words or business terms rather than an exact pattern, knowledge.search ranks it by symbol.",
         network: "none",
         access: "read",
         effect: false,

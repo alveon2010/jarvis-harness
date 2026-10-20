@@ -7,18 +7,21 @@ import { type KnowledgeRoots, loadStandards } from "../standards.ts";
 import type { Embedder } from "./embedder.ts";
 
 /**
- * Knowledge index (ADR-0015 §2 v0.1–v0.2): units of knowledge, standards, skills and run
- * artifacts in FTS5, re-indexed only when the unit's version (content sha) changed; vectors
- * (§4–5) keyed by `(sourceId, sourceVersion, embedder)` so a different embedder is a different index.
+ * Knowledge index (ADR-0015 §2 v0.1–v0.4): units of knowledge, standards, skills, run artifacts
+ * and code symbols in FTS5, re-indexed only when the unit's version (content sha, blob sha for
+ * code) changed; vectors (§4–5) keyed by `(sourceId, sourceVersion, embedder)` so a different
+ * embedder is a different index.
  */
-export type UnitKind = "knowledge" | "standard" | "skill" | "artifact";
+export type UnitKind = "knowledge" | "standard" | "skill" | "artifact" | "code";
+
+export const UNIT_KINDS: readonly UnitKind[] = ["knowledge", "standard", "skill", "artifact", "code"];
 
 export interface KnowledgeUnit {
   readonly sourceId: string;
   readonly sourceVersion: string;
   readonly kind: UnitKind;
   readonly title: string;
-  /** How an agent reads it in full: `knowledge:name`, `standard:ID@v`, `skill:id@v`, `artifactId@v`. */
+  /** How an agent reads it in full: `knowledge:name`, `standard:ID@v`, `skill:id@v`, `artifactId@v`, `path:start-end`. */
   readonly ref: string;
   readonly body: string;
 }
@@ -28,6 +31,8 @@ export interface IndexReport {
   readonly unchanged: number;
   readonly removed: number;
   readonly embedded: number;
+  /** Source files seen, changed since the last refresh, and skipped (ADR-0015 §2 v0.4). */
+  readonly code?: { readonly files: number; readonly changed: number; readonly skipped: number };
 }
 
 export function unitVersion(text: string): string {
@@ -113,36 +118,45 @@ export class KnowledgeIndex {
     let embedded = 0;
     const toEmbed: KnowledgeUnit[] = [];
     const now = this.clock().toISOString();
-    for (const u of units) {
-      const existing = this.db
-        .prepare("SELECT source_version FROM knowledge_units WHERE source_id = ?")
-        .get(u.sourceId) as { source_version: string } | undefined;
-      const vectorMissing = embedder
-        ? !this.db
-            .prepare(
-              "SELECT 1 FROM knowledge_vectors WHERE source_id = ? AND embedder = ? AND source_version = ?",
-            )
-            .get(u.sourceId, embedder.id, u.sourceVersion)
-        : false;
-      if (existing?.source_version === u.sourceVersion) {
-        unchanged += 1;
-        if (vectorMissing) toEmbed.push(u);
-        continue;
+    // one transaction: the first index of a repository writes thousands of units
+    const own = !this.db.isTransaction;
+    if (own) this.db.exec("BEGIN");
+    try {
+      for (const u of units) {
+        const existing = this.db
+          .prepare("SELECT source_version FROM knowledge_units WHERE source_id = ?")
+          .get(u.sourceId) as { source_version: string } | undefined;
+        const vectorMissing = embedder
+          ? !this.db
+              .prepare(
+                "SELECT 1 FROM knowledge_vectors WHERE source_id = ? AND embedder = ? AND source_version = ?",
+              )
+              .get(u.sourceId, embedder.id, u.sourceVersion)
+          : false;
+        if (existing?.source_version === u.sourceVersion) {
+          unchanged += 1;
+          if (vectorMissing) toEmbed.push(u);
+          continue;
+        }
+        this.db.prepare("DELETE FROM knowledge_fts WHERE source_id = ?").run(u.sourceId);
+        this.db
+          .prepare(
+            "INSERT INTO knowledge_fts (source_id, source_version, kind, title, body) VALUES (?, ?, ?, ?, ?)",
+          )
+          .run(u.sourceId, u.sourceVersion, u.kind, u.title, u.body);
+        this.db
+          .prepare(
+            "INSERT OR REPLACE INTO knowledge_units (source_id, source_version, kind, title, ref, indexed_at) VALUES (?, ?, ?, ?, ?, ?)",
+          )
+          .run(u.sourceId, u.sourceVersion, u.kind, u.title, u.ref, now);
+        this.db.prepare("DELETE FROM knowledge_vectors WHERE source_id = ?").run(u.sourceId);
+        indexed += 1;
+        if (embedder) toEmbed.push(u);
       }
-      this.db.prepare("DELETE FROM knowledge_fts WHERE source_id = ?").run(u.sourceId);
-      this.db
-        .prepare(
-          "INSERT INTO knowledge_fts (source_id, source_version, kind, title, body) VALUES (?, ?, ?, ?, ?)",
-        )
-        .run(u.sourceId, u.sourceVersion, u.kind, u.title, u.body);
-      this.db
-        .prepare(
-          "INSERT OR REPLACE INTO knowledge_units (source_id, source_version, kind, title, ref, indexed_at) VALUES (?, ?, ?, ?, ?, ?)",
-        )
-        .run(u.sourceId, u.sourceVersion, u.kind, u.title, u.ref, now);
-      this.db.prepare("DELETE FROM knowledge_vectors WHERE source_id = ?").run(u.sourceId);
-      indexed += 1;
-      if (embedder) toEmbed.push(u);
+      if (own) this.db.exec("COMMIT");
+    } catch (error) {
+      if (own) this.db.exec("ROLLBACK");
+      throw error;
     }
     if (embedder && toEmbed.length > 0) {
       const vectors = await embedder.embed(toEmbed.map((u) => `${u.title}\n${u.body}`.slice(0, 8000)));
@@ -166,14 +180,53 @@ export class KnowledgeIndex {
       .prepare("SELECT source_id FROM knowledge_units WHERE kind != 'artifact'")
       .all() as Array<{ source_id: string }>;
     let removed = 0;
-    for (const { source_id } of rows) {
-      if (keep.has(source_id)) continue;
-      this.db.prepare("DELETE FROM knowledge_fts WHERE source_id = ?").run(source_id);
-      this.db.prepare("DELETE FROM knowledge_units WHERE source_id = ?").run(source_id);
-      this.db.prepare("DELETE FROM knowledge_vectors WHERE source_id = ?").run(source_id);
-      removed += 1;
+    const own = !this.db.isTransaction;
+    if (own) this.db.exec("BEGIN");
+    try {
+      for (const { source_id } of rows) {
+        if (keep.has(source_id)) continue;
+        this.db.prepare("DELETE FROM knowledge_fts WHERE source_id = ?").run(source_id);
+        this.db.prepare("DELETE FROM knowledge_units WHERE source_id = ?").run(source_id);
+        this.db.prepare("DELETE FROM knowledge_vectors WHERE source_id = ?").run(source_id);
+        removed += 1;
+      }
+      if (own) this.db.exec("COMMIT");
+    } catch (error) {
+      if (own) this.db.exec("ROLLBACK");
+      throw error;
     }
     return removed;
+  }
+
+  /** Indexed code by file: the version its units carry and their ids (to keep an unchanged file as is). */
+  codeVersions(): Map<string, { version: string; ids: string[] }> {
+    const rows = this.db
+      .prepare("SELECT source_id, source_version FROM knowledge_units WHERE kind = 'code'")
+      .all() as Array<{ source_id: string; source_version: string }>;
+    const out = new Map<string, { version: string; ids: string[] }>();
+    for (const r of rows) {
+      const path = r.source_id.slice("code:".length).replace(/#\d+$/, "");
+      const prev = out.get(path);
+      if (!prev) out.set(path, { version: r.source_version, ids: [r.source_id] });
+      else {
+        prev.ids.push(r.source_id);
+        // units of one file at two versions (an interrupted refresh): the file is read again
+        if (prev.version !== r.source_version) prev.version = "";
+      }
+    }
+    return out;
+  }
+
+  /** Characters of each unit's indexed text, for the retrieved-tokens metric (ADR-0015 §6). */
+  sizes(sourceIds: readonly string[]): Map<string, number> {
+    const out = new Map<string, number>();
+    for (const id of sourceIds) {
+      const row = this.db
+        .prepare("SELECT length(title) + length(body) AS n FROM knowledge_fts WHERE source_id = ?")
+        .get(id) as { n: number } | undefined;
+      if (row) out.set(id, row.n);
+    }
+    return out;
   }
 
   count(): { units: number; vectors: number } {
@@ -191,7 +244,7 @@ export class KnowledgeIndex {
       .filter((t) => t.length > 2)
       .join(" OR ");
     if (!match) return [];
-    const kinds = options.kinds ?? ["knowledge", "standard", "skill", "artifact"];
+    const kinds = options.kinds ?? UNIT_KINDS;
     const rows = this.db
       .prepare(
         `SELECT f.source_id AS source_id, u.ref AS ref, f.kind AS kind, f.title AS title, bm25(knowledge_fts) AS score,
@@ -223,7 +276,7 @@ export class KnowledgeIndex {
     embedder: string,
     options: { kinds?: readonly UnitKind[]; limit?: number } = {},
   ): Array<{ sourceId: string; ref: string; kind: UnitKind; title: string; score: number }> {
-    const kinds = options.kinds ?? ["knowledge", "standard", "skill", "artifact"];
+    const kinds = options.kinds ?? UNIT_KINDS;
     const rows = this.db
       .prepare(
         `SELECT v.source_id AS source_id, v.vector_json AS vector_json, u.ref AS ref, u.kind AS kind, u.title AS title

@@ -51,6 +51,7 @@ import { runLogs } from "./commands/logs.ts";
 import { runMcpCall, runMcpList, runMcpServe } from "./commands/mcp.ts";
 import { runModelsList, runModelsProbe, runModelsStats } from "./commands/models.ts";
 import { runOnboard } from "./commands/onboard.ts";
+import { runKnowledgeEval } from "./commands/retrievalEval.ts";
 import {
   runApply,
   runApprove,
@@ -928,7 +929,7 @@ export function buildProgram(options: RunOptions = {}): Command {
   knowledge
     .command("index")
     .description(
-      "index knowledge, standards and skills for search (FTS5; vectors when knowledge.retrieval.embeddings is set)",
+      "index knowledge, standards, skills and source files for search (FTS5; vectors when knowledge.retrieval.embeddings is set)",
     )
     .action(async () => {
       await runKnowledgeIndex(ctxFor());
@@ -940,6 +941,27 @@ export function buildProgram(options: RunOptions = {}): Command {
     .action(async (query: string, opts: { limit: number }) => {
       await runKnowledgeSearch(ctxFor(), query, opts);
     });
+  knowledge
+    .command("eval")
+    .description(
+      "retrieval quality on labelled cases: Recall@5/@10, MRR, irrelevant ratio, tokens; compared with the baseline (ADR-0015 §6)",
+    )
+    .option("--cases <file>", "cases file", "evals/retrieval/cases.yaml")
+    .option("--no-glossary", "search without glossary expansion (what the glossary adds)")
+    .option("--baseline", "pin this result as the baseline", false)
+    .option("--tolerance <ratio>", "allowed relative drop", Number.parseFloat, 0.05)
+    .option("--out <file>", "result file (default: evals/results/<date>-retrieval.json)")
+    .action(
+      async (opts: {
+        cases: string;
+        glossary: boolean;
+        baseline: boolean;
+        tolerance: number;
+        out?: string;
+      }) => {
+        await runKnowledgeEval(ctxFor(), opts);
+      },
+    );
   knowledge
     .command("links")
     .description(

@@ -112,11 +112,15 @@ export async function runKnowledgeIndex(ctx: CliContext): Promise<void> {
     const roots = knowledgeRootsOf(loaded, loaded.project?.root ?? ctx.cwd);
     const report = await refreshIndex(runtime, roots);
     const counts = runtime.index.count();
-    ctx.out.result({ ...report, ...counts, embedder: runtime.embedder?.id ?? null }, () =>
+    ctx.out.result({ ...report, ...counts, embedder: runtime.embedder?.id ?? null }, () => {
       ctx.out.line(
         `index: ${report.indexed} indexed, ${report.unchanged} unchanged, ${report.removed} removed → ${counts.units} unit(s), ${counts.vectors} vector(s)${runtime.embedder ? ` (${runtime.embedder.id})` : " (lexical only; set knowledge.retrieval.embeddings for vectors)"}`,
-      ),
-    );
+      );
+      if (report.code)
+        ctx.out.line(
+          `code: ${report.code.files} file(s), ${report.code.changed} read again${report.code.skipped > 0 ? `, ${report.code.skipped} skipped (too large, binary or over knowledge.retrieval.code.maxFiles)` : ""}`,
+        );
+    });
   } finally {
     await runtime.close();
   }

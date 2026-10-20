@@ -1,4 +1,5 @@
 import { reasonOf } from "../app/activity.ts";
+import { proposeGlossaryCandidates } from "../app/candidates.ts";
 import { goOnRequested, rerunBackTo } from "../app/decide.ts";
 import { pausedText, pauseRequested } from "../app/pause.ts";
 import { pendingRedo } from "../app/redo.ts";
@@ -518,6 +519,7 @@ export class LocalWorkflowEngine {
       const done = this.rt.runs.transition(run.id, "COMPLETED", { reason: "workflow done" });
       this.emit(done, "run.state", { state: done.state });
       noteEvalCandidate(this.rt, done);
+      this.completed(done);
       return { run: done, stop: true };
     }
     if (transition.to === STEP_FAIL) {
@@ -648,6 +650,7 @@ export class LocalWorkflowEngine {
         });
         this.emit(done, "run.state", { state: done.state });
         noteEvalCandidate(this.rt, done);
+        this.completed(done);
         return done;
       }
       const to =
@@ -884,6 +887,16 @@ export class LocalWorkflowEngine {
   /** The engine runs for the run's owner: an edit it finds is theirs (a gate decision syncs as its actor). */
   private syncEdits(run: Run): void {
     syncEditable(this.rt, run);
+  }
+
+  /** A completed run: the terms it linked to code become glossary candidates (ADR-0015 §3). */
+  private completed(run: Run): void {
+    try {
+      proposeGlossaryCandidates(this.rt, run);
+    } catch (error) {
+      // proposals are a by-product: a glossary that cannot be read never fails the run
+      this.emit(run, "glossary.failed", { error: error instanceof Error ? error.message : String(error) });
+    }
   }
 
   private emit(run: Run, kind: string, payload: Record<string, unknown>): void {

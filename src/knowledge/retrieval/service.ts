@@ -1,6 +1,7 @@
 import type { Runtime } from "../../app/runtime.ts";
 import type { KnowledgeDoc } from "../resolver.ts";
 import type { KnowledgeRoots } from "../standards.ts";
+import { type CodeScan, scanCode } from "./code.ts";
 import { loadGlossary } from "./glossary.ts";
 import { type IndexReport, KnowledgeIndex, type UnitKind } from "./index.ts";
 import { type RetrievalResult, retrieve } from "./retriever.ts";
@@ -16,20 +17,49 @@ export async function refreshIndex(
     ...(runId ? KnowledgeIndex.artifactUnits(runtime, runId) : []),
   ];
   const report = await runtime.index.upsert(units, runtime.embedder);
+  const code = await refreshCode(runtime, roots);
   const removed = runtime.index.prune(
-    new Set(units.filter((u) => u.kind !== "artifact").map((u) => u.sourceId)),
+    new Set([
+      ...units.filter((u) => u.kind !== "artifact").map((u) => u.sourceId),
+      ...(code?.keep ?? []),
+      ...(code?.units.map((u) => u.sourceId) ?? []),
+    ]),
   );
-  return { ...report, removed };
+  if (!code) return { ...report, removed };
+  return {
+    indexed: report.indexed + code.report.indexed,
+    unchanged: report.unchanged + code.report.unchanged + code.keep.length,
+    removed,
+    embedded: report.embedded,
+    code: { files: code.files, changed: code.changed, skipped: code.skipped },
+  };
+}
+
+/**
+ * Tracked source files of the project root (ADR-0015 §2 v0.4), only those git says changed. Code
+ * gets no vectors: embeddings for it wait for the §6 gate.
+ */
+async function refreshCode(
+  runtime: Runtime,
+  roots: KnowledgeRoots,
+): Promise<(CodeScan & { report: IndexReport }) | undefined> {
+  const config = runtime.loaded.config.knowledge.retrieval.code;
+  if (!config.enabled || !roots.projectRoot) return undefined;
+  const scan = await scanCode(roots.projectRoot, config, runtime.index.codeVersions(), roots.isDenied);
+  // ADR-0010: a key hard-coded in a source file never reaches the index or a search snippet
+  const units = scan.units.map((u) => ({ ...u, body: runtime.redactor.redact(u.body).text }));
+  return { ...scan, units, report: await runtime.index.upsert(units) };
 }
 
 export async function search(
   runtime: Runtime,
   roots: KnowledgeRoots,
   query: string,
-  options: { kinds?: readonly UnitKind[]; limit?: number } = {},
+  /** `glossary: false` searches without query expansion (to measure what the glossary adds, §6). */
+  options: { kinds?: readonly UnitKind[]; limit?: number; glossary?: boolean } = {},
 ): Promise<RetrievalResult> {
   return retrieve(runtime.index, query, {
-    glossary: loadGlossary(roots.projectRoot),
+    glossary: options.glossary === false ? [] : loadGlossary(roots.projectRoot),
     ...(runtime.embedder ? { embedder: runtime.embedder } : {}),
     ...(options.kinds ? { kinds: options.kinds } : {}),
     ...(options.limit !== undefined ? { limit: options.limit } : {}),
