@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import type { KnowledgeConfig } from "../core/config/schema.ts";
@@ -104,6 +104,11 @@ export interface EngineeringContextPackage {
   /** Everything that matched but was cut by maxSkills — available on request via knowledge.read. */
   readonly deferredSkills: Skill[];
   /**
+   * Every other skill, as a catalog line (id and what it is for): an agent sees all the skills there are,
+   * not only those its task was matched to, and asks for one it needs. Those meant for other agents last.
+   */
+  readonly catalogSkills: Skill[];
+  /**
    * How the skills were chosen: `step` — the workflow step names them; `picked` — by the task's kind,
    * stacks, paths and agent. `missing`: ids the step names that no skill has.
    */
@@ -180,16 +185,18 @@ export function resolvePackage(input: ResolveInput): EngineeringContextPackage {
       .map((x) => x.item);
 
   // Skills without an explicit agent list are for the implementation agent (ADR-0020 §1).
-  const skillsRanked = rank(skills, (s) =>
-    matchScope(
-      {
-        stacks: s.appliesTo.stacks,
-        paths: s.appliesTo.paths,
-        kinds: s.appliesTo.kinds,
-        agents: s.appliesTo.agents.length > 0 ? s.appliesTo.agents : ["implementation"],
-      },
-      task,
-    ),
+  const skillsRanked = rank(
+    skills.filter((s) => !s.catalogOnly),
+    (s) =>
+      matchScope(
+        {
+          stacks: s.appliesTo.stacks,
+          paths: s.appliesTo.paths,
+          kinds: s.appliesTo.kinds,
+          agents: s.appliesTo.agents.length > 0 ? s.appliesTo.agents : ["implementation"],
+        },
+        task,
+      ),
   );
   const byId = new Map(skills.map((s) => [s.id, s]));
   const named = input.stepSkills;
@@ -201,6 +208,16 @@ export function resolvePackage(input: ResolveInput): EngineeringContextPackage {
     ? skillsRanked.filter((s) => !named.includes(s.id))
     : skillsRanked.slice(input.config.maxSkills);
   const missing = named?.filter((id) => !byId.has(id)) ?? [];
+  const given = new Set([...selectedSkills, ...deferredSkills].map((s) => s.id));
+  const forOthers = (s: Skill) =>
+    s.appliesTo.agents.length > 0
+      ? !s.appliesTo.agents.includes(task.agentId)
+      : task.agentId !== "implementation";
+  const rest = skills.filter((s) => !given.has(s.id));
+  const catalogSkills = [
+    ...rest.filter((s) => !forOthers(s) || s.catalogOnly),
+    ...rest.filter((s) => forOthers(s) && !s.catalogOnly),
+  ];
 
   const required = selectedSkills.flatMap((s) => s.requiredStandards);
   const standardsRanked = rank(standards, (s) => {
@@ -220,6 +237,7 @@ export function resolvePackage(input: ResolveInput): EngineeringContextPackage {
     standards: stableBySeverity(standardsRanked),
     knowledge,
     deferredSkills,
+    catalogSkills,
     skillsBy: named ? { how: "step", ...(missing.length > 0 ? { missing } : {}) } : { how: "picked" },
     provenance: [
       ...selectedSkills.map(skillRef),
@@ -248,8 +266,19 @@ export function readByRef(roots: KnowledgeRoots, ref: string): string | undefine
     return s ? `# Standard ${s.id}@${s.version} — ${s.title} [${s.severity}]\n${s.rule}` : undefined;
   }
   if (kind === "skill") {
-    const s = loadSkills(roots).find((x) => x.id === id);
-    return s ? `# Skill ${s.id}@${s.version}${s.title ? ` — ${s.title}` : ""}\n${s.instructions}` : undefined;
+    // `skill:<name>/references/x.md`: a file of an Agent Skills skill, never one of its scripts
+    const [skillId, ...inside] = id.split("/");
+    const s = loadSkills(roots).find((x) => x.id === skillId);
+    if (!s) return undefined;
+    if (inside.length > 0) {
+      const file = inside.join("/");
+      if (!s.dir || file.startsWith("scripts/") || file.split("/").includes("..")) return undefined;
+      const path = join(s.dir, file);
+      return existsSync(path) && statSync(path).isFile() && statSync(path).size < 200_000
+        ? `# Skill ${s.id}: ${file}\n${readFileSync(path, "utf8")}`
+        : undefined;
+    }
+    return `# Skill ${s.id}@${s.version}${s.title ? ` — ${s.title}` : ""}\n${s.instructions}`;
   }
   if (kind === "knowledge") {
     const d = loadKnowledgeDocs(roots).find((x) => x.name === id);

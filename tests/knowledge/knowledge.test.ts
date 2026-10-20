@@ -304,6 +304,94 @@ describe("skills and the resolver", () => {
   });
 });
 
+describe("Agent Skills (SKILL.md) and the catalog", () => {
+  const agentSkill = (at: string, name: string, front: string, body = `steps of ${name}`) =>
+    sb.write(`${at}/${name}/SKILL.md`, `---\nname: ${name}\n${front}\n---\n${body}\n`);
+
+  it("reads SKILL.md from the project and the person's folders; a Jarvis skill with the same id wins", () => {
+    const userRoot = join(sb.root, "me", ".jarvis");
+    skill("release-notes", "", "the project's way");
+    agentSkill("project/.agents/skills", "release-notes", "description: shared copy");
+    agentSkill(
+      "project/.claude/skills",
+      "orders-endpoint",
+      "description: Add an endpoint to orders-api\nmetadata:\n  jarvis/stacks: aspnet\n  jarvis/paths: src/**/Api/**\n  jarvis/version: 2",
+    );
+    agentSkill("me/.agents/skills", "pdf-tables", "description: Pull tables out of a PDF");
+    agentSkill("me/.claude/skills", "orders-endpoint", "description: my older copy");
+    sb.write("me/.agents/skills/no-name/SKILL.md", "---\ndescription: x\n---\nbody\n");
+    const skills = loadSkills({ projectRoot: sb.project, userRoot });
+    expect(skills.find((s) => s.id === "release-notes")).toMatchObject({ instructions: "the project's way" });
+    expect(skills.find((s) => s.id === "orders-endpoint")).toMatchObject({
+      level: "project",
+      version: 2,
+      format: "agent-skills",
+      description: "Add an endpoint to orders-api",
+      appliesTo: { stacks: ["aspnet"], paths: ["src/**/Api/**"] },
+      instructions: "steps of orders-endpoint",
+    });
+    expect(skills.find((s) => s.id === "orders-endpoint")?.catalogOnly).toBeUndefined();
+    expect(skills.find((s) => s.id === "pdf-tables")).toMatchObject({ level: "user", catalogOnly: true });
+    expect(skills.map((s) => s.id)).not.toContain("no-name");
+    expect(skills.filter((s) => s.id === "orders-endpoint")).toHaveLength(1);
+    // a JARVIS_HOME that is not ~/.jarvis reads no home folders
+    expect(loadSkills({ projectRoot: sb.project, userRoot: sb.home }).map((s) => s.id)).not.toContain(
+      "pdf-tables",
+    );
+  });
+
+  it("never picks a catalog-only skill, lists it for every agent, and gives it to a step that names it", () => {
+    const userRoot = join(sb.root, "me", ".jarvis");
+    agentSkill("me/.agents/skills", "pdf-tables", "description: Pull tables out of a PDF");
+    agentSkill(
+      "project/.agents/skills",
+      "migration-check",
+      "description: Check a migration\nmetadata:\n  jarvis/agents: review",
+    );
+    sb.write("project/.agents/skills/pdf-tables/references/forms.md", "form fields");
+    sb.write("me/.agents/skills/pdf-tables/scripts/run.sh", "rm -rf /");
+    const roots = { projectRoot: sb.project, userRoot };
+    const task = { kind: "change", affectedPaths: [], stacks: [], agentId: "implementation" };
+    const pkg = resolvePackage({ roots, config: CONFIG, task });
+    expect([...pkg.skills, ...pkg.deferredSkills].map((s) => s.id)).not.toContain("pdf-tables");
+    expect(pkg.catalogSkills.map((s) => s.id)).toEqual(
+      expect.arrayContaining(["pdf-tables", "migration-check"]),
+    );
+    const text = renderPackage(pkg, 20_000, CONFIG);
+    expect(text).toContain("# Other skills (knowledge.read <ref> when one fits your work)");
+    expect(text).toContain("- skill:pdf-tables@user — Pull tables out of a PDF");
+    expect(text).toContain("- skill:migration-check@1 — Check a migration");
+    expect(pkg.provenance.some((r) => r.startsWith("skill:pdf-tables"))).toBe(false);
+
+    const named = resolvePackage({ roots, config: CONFIG, task, stepSkills: ["pdf-tables"] });
+    expect(named.skills.map((s) => s.id)).toEqual(["pdf-tables"]);
+    expect(named.catalogSkills.map((s) => s.id)).not.toContain("pdf-tables");
+
+    expect(readByRef(roots, "skill:pdf-tables@user")).toContain("steps of pdf-tables");
+    // a file of the skill by ref; never its scripts, never outside it
+    expect(readByRef(roots, "skill:pdf-tables/scripts/run.sh")).toBeUndefined();
+    expect(readByRef(roots, "skill:pdf-tables/../../x")).toBeUndefined();
+  });
+
+  it("cuts a long catalog and says how many more there are", () => {
+    for (let i = 0; i < 80; i++)
+      agentSkill(
+        "project/.agents/skills",
+        `extra-${String(i).padStart(2, "0")}`,
+        `description: ${"a long description ".repeat(4)}`,
+      );
+    const pkg = resolvePackage({
+      roots: { projectRoot: sb.project },
+      config: CONFIG,
+      task: { kind: "change", affectedPaths: [], stacks: [], agentId: "implementation" },
+    });
+    const text = renderPackage(pkg, 12_000, CONFIG);
+    expect(text).toMatch(/- … \d+ more \(knowledge\.search finds them\)/);
+    expect(text).toContain("skill:extra-00@1");
+    expect(text).not.toContain("skill:extra-79@1");
+  });
+});
+
 describe("stack detection", () => {
   it("detects node/typescript/react and dotnet", () => {
     sb.write(

@@ -1250,6 +1250,10 @@ export const RU: Readonly<Record<string, string>> = {
   "skills:": "навыки:",
   "no such skill: {ids}": "нет такого навыка: {ids}",
   "tool schemas {tokens} — {share}% of the input": "схемы инструментов {tokens} — {share}% входа",
+  // ---- Agent Skills
+  "Agent Skills format, shared with other agents": "Формат Agent Skills, общий с другими агентами",
+  "Says nothing about where it applies, so it is never picked by itself: every agent sees it in the list of other skills and reads it when it fits; a workflow step can name it.":
+    "Не сказано, где он применим, поэтому сам он не подбирается: каждый агент видит его в списке остальных навыков и читает, когда тот подходит к работе; шаг workflow может назвать его явно.",
 };
 
 /**

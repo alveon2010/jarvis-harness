@@ -309,9 +309,12 @@ export interface SkillsPage {
 
 const ORIGIN: Record<SkillView["origin"], [string, string]> = {
   // t("Project") t("From documentation/") t("read in place; the id is the file name") t("Yours") t("Built-in") t("ship with jarvis; a project skill with the same id wins")
-  project: ["Project", ".jarvis/skills/<id>/ — skill.yaml + instructions.md"],
+  project: [
+    "Project",
+    ".jarvis/skills/<id>/ — skill.yaml + instructions.md; .agents/skills, .claude/skills — SKILL.md",
+  ],
   source: ["From documentation/", "read in place; the id is the file name"],
-  user: ["Yours", "~/.jarvis/skills"],
+  user: ["Yours", "~/.jarvis/skills, ~/.agents/skills, ~/.claude/skills"],
   builtin: ["Built-in", "ship with jarvis; a project skill with the same id wins"],
 };
 
@@ -338,8 +341,10 @@ ${groups.map(
 ${
   v && k
     ? html`<article class="panel kdoc" aria-labelledby="skill-h">
-<div class="kdochead"><div class="row"><h2 id="skill-h"><code>${k.id}</code></h2><span class="pill plain">${t(ORIGIN[v.origin][0])}</span><span class="hint">v${String(k.version)}</span></div>
+<div class="kdochead"><div class="row"><h2 id="skill-h"><code>${k.id}</code></h2><span class="pill plain">${t(ORIGIN[v.origin][0])}</span><span class="hint">v${String(k.version)}</span>${k.format === "agent-skills" ? html`<span class="pill plain" title="${t("Agent Skills format, shared with other agents")}">SKILL.md</span>` : ""}</div>
 ${k.title ? html`<p class="klead">${k.title}</p>` : ""}
+${k.description && k.description !== k.title ? html`<p class="hint">${k.description}</p>` : ""}
+${k.catalogOnly ? html`<div class="banner info">${t("Says nothing about where it applies, so it is never picked by itself: every agent sees it in the list of other skills and reads it when it fits; a workflow step can name it.")}</div>` : ""}
 ${v.overridden ? html`<div class="banner info">${th("Replaced by the project skill {id}: agents get that one, this one is not used.", { id: html`<code>${k.id}</code>` })}</div>` : ""}
 ${v.overrides ? html`<div class="banner info">${t("Replaces the built-in skill with the same id.")}</div>` : ""}
 ${v.origin === "source" ? html`<div class="banner info">${t("Read in place from the team's documentation — change it there; jarvis copies nothing.")}</div>` : ""}

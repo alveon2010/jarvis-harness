@@ -47,6 +47,30 @@ function fill<T>(items: readonly T[], budget: number, render: (t: T) => string, 
   return { shown, omitted };
 }
 
+/** A skill's line in a list: its description, else its title. */
+function aboutOf(s: {
+  readonly description?: string | undefined;
+  readonly title?: string | undefined;
+}): string | undefined {
+  const text = (s.description ?? s.title)?.replace(/\s+/g, " ").trim();
+  return text ? (text.length > 160 ? `${text.slice(0, 159)}…` : text) : undefined;
+}
+
+/** As many catalog lines as fit `budget` characters (at least 600), then how many were left out. */
+function catalogLines(lines: readonly string[], budget: number): string[] {
+  const out: string[] = [];
+  let used = 0;
+  const cap = Math.max(600, budget);
+  for (const l of lines) {
+    if (used + l.length + 1 > cap) break;
+    out.push(l);
+    used += l.length + 1;
+  }
+  if (out.length < lines.length)
+    out.push(`- … ${lines.length - out.length} more (knowledge.search finds them)`);
+  return out;
+}
+
 export function renderPackage(
   pkg: EngineeringContextPackage,
   chars: number,
@@ -85,6 +109,11 @@ export function renderPackage(
       `# Standards (required ones are verified; violations send the work back)\n${standards.shown.join("\n\n")}`,
     );
   if (knowledge.shown.length > 0) sections.push(`# Project knowledge\n${knowledge.shown.join("\n\n")}`);
+  // a skill on request says what it is for: the agent asks for the one it needs by that, not by its id
+  const said = new Map(
+    [...pkg.skills, ...pkg.deferredSkills, ...pkg.catalogSkills].map((s) => [skillRef(s), aboutOf(s)]),
+  );
+  const line = (ref: string) => (said.get(ref) ? `- ${ref} — ${said.get(ref)}` : `- ${ref}`);
   const onRequest = [
     ...skills.omitted,
     ...pkg.deferredSkills.map(skillRef),
@@ -92,8 +121,10 @@ export function renderPackage(
     ...knowledge.omitted,
   ];
   if (onRequest.length > 0)
-    sections.push(
-      `# Available on request (knowledge.read <ref>)\n${onRequest.map((r) => `- ${r}`).join("\n")}`,
-    );
+    sections.push(`# Available on request (knowledge.read <ref>)\n${onRequest.map(line).join("\n")}`);
+  // every other skill there is, in a line each, within a small budget: the ones for other agents go first
+  const catalog = catalogLines(pkg.catalogSkills.map(skillRef).map(line), Math.floor(chars * 0.05));
+  if (catalog.length > 0)
+    sections.push(`# Other skills (knowledge.read <ref> when one fits your work)\n${catalog.join("\n")}`);
   return sections.join("\n\n");
 }

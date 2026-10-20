@@ -169,6 +169,10 @@ export async function runEvalsRunToCase(
       );
       if (result.skipped)
         ctx.out.line(`  not in the overlay (changed after the run began): ${result.skipped.join(", ")}`);
+      if (result.userSkills)
+        ctx.out.line(
+          `  warning: the run used your own skills, the case does not hold them: ${result.userSkills.join(", ")} — move them into the project's .agents/skills to keep the case reproducible`,
+        );
       ctx.out.line("  next: review case.yaml, then `jarvis evals run --mode record`");
     });
   } finally {

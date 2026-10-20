@@ -36,6 +36,11 @@ export interface RunToCaseResult {
    * before its inputs were recorded) or no longer in the object store — the case runs without them.
    */
   readonly skipped?: string[];
+  /**
+   * Skills the run's agents got from the person's own folders (`~/.jarvis/skills`, `~/.agents/skills`,
+   * `~/.claude/skills`): not in the case, so on another machine it runs without them.
+   */
+  readonly userSkills?: string[];
   readonly fixture: boolean;
 }
 
@@ -279,5 +284,17 @@ export async function runToCase(
     answers: answers.length,
     fixture,
     ...(skipped.length > 0 ? { skipped } : {}),
+    ...userSkillsOf(runtime, run.id),
   };
+}
+
+/** The `skill:<id>@user` refs the run's agent calls got (the `context.skills` events). */
+function userSkillsOf(runtime: Runtime, runId: string): { userSkills?: string[] } {
+  const refs = new Set<string>();
+  for (const e of runtime.events.list({ runId, kind: "context.skills" })) {
+    const skills = (e.payload as { skills?: unknown } | undefined)?.skills;
+    if (Array.isArray(skills))
+      for (const r of skills) if (typeof r === "string" && r.endsWith("@user")) refs.add(r);
+  }
+  return refs.size > 0 ? { userSkills: [...refs].sort() } : {};
 }
