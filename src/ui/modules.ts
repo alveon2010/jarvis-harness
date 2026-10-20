@@ -7,6 +7,7 @@ import { moduleCheckOf, moduleOfRun } from "../onboarding/moduleRun.ts";
 import { findNode, isAuxFolder, type ModuleTree, TOO_BIG, type TreeNode } from "../onboarding/tree.ts";
 import { shortRunId } from "../storage/runStore.ts";
 import { type DiffFile, type Html, html, markdownToHtml } from "./html.ts";
+import { plural, t, th, when } from "./i18n.ts";
 import { type KnowledgeCounts, knowledgeTabs } from "./knowledge.ts";
 import type { Launch } from "./launcher.ts";
 import { type Actions, diffFileHtml } from "./pages.ts";
@@ -93,8 +94,8 @@ export function researchOf(
     else {
       const check = moduleCheckOf(runtime, run.id);
       const reason = check
-        ? "no claim survived the check against the code"
-        : `the run ended ${run.state.toLowerCase()}${run.stateReason ? `: ${run.stateReason}` : ""}`;
+        ? t("no claim survived the check against the code")
+        : `${t("the run ended {state}", { state: t(run.state).toLowerCase() })}${run.stateReason ? `: ${run.stateReason}` : ""}`;
       out.set(module, { kind: "failed", run, reason });
     }
   }
@@ -132,11 +133,11 @@ function badge(node: TreeNode, r: Research | undefined): Html {
   const c = node.coverage;
   if (!c)
     return node.tooBig && node.children.length > 0
-      ? html`<span class="pill plain">by parts</span>`
-      : html`<span class="pill wait">no document</span>`;
-  if (c.staleCommits) return html`<span class="pill wait">may be stale</span>`;
+      ? html`<span class="pill plain">${t("by parts")}</span>`
+      : html`<span class="pill wait">${t("no document")}</span>`;
+  if (c.staleCommits) return html`<span class="pill wait">${t("may be stale")}</span>`;
   if (c.kind === "generated") return html`<span class="pill plain">generated</span>`;
-  if (c.kind === "via") return html`<span class="pill ok">via a doc</span>`;
+  if (c.kind === "via") return html`<span class="pill ok">${t("via a doc")}</span>`;
   return html`<span class="pill ok">documented</span>`;
 }
 
@@ -181,17 +182,17 @@ function treeHtml(page: ModulesPage): Html {
     return html`<li><details${open ? " open" : ""}><summary>${row(n)}</summary><ul>${kids.map(node)}</ul></details></li>`;
   };
   const tops = page.tree.modules.filter(keep);
-  return html`<nav class="panel mtree" aria-label="Modules and folders">
-<div class="mhead"><span>Module / folder</span><span>Knowledge</span><span>Files</span></div>
-${tops.length > 0 ? html`<ul>${tops.map(node)}</ul>` : html`<p class="empty">${page.need ? "Every module has a document." : "No source modules in this repository."}</p>`}
+  return html`<nav class="panel mtree" aria-label="${t("Modules and folders")}">
+<div class="mhead"><span>${t("Module / folder")}</span><span>${t("Knowledge")}</span><span>${t("Files")}</span></div>
+${tops.length > 0 ? html`<ul>${tops.map(node)}</ul>` : html`<p class="empty">${page.need ? t("Every module has a document.") : t("No source modules in this repository.")}</p>`}
 </nav>`;
 }
 
 function pathField(page: ModulesPage): Html {
   return html`<form class="mpath" method="get" action="/knowledge/modules" role="search">
-<label class="field grow">Path<input type="text" name="path" list="module-dirs" value="${page.path ?? ""}" placeholder="src/shared/metrics" autocomplete="off" spellcheck="false"></label>
+<label class="field grow">${t("Path")}<input type="text" name="path" list="module-dirs" value="${page.path ?? ""}" placeholder="src/shared/metrics" autocomplete="off" spellcheck="false"></label>
 ${page.need ? html`<input type="hidden" name="need" value="1">` : ""}
-<button type="submit" class="btn">Open</button>
+<button type="submit" class="btn">${t("Open")}</button>
 <datalist id="module-dirs">${page.tree.dirs.map((d) => html`<option value="${d}"></option>`)}</datalist>
 </form>`;
 }
@@ -199,50 +200,50 @@ ${page.need ? html`<input type="hidden" name="need" value="1">` : ""}
 function factsHtml(n: TreeNode): Html {
   const c = n.coverage;
   const knowledge = c
-    ? html`<code>${c.doc}</code>${c.source ? html` <span class="hint">(the team's documentation, read-only)</span>` : ""}${c.kind === "via" ? html` <span class="hint">— about a wider folder</span>` : ""}${c.kind === "generated" ? html` <span class="hint">— generated, nobody took it over</span>` : ""}${c.staleCommits ? html` <span class="pill wait">${c.staleCommits} commits here since its last edit</span>` : ""}`
-    : html`<span class="hint">none</span>`;
+    ? html`<code>${c.doc}</code>${c.source ? html` <span class="hint">${t("(the team's documentation, read-only)")}</span>` : ""}${c.kind === "via" ? html` <span class="hint">${t("— about a wider folder")}</span>` : ""}${c.kind === "generated" ? html` <span class="hint">${t("— generated, nobody took it over")}</span>` : ""}${c.staleCommits ? html` <span class="pill wait">${t("{n} here since its last edit", { n: plural(c.staleCommits, "commit") })}</span>` : ""}`
+    : html`<span class="hint">${t("none")}</span>`;
   return html`<dl class="mfacts">
-<dt>from the scan</dt><dd>${n.files} files, about ${n.lines} lines${n.languages.length > 0 ? ` (${n.languages.join(", ")})` : ""}</dd>
-<dt>knowledge now</dt><dd>${knowledge}</dd>
-${n.also.length > 0 ? html`<dt>also applies</dt><dd>${n.also.map((d, i) => html`${i > 0 ? ", " : ""}<a href="/knowledge/docs?doc=${encodeURIComponent(d)}"><code>${d}</code></a>`)} <span class="hint">— wider documents, not about this folder</span></dd>` : ""}
+<dt>${t("from the scan")}</dt><dd>${t("{files}, about {lines}", { files: plural(n.files, "file"), lines: plural(n.lines, "line") })}${n.languages.length > 0 ? ` (${n.languages.join(", ")})` : ""}</dd>
+<dt>${t("knowledge now")}</dt><dd>${knowledge}</dd>
+${n.also.length > 0 ? html`<dt>${t("also applies")}</dt><dd>${n.also.map((d, i) => html`${i > 0 ? ", " : ""}<a href="/knowledge/docs?doc=${encodeURIComponent(d)}"><code>${d}</code></a>`)} <span class="hint">${t("— wider documents, not about this folder")}</span></dd>` : ""}
 </dl>`;
 }
 
 const cost = (n: TreeNode) =>
   n.files > TOO_BIG.files || n.lines > TOO_BIG.lines
-    ? "a folder this big may stop at the agent's limit and ask you for more"
+    ? t("a folder this big may stop at the agent's limit and ask you for more")
     : n.files > 60
-      ? "usually 30–45 tool calls, 0.5–0.9M input tokens"
-      : "usually 20–35 tool calls, 0.3–0.6M input tokens";
+      ? t("usually 30–45 tool calls, 0.5–0.9M input tokens")
+      : t("usually 20–35 tool calls, 0.3–0.6M input tokens");
 
 function startHtml(n: TreeNode, actions: Actions, again?: string): Html {
   return form(
     actions,
     "/knowledge/modules/research",
     html`<input type="hidden" name="path" value="${n.path}">
-<label class="field">What matters <span class="hint">optional — goes into the agent's task</span><textarea name="note" rows="3" maxlength="2000" placeholder="e.g. how events are named and where the catalogue lives; skip the legacy adapter">${again ?? ""}</textarea></label>
-<p class="hint">Agent <code>onboard-mapper</code>, read-only, stays inside <code>${n.path}/</code>: ${cost(n)}. One research at a time; the next one waits in the queue.</p>
-<div class="row"><button type="submit" class="btn primary">${again === undefined ? "Start research" : "Research again"}</button><span class="hint">Same as <code>jarvis onboard --module ${n.path}</code></span></div>`,
+<label class="field">${t("What matters")} <span class="hint">${t("optional — goes into the agent's task")}</span><textarea name="note" rows="3" maxlength="2000" placeholder="${t("e.g. how events are named and where the catalogue lives; skip the legacy adapter")}">${again ?? ""}</textarea></label>
+<p class="hint">${th("Agent {agent}, read-only, stays inside {path}: {cost}. One research at a time; the next one waits in the queue.", { agent: html`<code>onboard-mapper</code>`, path: html`<code>${n.path}/</code>`, cost: cost(n) })}</p>
+<div class="row"><button type="submit" class="btn primary">${again === undefined ? t("Start research") : t("Research again")}</button><span class="hint">${th("Same as {cmd}", { cmd: html`<code>jarvis onboard --module ${n.path}</code>` })}</span></div>`,
     ' class="mstart"',
   );
 }
 
 function partsHtml(n: TreeNode, page: ModulesPage, actions: Actions): Html {
   const parts = n.children;
-  return html`<div class="banner info">Too big for one pass — ${n.files} files, about ${n.lines} lines (one research covers up to ${TOO_BIG.files} files or ${TOO_BIG.lines / 1000}k lines well). Pick the parts: they run one after another, each gives its own candidate.</div>
+  return html`<div class="banner info">${t("Too big for one pass — {files}, about {lines} (one research covers up to {maxFiles} files or {maxLines}k lines well). Pick the parts: they run one after another, each gives its own candidate.", { files: plural(n.files, "file"), lines: plural(n.lines, "line"), maxFiles: TOO_BIG.files, maxLines: TOO_BIG.lines / 1000 })}</div>
 ${form(
   actions,
   "/knowledge/modules/research",
-  html`<fieldset class="mparts"><legend class="sr">Parts of ${n.path}</legend>
+  html`<fieldset class="mparts"><legend class="sr">${t("Parts of {path}", { path: n.path })}</legend>
 ${parts.map((p) => {
   const busy = page.research.get(p.path);
   const disabled = busy && ["queued", "starting", "running", "paused", "waiting"].includes(busy.kind);
   const pick = !disabled && needsResearch(p) && !p.tooBig;
-  return html`<label class="mpart"><input type="checkbox" name="path" value="${p.path}"${pick ? " checked" : ""}${disabled ? " disabled" : ""}><code>${p.path}</code><span class="hint">${p.files} files${p.tooBig ? " · big itself" : ""}</span>${badge(p, busy)}</label>`;
+  return html`<label class="mpart"><input type="checkbox" name="path" value="${p.path}"${pick ? " checked" : ""}${disabled ? " disabled" : ""}><code>${p.path}</code><span class="hint">${plural(p.files, "file")}${p.tooBig ? ` · ${t("big itself")}` : ""}</span>${badge(p, busy)}</label>`;
 })}
 </fieldset>
-<label class="field">What matters <span class="hint">optional — the same note for every part</span><textarea name="note" rows="2" maxlength="2000"></textarea></label>
-<div class="row"><button type="submit" class="btn primary">Research the picked parts</button></div>`,
+<label class="field">${t("What matters")} <span class="hint">${t("optional — the same note for every part")}</span><textarea name="note" rows="2" maxlength="2000"></textarea></label>
+<div class="row"><button type="submit" class="btn primary">${t("Research the picked parts")}</button></div>`,
 )}`;
 }
 
@@ -285,41 +286,41 @@ export function candidateReviewHtml(
     `/knowledge/candidates/${encodeURIComponent(c.artifact.artifactId)}/accept`,
     html`${backField}${
       c.review.length > 0
-        ? html`<fieldset class="mchecks"><legend><b>Check these first</b> <span class="hint">— the excerpts show one place, the statement speaks for the whole folder. Tick when you agree.</span></legend>
+        ? html`<fieldset class="mchecks"><legend><b>${t("Check these first")}</b> <span class="hint">${t("— the excerpts show one place, the statement speaks for the whole folder. Tick when you agree.")}</span></legend>
 ${c.review.map((s, i) => html`<label class="mcheck"><input type="checkbox" name="checked" value="${String(i)}" required><span>${s}</span></label>`)}
 </fieldset>`
         : ""
     }
-${taken ? html`<div class="banner bad"><code>${rel}</code> exists and was written by a person. Replace it with this document, or keep it and write the new one under another name.</div>` : ""}
-${existing?.generated ? html`<p class="hint"><code>${rel}</code> exists but jarvis generated it and nobody took it over: Accept replaces it.</p>` : ""}
+${taken ? html`<div class="banner bad">${th("{file} exists and was written by a person. Replace it with this document, or keep it and write the new one under another name.", { file: html`<code>${rel}</code>` })}</div>` : ""}
+${existing?.generated ? html`<p class="hint">${th("{file} exists but jarvis generated it and nobody took it over: Accept replaces it.", { file: html`<code>${rel}</code>` })}</p>` : ""}
 <div class="row">
-<button type="submit" class="btn accept"${taken ? html` name="replace" value="1"` : ""}>${taken ? "Replace it" : "Accept as a draft"}</button>
-${taken ? html`<label class="field inline">or as<input type="text" name="id" placeholder="${rel.replace(/^.*\//, "").replace(/\.md$/, "")}-2" pattern="[a-z0-9][a-z0-9._-]*" maxlength="60"></label><button type="submit" class="btn">Write under that name</button>` : ""}
-<span class="hint">Writes <code>${rel}</code> into the working copy; commit it with the drafts below.</span>
+<button type="submit" class="btn accept"${taken ? html` name="replace" value="1"` : ""}>${taken ? t("Replace it") : t("Accept as a draft")}</button>
+${taken ? html`<label class="field inline">${t("or as")}<input type="text" name="id" placeholder="${rel.replace(/^.*\//, "").replace(/\.md$/, "")}-2" pattern="[a-z0-9][a-z0-9._-]*" maxlength="60"></label><button type="submit" class="btn">${t("Write under that name")}</button>` : ""}
+<span class="hint">${th("Writes {file} into the working copy; commit it with the drafts below.", { file: html`<code>${rel}</code>` })}</span>
 </div>`,
   );
   const again = form(
     actions,
     `/knowledge/candidates/${encodeURIComponent(c.artifact.artifactId)}/reject`,
-    html`${backField}<label class="field">Note for the next research <span class="hint">what was wrong or missing</span><textarea name="comment" rows="2" maxlength="2000"></textarea></label>
-<div class="row"><button type="submit" class="btn" name="again" value="1">Research again with the note</button><button type="submit" class="btn">Discard</button></div>`,
+    html`${backField}<label class="field">${t("Note for the next research")} <span class="hint">${t("what was wrong or missing")}</span><textarea name="comment" rows="2" maxlength="2000"></textarea></label>
+<div class="row"><button type="submit" class="btn" name="again" value="1">${t("Research again with the note")}</button><button type="submit" class="btn">${t("Discard")}</button></div>`,
   );
   return html`<div class="row">
-${claims ? html`<span class="pill ok">${claims.kept} of ${claims.proposed} claims confirmed</span>` : ""}
-${dropped.length > 0 ? html`<span class="pill plain">${dropped.length} dropped</span>` : ""}
-${c.review.length > 0 ? html`<span class="pill wait">${c.review.length} to check</span>` : ""}
+${claims ? html`<span class="pill ok">${t("{n} of {m} claims confirmed", { n: claims.kept, m: claims.proposed })}</span>` : ""}
+${dropped.length > 0 ? html`<span class="pill plain">${t("dropped: {n}", { n: dropped.length })}</span>` : ""}
+${c.review.length > 0 ? html`<span class="pill wait">${t("to check: {n}", { n: c.review.length })}</span>` : ""}
 <a class="hint" href="${runHref(r.run)}">run ${shortRunId(r.run.id)}</a>
 </div>
-${c.doc.note ? html`<p class="hint">Asked: ${c.doc.note}</p>` : ""}
+${c.doc.note ? html`<p class="hint">${t("Asked:")} ${c.doc.note}</p>` : ""}
 ${
   dropped.length > 0
-    ? html`<section class="mdropped" aria-label="Dropped by the check"><h3>Dropped by the check against the code</h3><ul>${dropped.map((d) => html`<li><span class="hint">${d.section}</span> <s>${d.what}</s> — ${d.why}</li>`)}</ul></section>`
+    ? html`<section class="mdropped" aria-label="${t("Dropped by the check")}"><h3>${t("Dropped by the check against the code")}</h3><ul>${dropped.map((d) => html`<li><span class="hint">${d.section}</span> <s>${d.what}</s> — ${d.why}</li>`)}</ul></section>`
     : ""
 }
-<details class="mdoc" open><summary>The document → <code>${rel}</code></summary><div class="doc">${markdownToHtml(
+<details class="mdoc" open><summary>${th("The document → {file}", { file: html`<code>${rel}</code>` })}</summary><div class="doc">${markdownToHtml(
     (c.doc.proposal ?? "").replace(/^---\n[\s\S]*?\n---\n/, "").replace(/^<!--[\s\S]*?-->\n?/gm, ""),
   )}</div></details>
-${taken && page.conflict?.diff.length ? html`<details class="mdiff"><summary>What replacing <code>${rel}</code> changes</summary>${page.conflict.diff.map((f, i) => diffFileHtml(f, i, false))}</details>` : ""}
+${taken && page.conflict?.diff.length ? html`<details class="mdiff"><summary>${th("What replacing {file} changes", { file: html`<code>${rel}</code>` })}</summary>${page.conflict.diff.map((f, i) => diffFileHtml(f, i, false))}</details>` : ""}
 ${accept}
 ${again}`;
 }
@@ -327,38 +328,38 @@ ${again}`;
 function researchHtml(page: ModulesPage, actions?: Actions): Html {
   const n = page.selected;
   if (!n)
-    return html`<section class="panel mresearch" data-live="research"><p class="empty">${page.path ? html`<code>${page.path}</code> is not a folder of a module here.` : "Pick a module or a folder on the left, or type its path."}</p></section>`;
+    return html`<section class="panel mresearch" data-live="research"><p class="empty">${page.path ? th("{path} is not a folder of a module here.", { path: html`<code>${page.path}</code>` }) : t("Pick a module or a folder on the left, or type its path.")}</p></section>`;
   const r = page.research.get(n.path);
   const can = actions && page.canStart ? actions : undefined;
   let body: Html;
   if (!r || r.kind === "rejected") {
     if (!can)
-      body = html`<p class="hint">Starting research is off here (read-only, or <code>jarvis ui</code> without a launcher). In a terminal: <code>jarvis onboard --module ${n.path}</code></p>`;
+      body = html`<p class="hint">${th("Starting research is off here (read-only, or {ui} without a launcher). In a terminal: {cmd}", { ui: html`<code>jarvis ui</code>`, cmd: html`<code>jarvis onboard --module ${n.path}</code>` })}</p>`;
     else if (n.tooBig && n.children.length > 0) body = partsHtml(n, page, can);
     else body = startHtml(n, can);
   } else if (r.kind === "queued")
-    body = html`<p>Queued — ${r.position === 1 ? "next" : `${r.position} in line`}. Starts when the research in front of it ends.</p>${can ? form(can, "/knowledge/modules/unqueue", html`<input type="hidden" name="launch" value="${r.launch}"><input type="hidden" name="path" value="${n.path}"><button type="submit" class="btn">Remove from the queue</button>`) : ""}`;
+    body = html`<p>${r.position === 1 ? t("Queued — next. Starts when the research in front of it ends.") : t("Queued — {n} in line. Starts when the research in front of it ends.", { n: r.position })}</p>${can ? form(can, "/knowledge/modules/unqueue", html`<input type="hidden" name="launch" value="${r.launch}"><input type="hidden" name="path" value="${n.path}"><button type="submit" class="btn">${t("Remove from the queue")}</button>`) : ""}`;
   else if (r.kind === "starting")
-    body = html`<p class="row"><span class="spin" aria-hidden="true"></span> Starting — the scan reads the folder, then the agent begins.</p>`;
+    body = html`<p class="row"><span class="spin" aria-hidden="true"></span> ${t("Starting — the scan reads the folder, then the agent begins.")}</p>`;
   else if (r.kind === "running")
-    body = html`<p class="row"><span class="spin" aria-hidden="true"></span> ${r.run.currentStep === "verify" ? "Checking every claim against the code (no model)…" : "The agent maps the folder — read-only."}</p><p><a class="btn" href="${runHref(r.run)}">Open the run</a></p>`;
+    body = html`<p class="row"><span class="spin" aria-hidden="true"></span> ${r.run.currentStep === "verify" ? t("Checking every claim against the code (no model)…") : t("The agent maps the folder — read-only.")}</p><p><a class="btn" href="${runHref(r.run)}">${t("Open the run")}</a></p>`;
   else if (r.kind === "paused")
-    body = html`<div class="banner info">⏸ Paused, not failed: ${r.wait.kind === "model" ? html`the model <code>${r.wait.model ?? "?"}</code> does not answer` : html`the quota window${r.wait.pool ? html` of pool <code>${r.wait.pool}</code>` : ""} is full`}. Goes on by itself at <b>${whenText(r.wait.resumeAfter)}</b>.${r.wait.detail ? html` <span class="hint">Window: ${r.wait.detail}.</span>` : ""}</div>
-<div class="row">${actions ? html`<form method="post" action="/runs/${encodeURIComponent(shortRunId(r.run.id))}/resume"><input type="hidden" name="t" value="${actions.token}"><input type="hidden" name="back" value="${here(n.path)}"><button type="submit" class="btn">Resume now</button></form>` : ""}<a class="btn" href="${runHref(r.run)}">Open the run</a></div>`;
+    body = html`<div class="banner info">⏸ ${r.wait.kind === "model" ? th("Paused, not failed: the model {model} does not answer.", { model: html`<code>${r.wait.model ?? "?"}</code>` }) : r.wait.pool ? th("Paused, not failed: the quota window of pool {pool} is full.", { pool: html`<code>${r.wait.pool}</code>` }) : t("Paused, not failed: the quota window is full.")} ${th("Goes on by itself at {at}.", { at: html`<b>${when(whenText(r.wait.resumeAfter))}</b>` })}${r.wait.detail ? html` <span class="hint">${t("Window:")} ${r.wait.detail}.</span>` : ""}</div>
+<div class="row">${actions ? html`<form method="post" action="/runs/${encodeURIComponent(shortRunId(r.run.id))}/resume"><input type="hidden" name="t" value="${actions.token}"><input type="hidden" name="back" value="${here(n.path)}"><button type="submit" class="btn">${t("Resume now")}</button></form>` : ""}<a class="btn" href="${runHref(r.run)}">${t("Open the run")}</a></div>`;
   else if (r.kind === "waiting")
-    body = html`<div class="banner info">The research waits for you (a budget, or the agent asks).</div><p><a class="btn primary" href="${runHref(r.run)}">Open the run</a></p>`;
+    body = html`<div class="banner info">${t("The research waits for you (a budget, or the agent asks).")}</div><p><a class="btn primary" href="${runHref(r.run)}">${t("Open the run")}</a></p>`;
   else if (r.kind === "failed")
-    body = html`<div class="banner bad">The last research found nothing to keep: ${r.reason}. <a href="${runHref(r.run)}">run ${shortRunId(r.run.id)}</a></div>${can ? startHtml(n, can, "") : ""}`;
+    body = html`<div class="banner bad">${t("The last research found nothing to keep: {reason}.", { reason: r.reason })} <a href="${runHref(r.run)}">run ${shortRunId(r.run.id)}</a></div>${can ? startHtml(n, can, "") : ""}`;
   else if (r.kind === "accepted")
-    body = html`<div class="banner ok">Accepted: <code>${r.file}</code> is in the working copy — the next run already finds it. Commit it with the drafts below.</div>
-${actions ? form(actions, "/knowledge/open", html`<input type="hidden" name="file" value="${r.file}"><input type="hidden" name="path" value="${n.path}"><button type="submit" class="btn">Open in editor</button>`) : ""}
-${can ? html`<details class="magain"><summary>Research again</summary>${startHtml(n, can, "")}</details>` : ""}`;
+    body = html`<div class="banner ok">${th("Accepted: {file} is in the working copy — the next run already finds it. Commit it with the drafts below.", { file: html`<code>${r.file}</code>` })}</div>
+${actions ? form(actions, "/knowledge/open", html`<input type="hidden" name="file" value="${r.file}"><input type="hidden" name="path" value="${n.path}"><button type="submit" class="btn">${t("Open in editor")}</button>`) : ""}
+${can ? html`<details class="magain"><summary>${t("Research again")}</summary>${startHtml(n, can, "")}</details>` : ""}`;
   else
     body = actions
       ? candidateHtml(r, page, actions)
-      : html`<p class="hint">A candidate waits: <code>jarvis candidates show ${r.candidate.name}</code></p>`;
+      : html`<p class="hint">${th("A candidate waits: {cmd}", { cmd: html`<code>jarvis candidates show ${r.candidate.name}</code>` })}</p>`;
   return html`<section class="panel mresearch" aria-labelledby="research-title" data-live="research">
-<div class="row"><h2 id="research-title">Research <code>${n.path}</code></h2>${badge(n, r)}</div>
+<div class="row"><h2 id="research-title">${th("Research {path}", { path: html`<code>${n.path}</code>` })}</h2>${badge(n, r)}</div>
 ${factsHtml(n)}
 ${body}
 </section>`;
@@ -367,21 +368,21 @@ ${body}
 /** Knowledge files not committed yet, on every Knowledge page, with one button to commit them. */
 export function draftsHtml(drafts: readonly Draft[], back: string, actions?: Actions): Html {
   if (drafts.length === 0) return html`<div data-live="drafts" hidden></div>`;
-  return html`<section class="panel mdrafts" aria-label="Knowledge not committed" data-live="drafts">
-<div><b>${drafts.length} knowledge file${drafts.length === 1 ? "" : "s"} not committed</b>
-<span class="hint">${drafts.map((d) => d.path.replace(/^\.jarvis\//, "")).join(", ")} · agents already see them</span></div>
-${actions ? form(actions, "/knowledge/commit", html`<input type="hidden" name="back" value="${back}"><button type="submit" class="btn primary">Commit knowledge</button>`) : html`<code>git add .jarvis && git commit</code>`}
+  return html`<section class="panel mdrafts" aria-label="${t("Knowledge not committed")}" data-live="drafts">
+<div><b>${t("{n} not committed", { n: plural(drafts.length, "knowledge file") })}</b>
+<span class="hint">${drafts.map((d) => d.path.replace(/^\.jarvis\//, "")).join(", ")} · ${t("agents already see them")}</span></div>
+${actions ? form(actions, "/knowledge/commit", html`<input type="hidden" name="back" value="${back}"><button type="submit" class="btn primary">${t("Commit knowledge")}</button>`) : html`<code>git add .jarvis && git commit</code>`}
 </section>`;
 }
 
 export function modulesContent(page: ModulesPage, actions?: Actions, notice?: Html): Html {
   return html`${knowledgeTabs("modules", page.counts)}
 ${notice ?? ""}
-<p class="hint">An agent maps a module or a folder; every claim is checked against the code; what survives waits here. Nothing reaches <code>.jarvis/knowledge/</code> until you accept it.</p>
+<p class="hint">${th("An agent maps a module or a folder; every claim is checked against the code; what survives waits here. Nothing reaches {dir} until you accept it.", { dir: html`<code>.jarvis/knowledge/</code>` })}</p>
 <div class="cols mcols">
 <div class="mleft">
 ${pathField(page)}
-<div class="row"><a class="btn small${page.need ? "" : " strong"}" href="/knowledge/modules${page.path ? `?path=${encodeURIComponent(page.path)}` : ""}"${page.need ? "" : ' aria-current="true"'}>All</a><a class="btn small${page.need ? " strong" : ""}" href="${page.path ? here(page.path, "&need=1") : "/knowledge/modules?need=1"}"${page.need ? ' aria-current="true"' : ""}>Need research</a></div>
+<div class="row"><a class="btn small${page.need ? "" : " strong"}" href="/knowledge/modules${page.path ? `?path=${encodeURIComponent(page.path)}` : ""}"${page.need ? "" : ' aria-current="true"'}>${t("All")}</a><a class="btn small${page.need ? " strong" : ""}" href="${page.path ? here(page.path, "&need=1") : "/knowledge/modules?need=1"}"${page.need ? ' aria-current="true"' : ""}>${t("Need research")}</a></div>
 ${treeHtml(page)}
 </div>
 <div class="mright">

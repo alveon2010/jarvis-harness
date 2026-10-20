@@ -10,6 +10,7 @@ import type {
 import type { RetrievalResult } from "../knowledge/retrieval/retriever.ts";
 import type { TreeNode } from "../onboarding/tree.ts";
 import { type Html, html, markdownToHtml } from "./html.ts";
+import { plural, t, th } from "./i18n.ts";
 import type { Actions } from "./pages.ts";
 
 /**
@@ -40,12 +41,13 @@ export type KnowledgeTab =
 
 /** The architecture document, by name: `.jarvis/knowledge/`, or a service's folder of the knowledge repository. */
 export const ARCHITECTURE = "architecture.md";
+// the tabs' labels: t("Overview") t("Services") t("Ask") t("Modules") t("Documents") t("Architecture") t("Standards") t("Skills") t("Glossary")
 
 export function knowledgeTabs(current: KnowledgeTab, counts?: KnowledgeCounts): Html {
   const tab = (id: KnowledgeTab, href: string, label: string, count?: number) =>
-    html`<a href="${href}"${id === current ? html` aria-current="page"` : ""}>${label}${count !== undefined ? html` <span class="muted">${String(count)}</span>` : ""}</a>`;
-  return html`<div class="lede"><h1>Knowledge</h1><span class="muted">what the agents know about this project</span></div>
-<nav class="tabs" aria-label="Knowledge">
+    html`<a href="${href}"${id === current ? html` aria-current="page"` : ""}>${t(label)}${count !== undefined ? html` <span class="muted">${String(count)}</span>` : ""}</a>`;
+  return html`<div class="lede"><h1>${t("Knowledge")}</h1><span class="muted">${t("what the agents know about this project")}</span></div>
+<nav class="tabs" aria-label="${t("Knowledge")}">
 ${tab("overview", "/knowledge", "Overview")}
 ${counts?.services !== undefined ? tab("services", "/knowledge/services", "Services", counts.services) : ""}
 ${tab("ask", "/knowledge/ask", "Ask")}
@@ -71,15 +73,15 @@ function fileActions(path: string, back: string, actions?: Actions): Html {
       ? form(
           actions,
           "/knowledge/open",
-          html`<input type="hidden" name="file" value="${path}"><input type="hidden" name="back" value="${back}"><button type="submit" class="btn small strong">Open in editor</button>`,
+          html`<input type="hidden" name="file" value="${path}"><input type="hidden" name="back" value="${back}"><button type="submit" class="btn small strong">${t("Open in editor")}</button>`,
         )
       : ""
-  }<button type="button" class="btn small" data-copy="${path}">Copy path</button></div>`;
+  }<button type="button" class="btn small" data-copy="${path}">${t("Copy path")}</button></div>`;
 }
 
 function usageHtml(u: Usage | undefined, what: string): Html {
-  if (!u) return html`<p class="hint">Not in the context of any recent agent call.</p>`;
-  return html`<p class="hint">In the context of ${String(u.calls)} agent call${u.calls === 1 ? "" : "s"} over ${String(u.runs)} run${u.runs === 1 ? "" : "s"}${u.asked > 0 ? html`; asked for by name ${String(u.asked)}×` : ""}${u.lastRun ? html` · last <a href="/runs/${encodeURIComponent(u.lastRun)}">run ${u.lastRun}</a>` : ""}. <span class="muted">${what}</span></p>`;
+  if (!u) return html`<p class="hint">${t("Not in the context of any recent agent call.")}</p>`;
+  return html`<p class="hint">${t("In the context of {calls} over {runs}", { calls: plural(u.calls, "agent call"), runs: plural(u.runs, "run") })}${u.asked > 0 ? html`; ${t("asked for by name {n}×", { n: u.asked })}` : ""}${u.lastRun ? html` · ${t("last")} <a href="/runs/${encodeURIComponent(u.lastRun)}">run ${u.lastRun}</a>` : ""}. <span class="muted">${what}</span></p>`;
 }
 
 const md = (text: string) => markdownToHtml(text.replace(/^<!--[\s\S]*?-->\n?/gm, ""));
@@ -114,26 +116,26 @@ function refHref(ref: string, docs: readonly DocView[]): string | undefined {
 function searchHtml(page: OverviewPage): Html {
   const r = page.result;
   return html`<section class="panel ksearch" aria-labelledby="find-h">
-<h2 id="find-h">Would an agent find it?</h2>
-<p class="hint">The same search the agents use: the query widened by the glossary, every step shown.</p>
-<form method="get" action="/knowledge" role="search" class="row"><label class="field grow"><span class="sr">Query</span><input type="search" name="q" value="${page.query ?? ""}" placeholder="маска телефона в форме заказа" maxlength="300"></label><button type="submit" class="btn strong">Search</button></form>
+<h2 id="find-h">${t("Would an agent find it?")}</h2>
+<p class="hint">${t("The same search the agents use: the query widened by the glossary, every step shown.")}</p>
+<form method="get" action="/knowledge" role="search" class="row"><label class="field grow"><span class="sr">${t("Query")}</span><input type="search" name="q" value="${page.query ?? ""}" placeholder="маска телефона в форме заказа" maxlength="300"></label><button type="submit" class="btn strong">${t("Search")}</button></form>
 ${page.searchError ? html`<div class="banner bad">${page.searchError}</div>` : ""}
 ${
   r
-    ? html`<div class="row kexp"><span class="hint">widened by the glossary:</span>${
+    ? html`<div class="row kexp"><span class="hint">${t("widened by the glossary:")}</span>${
         r.expansions.length > 0
           ? r.expansions.map(
               (e) => html`<span class="pill info">${e.term} → ${e.added.slice(0, 6).join(", ")}</span>`,
             )
-          : html`<span class="hint">no term matched</span>`
-      }<a class="pill wait" href="/knowledge/glossary?add=${encodeURIComponent(page.query ?? "")}#add">add a term</a><span class="hint">· ${r.indexes.join(" + ")}</span></div>
+          : html`<span class="hint">${t("no term matched")}</span>`
+      }<a class="pill wait" href="/knowledge/glossary?add=${encodeURIComponent(page.query ?? "")}#add">${t("add a term")}</a><span class="hint">· ${r.indexes.join(" + ")}</span></div>
 ${
   r.evidence.length > 0
     ? html`<ol class="khits">${r.evidence.slice(0, 10).map((e) => {
         const href = refHref(e.ref, page.docs);
         return html`<li><span class="meta">${e.score.toFixed(2)}</span>${href ? html`<a href="${href}"><code>${e.ref}</code></a>` : html`<code>${e.ref}</code>`}<span>${e.title}</span>${e.snippet ? html`<span class="hint">${e.snippet.slice(0, 200)}</span>` : ""}</li>`;
       })}</ol>`
-    : html`<p class="hint">Nothing found — an agent asking this would get no project knowledge.</p>`
+    : html`<p class="hint">${t("Nothing found — an agent asking this would get no project knowledge.")}</p>`
 }`
     : ""
 }
@@ -154,31 +156,31 @@ ${notice ?? ""}
 ${searchHtml(page)}
 <div class="cols">
 <section class="panel mainc kdocs" aria-labelledby="docs-h">
-<div class="row khead"><h2 id="docs-h">Documents</h2><span class="hint">click to read · edit them in your editor</span></div>
-<div class="ktable" role="table" aria-label="Knowledge documents">
-<div class="kr kh" role="row"><span role="columnheader">Document</span><span role="columnheader">About (paths)</span><span role="columnheader">Used</span><span role="columnheader">Edited</span></div>
+<div class="row khead"><h2 id="docs-h">${t("Documents")}</h2><span class="hint">${t("click to read · edit them in your editor")}</span></div>
+<div class="ktable" role="table" aria-label="${t("Knowledge documents")}">
+<div class="kr kh" role="row"><span role="columnheader">${t("Document")}</span><span role="columnheader">${t("About (paths)")}</span><span role="columnheader">${t("Used")}</span><span role="columnheader">${t("Edited")}</span></div>
 ${shown.map(
   (d) =>
-    html`<a class="kr${d.staleCommits ? " warn" : ""}" role="row" href="${docHref(d.path)}"><span role="cell"><code>${d.path.replace(/^\.jarvis\/knowledge\//, "")}</code>${d.generated ? html` <span class="pill plain">generated</span>` : ""}${d.source ? html` <span class="pill plain">documentation/</span>` : ""}${d.staleCommits ? html` <span class="pill wait">may be stale</span>` : ""}</span><span role="cell" class="meta">${d.paths.length > 0 ? d.paths.slice(0, 2).join(", ") + (d.paths.length > 2 ? ` +${d.paths.length - 2}` : "") : "everywhere"}</span><span role="cell" class="meta">${d.usage ? `${d.usage.runs} run${d.usage.runs === 1 ? "" : "s"}` : "—"}</span><span role="cell" class="meta">${d.edited ?? "not committed"}</span></a>`,
+    html`<a class="kr${d.staleCommits ? " warn" : ""}" role="row" href="${docHref(d.path)}"><span role="cell"><code>${d.path.replace(/^\.jarvis\/knowledge\//, "")}</code>${d.generated ? html` <span class="pill plain">${t("generated")}</span>` : ""}${d.source ? html` <span class="pill plain">documentation/</span>` : ""}${d.staleCommits ? html` <span class="pill wait">${t("may be stale")}</span>` : ""}</span><span role="cell" class="meta">${d.paths.length > 0 ? d.paths.slice(0, 2).join(", ") + (d.paths.length > 2 ? ` +${d.paths.length - 2}` : "") : t("everywhere")}</span><span role="cell" class="meta">${d.usage ? plural(d.usage.runs, "run") : "—"}</span><span role="cell" class="meta">${d.edited ?? t("not committed")}</span></a>`,
 )}
 </div>
 </section>
 <div class="side kside">
-<section class="panel kbox" aria-labelledby="stale-h"><h2 id="stale-h">May be stale</h2>
-${stale.length === 0 && generated.length === 0 && page.glossaryProblems === 0 ? html`<p class="hint">Nothing points that way.</p>` : ""}
-${stale.map((d) => html`<p><a href="${docHref(d.path)}"><code>${d.path.replace(/^\.jarvis\/knowledge\//, "")}</code></a> — ${String(d.staleCommits)} commit${d.staleCommits === 1 ? "" : "s"} under its paths since its last edit</p>`)}
-${generated.length > 0 ? html`<p>${String(generated.length)} document${generated.length === 1 ? "" : "s"} generated by jarvis and never taken over by a person</p>` : ""}
-${page.glossaryProblems > 0 ? html`<p><a href="/knowledge/glossary?problems=1">glossary</a> — ${String(page.glossaryProblems)} term${page.glossaryProblems === 1 ? "" : "s"} with a problem</p>` : ""}
+<section class="panel kbox" aria-labelledby="stale-h"><h2 id="stale-h">${t("May be stale")}</h2>
+${stale.length === 0 && generated.length === 0 && page.glossaryProblems === 0 ? html`<p class="hint">${t("Nothing points that way.")}</p>` : ""}
+${stale.map((d) => html`<p><a href="${docHref(d.path)}"><code>${d.path.replace(/^\.jarvis\/knowledge\//, "")}</code></a> — ${t("{n} under its paths since its last edit", { n: plural(d.staleCommits ?? 0, "commit") })}</p>`)}
+${generated.length > 0 ? html`<p>${t("{n} generated by jarvis and never taken over by a person", { n: plural(generated.length, "document") })}</p>` : ""}
+${page.glossaryProblems > 0 ? html`<p><a href="/knowledge/glossary?problems=1">${t("glossary")}</a> — ${t("{n} with a problem", { n: plural(page.glossaryProblems, "term") })}</p>` : ""}
 </section>
-<section class="panel kbox" aria-labelledby="res-h"><div class="row"><h2 id="res-h">Modules to research</h2><a class="hint" href="/knowledge/modules?need=1">all</a></div>
-${page.candidates > 0 ? html`<p><a href="/knowledge/modules?need=1">${String(page.candidates)} candidate${page.candidates === 1 ? "" : "s"} wait${page.candidates === 1 ? "s" : ""} for review</a></p>` : ""}
+<section class="panel kbox" aria-labelledby="res-h"><div class="row"><h2 id="res-h">${t("Modules to research")}</h2><a class="hint" href="/knowledge/modules?need=1">${t("all")}</a></div>
+${page.candidates > 0 ? html`<p><a href="/knowledge/modules?need=1">${plural(page.candidates, "candidate waits for review", "candidates wait for review")}</a></p>` : ""}
 ${
   page.toResearch.length > 0
     ? page.toResearch.map(
         (n) =>
-          html`<p class="row kres"><a href="/knowledge/modules?path=${encodeURIComponent(n.path)}"><code>${n.path}</code></a><span class="hint">${String(n.files)} files${n.tooBig ? " · in parts" : ""}</span></p>`,
+          html`<p class="row kres"><a href="/knowledge/modules?path=${encodeURIComponent(n.path)}"><code>${n.path}</code></a><span class="hint">${plural(n.files, "file")}${n.tooBig ? ` · ${t("in parts")}` : ""}</span></p>`,
       )
-    : html`<p class="hint">Every module has a document.</p>`
+    : html`<p class="hint">${t("Every module has a document.")}</p>`
 }
 </section>
 </div>
@@ -202,8 +204,8 @@ function docGroups(docs: readonly DocView[]): Array<{ title: string; docs: DocVi
   );
   const rest = own.filter((d) => !arch.includes(d));
   return [
-    { title: "Architecture and modules", docs: arch },
-    { title: "Project", docs: rest },
+    { title: t("Architecture and modules"), docs: arch },
+    { title: t("Project"), docs: rest },
     { title: "documentation/ · read-only", docs: docs.filter((d) => d.source) },
   ].filter((g) => g.docs.length > 0);
 }
@@ -214,30 +216,30 @@ export function docsContent(page: DocsPage, actions?: Actions, notice?: Html): H
   return html`${knowledgeTabs(page.architecture ? "architecture" : "docs", page.counts)}
 ${notice ?? ""}
 <div class="kdoccols">
-<nav class="panel ktree" aria-label="Documents">
+<nav class="panel ktree" aria-label="${t("Documents")}">
 ${docGroups(page.docs).map(
   (g) =>
     html`<h3>${g.title}</h3><ul>${g.docs.map(
       (x) =>
-        html`<li><a href="${docHref(x.path)}"${x.path === d?.path ? html` aria-current="page"` : ""}><span>${x.path.replace(/^\.jarvis\/knowledge\//, "").replace(/^documentation\//, "")}</span>${x.staleCommits ? html`<span class="pill wait">stale</span>` : x.generated ? html`<span class="pill plain">gen</span>` : ""}</a></li>`,
+        html`<li><a href="${docHref(x.path)}"${x.path === d?.path ? html` aria-current="page"` : ""}><span>${x.path.replace(/^\.jarvis\/knowledge\//, "").replace(/^documentation\//, "")}</span>${x.staleCommits ? html`<span class="pill wait">${t("stale")}</span>` : x.generated ? html`<span class="pill plain">${t("gen")}</span>` : ""}</a></li>`,
     )}</ul>`,
 )}
 </nav>
 ${
   d
     ? html`<article class="panel kdoc" aria-labelledby="doc-h">
-<div class="kdochead"><div class="row"><code id="doc-h" class="kpath">${d.path}</code>${d.source ? html`<span class="pill plain">source · read-only</span>` : ""}${d.generated ? html`<span class="pill plain">generated by jarvis</span>` : ""}</div>
-<div class="row kchips">${d.tags.length > 0 ? html`<span class="chip">tags: ${d.tags.join(", ")}</span>` : ""}<span class="chip">paths: ${d.paths.length > 0 ? d.paths.join(", ") : "everywhere"}</span>${d.agents.length > 0 ? html`<span class="chip">agents: ${d.agents.join(", ")}</span>` : ""}<span class="chip">edited: ${d.edited ?? "not committed"}</span></div>
+<div class="kdochead"><div class="row"><code id="doc-h" class="kpath">${d.path}</code>${d.source ? html`<span class="pill plain">${t("source · read-only")}</span>` : ""}${d.generated ? html`<span class="pill plain">${t("generated by jarvis")}</span>` : ""}</div>
+<div class="row kchips">${d.tags.length > 0 ? html`<span class="chip">${t("tags:")} ${d.tags.join(", ")}</span>` : ""}<span class="chip">${t("paths:")} ${d.paths.length > 0 ? d.paths.join(", ") : t("everywhere")}</span>${d.agents.length > 0 ? html`<span class="chip">${t("agents:")} ${d.agents.join(", ")}</span>` : ""}<span class="chip">${t("edited:")} ${d.edited ?? t("not committed")}</span></div>
 ${fileActions(d.path, back, actions)}</div>
 <div class="doc">${md(d.body)}</div>
 </article>
-<aside class="kaside" aria-label="How the agents see it">
-<section class="panel kbox"><h2>How the index cuts it</h2><p class="hint">${String(d.sections.length)} unit${d.sections.length === 1 ? "" : "s"}, one per section; a search finds a unit, not the whole file.</p>
-<ul class="kunits">${d.sections.slice(0, 30).map((s) => html`<li><span>${s.heading}</span><span class="meta">${String(s.chars)} chars</span></li>`)}</ul></section>
-<section class="panel kbox"><h2>Who reads it</h2><p>${d.agents.length > 0 ? d.agents.join(", ") : "every agent"}${d.paths.length > 0 ? html` — when the task touches <code>${d.paths.join(", ")}</code>` : " — in every task"}</p>${usageHtml(d.usage, "")}</section>
-${d.staleCommits ? html`<section class="panel kbox warn"><h2>May be stale</h2><p>${String(d.staleCommits)} commit${d.staleCommits === 1 ? "" : "s"} under its paths since its last edit (${d.edited ?? "?"}).</p>${d.paths.length > 0 ? html`<p class="hint">Research the module again on <a href="/knowledge/modules">Modules</a>, or update the document in your editor.</p>` : ""}</section>` : ""}
+<aside class="kaside" aria-label="${t("How the agents see it")}">
+<section class="panel kbox"><h2>${t("How the index cuts it")}</h2><p class="hint">${t("{n}, one per section; a search finds a unit, not the whole file.", { n: plural(d.sections.length, "unit") })}</p>
+<ul class="kunits">${d.sections.slice(0, 30).map((s) => html`<li><span>${s.heading}</span><span class="meta">${t("{n} chars", { n: s.chars })}</span></li>`)}</ul></section>
+<section class="panel kbox"><h2>${t("Who reads it")}</h2><p>${d.agents.length > 0 ? d.agents.join(", ") : t("every agent")}${d.paths.length > 0 ? html` — ${t("when the task touches")} <code>${d.paths.join(", ")}</code>` : ` — ${t("in every task")}`}</p>${usageHtml(d.usage, "")}</section>
+${d.staleCommits ? html`<section class="panel kbox warn"><h2>${t("May be stale")}</h2><p>${t("{n} under its paths since its last edit", { n: plural(d.staleCommits ?? 0, "commit") })} (${d.edited ?? "?"}).</p>${d.paths.length > 0 ? html`<p class="hint">${th("Research the module again on {modules}, or update the document in your editor.", { modules: html`<a href="/knowledge/modules">${t("Modules")}</a>` })}</p>` : ""}</section>` : ""}
 </aside>`
-    : html`<p class="empty">${page.path ? html`No document <code>${page.path}</code>.` : "Pick a document."}</p>`
+    : html`<p class="empty">${page.path ? th("No document {path}.", { path: html`<code>${page.path}</code>` }) : t("Pick a document.")}</p>`
 }
 </div>`;
 }
@@ -261,38 +263,38 @@ export function standardsContent(page: StandardsPage, actions?: Actions, notice?
   const check = s?.verification.check;
   return html`${knowledgeTabs("standards", page.counts)}
 ${notice ?? ""}
-<div class="row"><p class="hint grow">Rules the agents follow and the checks enforce. Written in <code>.jarvis/standards/*.md</code> — this page shows them.</p>
+<div class="row"><p class="hint grow">${th("Rules the agents follow and the checks enforce. Written in {files} — this page shows them.", { files: html`<code>.jarvis/standards/*.md</code>` })}</p>
 ${filter(undefined, `All ${page.standards.length}`)}${filter("required", `Required ${page.standards.filter((x) => x.severity === "required").length}`)}${filter("recommended", `Recommended ${page.standards.filter((x) => x.severity === "recommended").length}`)}</div>
 <div class="kdoccols kstd">
-<nav class="panel klist" aria-label="Standards">
+<nav class="panel klist" aria-label="${t("Standards")}">
 ${list.map(
   (x) =>
-    html`<a class="kli" href="/knowledge/standards?id=${encodeURIComponent(x.id)}${page.severity ? `&severity=${page.severity}` : ""}"${x.id === s?.id ? html` aria-current="page"` : ""}><span><code>${x.id}</code><span class="hint">${x.title}</span></span><span class="kmeta">${sevPill(x.severity)}<span class="meta">${x.verification.kind}</span>${x.findings.length > 0 ? html`<span class="meta">${String(x.findings.length)} found</span>` : ""}</span></a>`,
+    html`<a class="kli" href="/knowledge/standards?id=${encodeURIComponent(x.id)}${page.severity ? `&severity=${page.severity}` : ""}"${x.id === s?.id ? html` aria-current="page"` : ""}><span><code>${x.id}</code><span class="hint">${x.title}</span></span><span class="kmeta">${sevPill(x.severity)}<span class="meta">${x.verification.kind}</span>${x.findings.length > 0 ? html`<span class="meta">${t("{n} found", { n: x.findings.length })}</span>` : ""}</span></a>`,
 )}
-${list.length === 0 ? html`<p class="empty">No standards here: <code>.jarvis/standards/</code> is empty.</p>` : ""}
+${list.length === 0 ? html`<p class="empty">${th("No standards here: {dir} is empty.", { dir: html`<code>.jarvis/standards/</code>` })}</p>` : ""}
 </nav>
 ${
   s
     ? html`<article class="panel kdoc" aria-labelledby="std-h">
 <div class="kdochead"><div class="row"><h2 id="std-h"><code>${s.id}</code></h2>${sevPill(s.severity)}<span class="hint">v${String(s.version)} · ${s.level}</span></div>
 <p class="klead">${s.title}</p>
-<dl class="mfacts"><dt>checked by</dt><dd>${s.verification.kind === "semantic" ? "review (semantic)" : html`${s.verification.kind}${check?.tool ? html` — <code>${check.tool}</code>` : ""}`}</dd>
-${check?.pattern ? html`<dt>pattern</dt><dd><code>${check.pattern.glob}</code>${check.pattern.mustNot ? html` must not: <code>${check.pattern.mustNot}</code>` : ""}${check.pattern.must ? html` must: <code>${check.pattern.must}</code>` : ""} <span class="hint">(${check.pattern.lines} lines)</span></dd>` : ""}
-<dt>applies to</dt><dd>${s.scope.paths.length > 0 ? html`<code>${s.scope.paths.join(", ")}</code>` : "everywhere"}${s.scope.stacks.length > 0 ? ` · ${s.scope.stacks.join(", ")}` : ""}</dd>
-${s.source ? html`<dt>source</dt><dd>${s.source.kind}: ${s.source.ref}</dd>` : ""}
+<dl class="mfacts"><dt>${t("checked by")}</dt><dd>${s.verification.kind === "semantic" ? t("review (semantic)") : html`${s.verification.kind}${check?.tool ? html` — <code>${check.tool}</code>` : ""}`}</dd>
+${check?.pattern ? html`<dt>${t("pattern")}</dt><dd><code>${check.pattern.glob}</code>${check.pattern.mustNot ? html` ${t("must not:")} <code>${check.pattern.mustNot}</code>` : ""}${check.pattern.must ? html` ${t("must:")} <code>${check.pattern.must}</code>` : ""} <span class="hint">(${t("{n} lines", { n: check.pattern.lines })})</span></dd>` : ""}
+<dt>${t("applies to")}</dt><dd>${s.scope.paths.length > 0 ? html`<code>${s.scope.paths.join(", ")}</code>` : t("everywhere")}${s.scope.stacks.length > 0 ? ` · ${s.scope.stacks.join(", ")}` : ""}</dd>
+${s.source ? html`<dt>${t("source")}</dt><dd>${s.source.kind}: ${s.source.ref}</dd>` : ""}
 </dl>
 ${fileActions(s.path, `/knowledge/standards?id=${encodeURIComponent(s.id)}`, actions)}</div>
 <div class="doc">${md(s.rule)}</div>
-<section class="kfound"><h3>In recent runs</h3>
+<section class="kfound"><h3>${t("In recent runs")}</h3>
 ${
   s.findings.length > 0
     ? html`<ul>${s.findings.map((f) => html`<li><a href="/runs/${encodeURIComponent(f.run)}"><code>${f.run}</code></a> ${f.file ? html`<code>${f.file}${f.line ? `:${f.line}` : ""}</code>` : ""} — ${f.detail}</li>`)}</ul>`
-    : html`<p class="hint">${s.verification.kind === "semantic" ? "Checked by review: its findings are in the reviews, not counted here." : "No violations in the last runs."}</p>`
+    : html`<p class="hint">${s.verification.kind === "semantic" ? t("Checked by review: its findings are in the reviews, not counted here.") : t("No violations in the last runs.")}</p>`
 }
 ${usageHtml(s.usage, "")}
 </section>
 </article>`
-    : html`<p class="empty">Pick a standard.</p>`
+    : html`<p class="empty">${t("Pick a standard.")}</p>`
 }
 </div>`;
 }
@@ -306,6 +308,7 @@ export interface SkillsPage {
 }
 
 const ORIGIN: Record<SkillView["origin"], [string, string]> = {
+  // t("Project") t("From documentation/") t("read in place; the id is the file name") t("Yours") t("Built-in") t("ship with jarvis; a project skill with the same id wins")
   project: ["Project", ".jarvis/skills/<id>/ — skill.yaml + instructions.md"],
   source: ["From documentation/", "read in place; the id is the file name"],
   user: ["Yours", "~/.jarvis/skills"],
@@ -321,38 +324,38 @@ export function skillsContent(page: SkillsPage, actions?: Actions, notice?: Html
   const k = v?.skill;
   return html`${knowledgeTabs("skills", page.counts)}
 ${notice ?? ""}
-<p class="hint">How to do one kind of work. An agent call gets the best matching ones in full (<code>context.maxSkills</code>); the rest are listed as available on request.</p>
+<p class="hint">${th("How to do one kind of work. An agent call gets the best matching ones in full ({setting}); the rest are listed as available on request.", { setting: html`<code>context.maxSkills</code>` })}</p>
 <div class="kdoccols kstd">
-<nav class="panel klist" aria-label="Skills">
+<nav class="panel klist" aria-label="${t("Skills")}">
 ${groups.map(
   (g) =>
-    html`<h3>${ORIGIN[g.o][0]} <span class="hint">${ORIGIN[g.o][1]}</span></h3>${g.list.map(
+    html`<h3>${t(ORIGIN[g.o][0])} <span class="hint">${t(ORIGIN[g.o][1])}</span></h3>${g.list.map(
       (s) =>
-        html`<a class="kli${s.overridden ? " off" : ""}" href="/knowledge/skills?id=${encodeURIComponent(key(s))}"${v && key(v) === key(s) ? html` aria-current="page"` : ""}><span><code>${s.skill.id}</code><span class="hint">${s.skill.title ?? ""}</span></span><span class="kmeta">${s.overridden ? html`<span class="pill plain">overridden</span>` : ""}${s.overrides ? html`<span class="pill info">overrides built-in</span>` : ""}${s.usage ? html`<span class="meta">${String(s.usage.runs)} runs</span>` : ""}</span></a>`,
+        html`<a class="kli${s.overridden ? " off" : ""}" href="/knowledge/skills?id=${encodeURIComponent(key(s))}"${v && key(v) === key(s) ? html` aria-current="page"` : ""}><span><code>${s.skill.id}</code><span class="hint">${s.skill.title ?? ""}</span></span><span class="kmeta">${s.overridden ? html`<span class="pill plain">${t("overridden")}</span>` : ""}${s.overrides ? html`<span class="pill info">${t("overrides built-in")}</span>` : ""}${s.usage ? html`<span class="meta">${plural(s.usage.runs, "run")}</span>` : ""}</span></a>`,
     )}`,
 )}
 </nav>
 ${
   v && k
     ? html`<article class="panel kdoc" aria-labelledby="skill-h">
-<div class="kdochead"><div class="row"><h2 id="skill-h"><code>${k.id}</code></h2><span class="pill plain">${ORIGIN[v.origin][0]}</span><span class="hint">v${String(k.version)}</span></div>
+<div class="kdochead"><div class="row"><h2 id="skill-h"><code>${k.id}</code></h2><span class="pill plain">${t(ORIGIN[v.origin][0])}</span><span class="hint">v${String(k.version)}</span></div>
 ${k.title ? html`<p class="klead">${k.title}</p>` : ""}
-${v.overridden ? html`<div class="banner info">Replaced by the project skill <code>${k.id}</code>: agents get that one, this one is not used.</div>` : ""}
-${v.overrides ? html`<div class="banner info">Replaces the built-in skill with the same id.</div>` : ""}
-${v.origin === "source" ? html`<div class="banner info">Read in place from the team's documentation — change it there; jarvis copies nothing.</div>` : ""}
+${v.overridden ? html`<div class="banner info">${th("Replaced by the project skill {id}: agents get that one, this one is not used.", { id: html`<code>${k.id}</code>` })}</div>` : ""}
+${v.overrides ? html`<div class="banner info">${t("Replaces the built-in skill with the same id.")}</div>` : ""}
+${v.origin === "source" ? html`<div class="banner info">${t("Read in place from the team's documentation — change it there; jarvis copies nothing.")}</div>` : ""}
 <dl class="mfacts">
-<dt>for agents</dt><dd>${k.appliesTo.agents.length > 0 ? k.appliesTo.agents.join(", ") : "implementation"}</dd>
-<dt>task kinds</dt><dd>${k.appliesTo.kinds.length > 0 ? k.appliesTo.kinds.join(", ") : "any"}</dd>
-<dt>paths</dt><dd>${k.appliesTo.paths.length > 0 ? html`<code>${k.appliesTo.paths.join(", ")}</code>` : "any"}</dd>
-${k.appliesTo.stacks.length > 0 ? html`<dt>stacks</dt><dd>${k.appliesTo.stacks.join(", ")}</dd>` : ""}
-${k.requiredStandards.length > 0 ? html`<dt>needs standards</dt><dd>${k.requiredStandards.map((s, i) => html`${i > 0 ? ", " : ""}<a href="/knowledge/standards?id=${encodeURIComponent(s)}"><code>${s}</code></a>`)}</dd>` : ""}
-${k.verification.length > 0 ? html`<dt>verified by</dt><dd><code>${k.verification.join(", ")}</code></dd>` : ""}
+<dt>${t("for agents")}</dt><dd>${k.appliesTo.agents.length > 0 ? k.appliesTo.agents.join(", ") : "implementation"}</dd>
+<dt>${t("task kinds")}</dt><dd>${k.appliesTo.kinds.length > 0 ? k.appliesTo.kinds.join(", ") : t("any")}</dd>
+<dt>${t("paths")}</dt><dd>${k.appliesTo.paths.length > 0 ? html`<code>${k.appliesTo.paths.join(", ")}</code>` : t("any")}</dd>
+${k.appliesTo.stacks.length > 0 ? html`<dt>${t("stacks")}</dt><dd>${k.appliesTo.stacks.join(", ")}</dd>` : ""}
+${k.requiredStandards.length > 0 ? html`<dt>${t("needs standards")}</dt><dd>${k.requiredStandards.map((s, i) => html`${i > 0 ? ", " : ""}<a href="/knowledge/standards?id=${encodeURIComponent(s)}"><code>${s}</code></a>`)}</dd>` : ""}
+${k.verification.length > 0 ? html`<dt>${t("verified by")}</dt><dd><code>${k.verification.join(", ")}</code></dd>` : ""}
 </dl>
 ${v.path ? fileActions(v.path, `/knowledge/skills?id=${encodeURIComponent(key(v))}`, actions) : ""}</div>
 <div class="doc">${md(k.instructions)}</div>
-<section class="kfound"><h3>Did it reach the agent?</h3>${v.overridden ? html`<p class="hint">Not used: the project version is picked instead.</p>` : usageHtml(v.usage, "")}</section>
+<section class="kfound"><h3>${t("Did it reach the agent?")}</h3>${v.overridden ? html`<p class="hint">${t("Not used: the project version is picked instead.")}</p>` : usageHtml(v.usage, "")}</section>
 </article>`
-    : html`<p class="empty">Pick a skill.</p>`
+    : html`<p class="empty">${t("Pick a skill.")}</p>`
 }
 </div>`;
 }
@@ -384,28 +387,28 @@ export interface GlossaryPage {
 function addFormHtml(page: GlossaryPage, actions: Actions): Html {
   const f = page.form ?? { term: "", synonyms: "", symbols: "", sources: "", definition: "" };
   const missing = (page.checks ?? []).filter((c) => !c.found);
-  return html`<details class="panel kadd" id="add"${page.form ? " open" : ""}><summary><b>Add a term</b> <span class="hint">— goes to <code>.jarvis/knowledge/glossary.md</code> as a draft; agents use it from the next run</span></summary>
+  return html`<details class="panel kadd" id="add"${page.form ? " open" : ""}><summary><b>${t("Add a term")}</b> <span class="hint">— ${th("goes to {file} as a draft; agents use it from the next run", { file: html`<code>.jarvis/knowledge/glossary.md</code>` })}</span></summary>
 ${form(
   actions,
   "/knowledge/glossary",
   html`<div class="row kfields">
-<label class="field">Term<input type="text" name="term" value="${f.term}" required maxlength="80"></label>
-<label class="field grow">Synonyms <span class="hint">comma-separated, how people say it</span><input type="text" name="synonyms" value="${f.synonyms}" maxlength="400"></label>
-<label class="field">Source <span class="hint">optional</span><input type="text" name="sources" value="${f.sources}" maxlength="200"></label>
+<label class="field">${t("Term")}<input type="text" name="term" value="${f.term}" required maxlength="80"></label>
+<label class="field grow">${t("Synonyms")} <span class="hint">${t("comma-separated, how people say it")}</span><input type="text" name="synonyms" value="${f.synonyms}" maxlength="400"></label>
+<label class="field">${t("Source")} <span class="hint">${t("optional")}</span><input type="text" name="sources" value="${f.sources}" maxlength="200"></label>
 </div>
 <div class="row kfields">
-<label class="field grow">Symbols and modules <span class="hint">what it is called in the code</span><input type="text" name="symbols" value="${f.symbols}" maxlength="400" class="mono"></label>
-<label class="field grow">Definition <span class="hint">one or two sentences, in the project's language</span><textarea name="definition" rows="2" maxlength="600">${f.definition}</textarea></label>
+<label class="field grow">${t("Symbols and modules")} <span class="hint">${t("what it is called in the code")}</span><input type="text" name="symbols" value="${f.symbols}" maxlength="400" class="mono"></label>
+<label class="field grow">${t("Definition")} <span class="hint">${t("one or two sentences, in the project's language")}</span><textarea name="definition" rows="2" maxlength="600">${f.definition}</textarea></label>
 </div>
 ${
   page.checks && page.checks.length > 0
-    ? html`<ul class="kchecks">${page.checks.map((c) => html`<li class="${c.found ? "ok" : "warn"}"><span aria-hidden="true">${c.found ? "✓" : "?"}</span> <code>${c.symbol}</code> — ${c.found ? c.where : "not in the code"}</li>`)}</ul>`
+    ? html`<ul class="kchecks">${page.checks.map((c) => html`<li class="${c.found ? "ok" : "warn"}"><span aria-hidden="true">${c.found ? "✓" : "?"}</span> <code>${c.symbol}</code> — ${c.found ? c.where : t("not in the code")}</li>`)}</ul>`
     : ""
 }
 ${page.error ? html`<div class="banner bad">${page.error}</div>` : ""}
-<div class="row"><button type="submit" name="do" value="check" class="btn">Check in the code</button>
-<button type="submit" name="do" value="${missing.length > 0 ? "add-anyway" : "add"}" class="btn primary">${missing.length > 0 ? "Add anyway" : "Add to the glossary"}</button>
-${missing.length > 0 ? html`<span class="hint">${String(missing.length)} symbol${missing.length === 1 ? "" : "s"} not found — fix the spelling, or add as it is</span>` : ""}</div>`,
+<div class="row"><button type="submit" name="do" value="check" class="btn">${t("Check in the code")}</button>
+<button type="submit" name="do" value="${missing.length > 0 ? "add-anyway" : "add"}" class="btn primary">${missing.length > 0 ? t("Add anyway") : t("Add to the glossary")}</button>
+${missing.length > 0 ? html`<span class="hint">${t("{n} not found — fix the spelling, or add as it is", { n: plural(missing.length, "symbol") })}</span>` : ""}</div>`,
 )}
 </details>`;
 }
@@ -430,39 +433,39 @@ export function glossaryContent(page: GlossaryPage, actions?: Actions, notice?: 
   };
   return html`${knowledgeTabs("glossary", page.counts)}
 ${notice ?? ""}
-<p class="hint">Business term → synonyms → code symbols. Every search an agent makes is widened by it; Ask (or <code>jarvis ask &lt;term&gt;</code>) answers from it. Existing terms are changed in the file; here you add new ones.</p>
+<p class="hint">${th("Business term → synonyms → code symbols. Every search an agent makes is widened by it; Ask (or {cmd}) answers from it. Existing terms are changed in the file; here you add new ones.", { cmd: html`<code>jarvis ask &lt;term&gt;</code>` })}</p>
 ${actions ? addFormHtml(page, actions) : ""}
-<form method="get" action="/knowledge/glossary" class="row kfilter" role="search"><label class="field grow"><span class="sr">Filter</span><input type="search" name="q" value="${page.filter ?? ""}" placeholder="Filter terms, synonyms, symbols…"></label>${page.problems ? html`<input type="hidden" name="problems" value="1">` : ""}<button type="submit" class="btn">Filter</button>
-<a class="btn${page.problems ? " strong" : ""}" href="${page.problems ? "/knowledge/glossary" : "/knowledge/glossary?problems=1"}">${page.problems ? "All terms" : `Problems only (${withProblems})`}</a>${actions ? fileActions(".jarvis/knowledge/glossary.md", "/knowledge/glossary", actions) : ""}</form>
+<form method="get" action="/knowledge/glossary" class="row kfilter" role="search"><label class="field grow"><span class="sr">${t("Filter")}</span><input type="search" name="q" value="${page.filter ?? ""}" placeholder="${t("Filter terms, synonyms, symbols…")}"></label>${page.problems ? html`<input type="hidden" name="problems" value="1">` : ""}<button type="submit" class="btn">${t("Filter")}</button>
+<a class="btn${page.problems ? " strong" : ""}" href="${page.problems ? "/knowledge/glossary" : "/knowledge/glossary?problems=1"}">${page.problems ? t("All terms") : t("Problems only ({n})", { n: withProblems })}</a>${actions ? fileActions(".jarvis/knowledge/glossary.md", "/knowledge/glossary", actions) : ""}</form>
 <div class="cols">
-<section class="panel mainc kgloss" aria-label="Terms">
+<section class="panel mainc kgloss" aria-label="${t("Terms")}">
 ${
   !page.glossary.exists
-    ? html`<p class="empty">No glossary yet: the first term you add creates <code>.jarvis/knowledge/glossary.md</code>.</p>`
-    : html`<div class="ktable" role="table" aria-label="Glossary">
-<div class="kr kh kg" role="row"><span role="columnheader">Term</span><span role="columnheader">Synonyms</span><span role="columnheader">Symbols / modules</span><span role="columnheader">Definition</span></div>
+    ? html`<p class="empty">${th("No glossary yet: the first term you add creates {file}.", { file: html`<code>.jarvis/knowledge/glossary.md</code>` })}</p>`
+    : html`<div class="ktable" role="table" aria-label="${t("Glossary")}">
+<div class="kr kh kg" role="row"><span role="columnheader">${t("Term")}</span><span role="columnheader">${t("Synonyms")}</span><span role="columnheader">${t("Symbols / modules")}</span><span role="columnheader">${t("Definition")}</span></div>
 ${rows.map(
   (r) =>
     html`<a class="kr kg${r.problems.length > 0 ? " warn" : ""}${r.term === s?.term ? " current" : ""}" role="row" href="${href({ term: r.term })}"><span role="cell"><b>${r.term}</b>${r.updated ? html`<span class="meta">${r.updated}</span>` : ""}</span><span role="cell">${r.synonyms.join(", ")}</span><span role="cell" class="meta">${r.symbols.join(", ")}${r.problems.map((p) => html`<span class="kprob">${p}</span>`)}</span><span role="cell" class="hint">${r.definition ?? ""}</span></a>`,
 )}
-${rows.length === 0 ? html`<p class="empty">No term matches.</p>` : ""}
+${rows.length === 0 ? html`<p class="empty">${t("No term matches.")}</p>` : ""}
 </div>`
 }
 </section>
-<aside class="side kside" aria-label="Where it is used">
+<aside class="side kside" aria-label="${t("Where it is used")}">
 ${
   s
-    ? html`<section class="panel kbox"><span class="hint">selected term</span><h2>${s.term}</h2>
-<p class="hint">a query with it also searches for</p><p class="mono">${[...s.synonyms, ...s.symbols].join(" · ") || "—"}</p>
+    ? html`<section class="panel kbox"><span class="hint">${t("selected term")}</span><h2>${s.term}</h2>
+<p class="hint">${t("a query with it also searches for")}</p><p class="mono">${[...s.synonyms, ...s.symbols].join(" · ") || "—"}</p>
 ${
   page.where && page.where.length > 0
-    ? html`<p class="hint">in the code</p><ul class="kchecks">${page.where.map((c) => html`<li class="${c.found ? "ok" : "warn"}"><span aria-hidden="true">${c.found ? "✓" : "?"}</span> <code>${c.symbol}</code> — ${c.found ? c.where : "not in the code"}</li>`)}</ul>`
+    ? html`<p class="hint">${t("in the code")}</p><ul class="kchecks">${page.where.map((c) => html`<li class="${c.found ? "ok" : "warn"}"><span aria-hidden="true">${c.found ? "✓" : "?"}</span> <code>${c.symbol}</code> — ${c.found ? c.where : t("not in the code")}</li>`)}</ul>`
     : ""
 }
-${s.sources.length > 0 ? html`<p class="hint">sources: ${s.sources.join(", ")}</p>` : ""}
+${s.sources.length > 0 ? html`<p class="hint">${t("sources:")} ${s.sources.join(", ")}</p>` : ""}
 ${s.problems.map((p) => html`<div class="banner bad">${p}</div>`)}
 </section>`
-    : html`<section class="panel kbox"><p class="hint">Pick a term to see what a query with it becomes and where its symbols are.</p></section>`
+    : html`<section class="panel kbox"><p class="hint">${t("Pick a term to see what a query with it becomes and where its symbols are.")}</p></section>`
 }
 </aside>
 </div>`;

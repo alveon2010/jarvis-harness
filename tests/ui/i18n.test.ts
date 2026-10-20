@@ -10,9 +10,19 @@ function keysInCode(): Map<string, string> {
   const keys = new Map<string, string>();
   for (const name of readdirSync(UI).filter((f) => f.endsWith(".ts"))) {
     const text = readFileSync(join(UI, name), "utf8");
-    for (const m of text.matchAll(/\bt\("((?:[^"\\]|\\.)*)"/g)) keys.set(JSON.parse(`"${m[1]}"`), name);
+    for (const m of text.matchAll(/\bth?\("((?:[^"\\]|\\.)*)"/g)) keys.set(JSON.parse(`"${m[1]}"`), name);
   }
   return keys;
+}
+/** Every noun given to `plural(n, "…")`: the forms RU_PLURALS must have. */
+function nounsInCode(): Map<string, string> {
+  const nouns = new Map<string, string>();
+  for (const name of readdirSync(UI).filter((f) => f.endsWith(".ts"))) {
+    const text = readFileSync(join(UI, name), "utf8");
+    for (const m of text.matchAll(/\bplural\([^,()]+(?:\([^()]*\))?[^,()]*, "([^"]+)"/g))
+      nouns.set(m[1] as string, name);
+  }
+  return nouns;
 }
 const placeholders = (s: string) => [...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort();
 
@@ -27,6 +37,13 @@ describe("the page in Russian", () => {
     }
     expect(missing).toEqual([]);
     expect(wrong).toEqual([]);
+  });
+
+  it("every noun counted on a page has its Russian forms", () => {
+    const missing = [...nounsInCode()]
+      .filter(([noun]) => !RU_PLURALS[noun])
+      .map(([noun, file]) => `${file}: ${noun}`);
+    expect(missing).toEqual([]);
   });
 
   it("no translation is left over from a string the code no longer has", () => {

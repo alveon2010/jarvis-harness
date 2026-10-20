@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { escapeHtml, Html, html, type Part } from "./html.ts";
 import { RU, RU_PLURALS } from "./i18n/ru.ts";
 
 /**
@@ -81,4 +82,23 @@ export function when(text: string): string {
     .replace("when the window frees", "когда окно освободится")
     .replace("(any moment now)", "(вот-вот)")
     .replace(/\(in (\d+) min\)/, "(через $1 мин)");
+}
+
+/**
+ * A whole sentence with markup inside, in the page's language: the placeholders take code, links,
+ * names — `th('Written in {file}.', { file: html`<code>${path}</code>` })` —
+ * so the sentence is translated as one, not in pieces around its code.
+ */
+export function th(key: string, vars: Readonly<Record<string, Part>> = {}): Html {
+  const text = lang() === "ru" ? (RU[key] ?? key) : key;
+  const parts = text.split(/(\{\w+\})/);
+  return new Html(
+    parts
+      .map((p) => {
+        const m = /^\{(\w+)\}$/.exec(p);
+        if (!m || !((m[1] as string) in vars)) return escapeHtml(p);
+        return html`${vars[m[1] as string]}`.value;
+      })
+      .join(""),
+  );
 }

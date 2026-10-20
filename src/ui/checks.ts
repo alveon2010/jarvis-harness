@@ -1,6 +1,7 @@
 import type { Run } from "../core/domain/run.ts";
 import { brokeLine, excerptOf } from "../orchestration/tools/excerpt.ts";
 import { type Html, html, raw } from "./html.ts";
+import { plural, t } from "./i18n.ts";
 import { fileRefHtml } from "./refs.ts";
 
 /**
@@ -58,11 +59,11 @@ const logHref = (run: Pick<Run, "id">, r: Result): string | undefined => {
 
 function chip(r: Result): Html {
   const label = r.skipped
-    ? `– ${r.check} · skipped`
+    ? `– ${r.check} · ${t("skipped")}`
     : r.ok
       ? `✓ ${r.check}`
       : r.tests
-        ? `✕ ${r.check} · ${r.tests.failed}${r.tests.total ? ` of ${r.tests.total}` : ""} failed`
+        ? `✕ ${r.check} · ${r.tests.total ? t("{n} of {m} failed", { n: r.tests.failed, m: r.tests.total }) : t("{n} failed", { n: r.tests.failed })}`
         : `✕ ${r.check}`;
   return html`<a href="#check-${r.check}" class="pill ${r.skipped ? "plain" : r.ok ? "ok" : "bad"}" title="${r.command}${r.skipped ? ` — ${r.skipped}` : ""}">${label}</a>`;
 }
@@ -71,18 +72,18 @@ function failureHtml(f: Failure): Html {
   const frames = f.stack ?? [];
   const title = f.name.replace(/\(\)$/, "");
   return html`<article class="tf">
-<div class="tf-head"><h3>${title}</h3>${f.suite ? html`<code class="meta">${f.suite}</code>` : ""}<span class="grow"></span>${f.preexisting ? html`<span class="pill plain" title="fails on the base commit too">also on the base</span>` : ""}</div>
+<div class="tf-head"><h3>${title}</h3>${f.suite ? html`<code class="meta">${f.suite}</code>` : ""}<span class="grow"></span>${f.preexisting ? html`<span class="pill plain" title="${t("fails on the base commit too")}">${t("also on the base")}</span>` : ""}</div>
 <dl class="tf-facts">
-<dt>Failure</dt><dd><pre>${f.message}</pre></dd>
-${f.expected !== undefined && f.actual !== undefined ? html`<dt>Expected</dt><dd><code class="ok">${f.expected}</code></dd><dt>Got</dt><dd><code class="bad">${f.actual}</code></dd>` : ""}
+<dt>${t("Failure")}</dt><dd><pre>${f.message}</pre></dd>
+${f.expected !== undefined && f.actual !== undefined ? html`<dt>${t("Expected")}</dt><dd><code class="ok">${f.expected}</code></dd><dt>${t("Got")}</dt><dd><code class="bad">${f.actual}</code></dd>` : ""}
 ${
   frames.length > 0
-    ? html`<dt>Where</dt><dd><ul class="tf-frames">${frames.map(
+    ? html`<dt>${t("Where")}</dt><dd><ul class="tf-frames">${frames.map(
         (s) =>
-          html`<li>${raw(fileRefHtml(s.file, s.line))}${s.fn ? html` <span class="meta">${s.fn}</span>` : ""}${s.changed ? html` <span class="pill wait">changed by this run</span>` : ""}</li>`,
-      )}</ul>${f.hidden ? html`<span class="hint">${f.hidden} frame${f.hidden === 1 ? "" : "s"} of the runner and libraries not shown</span>` : ""}</dd>`
+          html`<li>${raw(fileRefHtml(s.file, s.line))}${s.fn ? html` <span class="meta">${s.fn}</span>` : ""}${s.changed ? html` <span class="pill wait">${t("changed by this run")}</span>` : ""}</li>`,
+      )}</ul>${f.hidden ? html`<span class="hint">${t("{n} of the runner and libraries not shown", { n: plural(f.hidden, "frame") })}</span>` : ""}</dd>`
     : f.file
-      ? html`<dt>File</dt><dd>${raw(fileRefHtml(f.file))}</dd>`
+      ? html`<dt>${t("File")}</dt><dd>${raw(fileRefHtml(f.file))}</dd>`
       : ""
 }
 </dl>
@@ -93,11 +94,11 @@ function resultHtml(run: Pick<Run, "id">, r: Result): Html {
   const log = logHref(run, r);
   const failures = r.failures ?? [];
   return html`<section class="panel tf-check" id="check-${r.check}" aria-labelledby="check-${r.check}-h">
-<div class="row"><h2 id="check-${r.check}-h">${r.check}</h2><span class="pill bad">${r.tests ? `${r.tests.failed}${r.tests.total ? ` of ${r.tests.total}` : ""} tests failed` : "failed"}</span><code class="meta">${r.command}</code></div>
+<div class="row"><h2 id="check-${r.check}-h">${r.check}</h2><span class="pill bad">${r.tests ? (r.tests.total ? t("{n} of {m} tests failed", { n: r.tests.failed, m: r.tests.total }) : t("{n} tests failed", { n: r.tests.failed })) : t("failed")}</span><code class="meta">${r.command}</code></div>
 ${failures.map(failureHtml)}
 ${failures.length === 0 && r.tail ? html`<pre class="tf-tail">${r.tail}</pre>` : ""}
-${r.failures && r.tests && r.tests.failed > failures.length ? html`<p class="hint">${r.tests.failed - failures.length} more failed tests are in the full output.</p>` : ""}
-${log ? html`<p><a href="${log}">The whole output</a> <span class="hint">— what the command printed, every line</span></p>` : ""}
+${r.failures && r.tests && r.tests.failed > failures.length ? html`<p class="hint">${t("{n} more failed tests are in the full output.", { n: r.tests.failed - failures.length })}</p>` : ""}
+${log ? html`<p><a href="${log}">${t("The whole output")}</a> <span class="hint">${t("— what the command printed, every line")}</span></p>` : ""}
 </section>`;
 }
 
@@ -107,10 +108,10 @@ export function checksHtml(run: Pick<Run, "id">, results: readonly Result[]): Ht
   const tests = failed.reduce((n, r) => n + (r.tests?.failed ?? 0), 0);
   const lead =
     failed.length === 0
-      ? "Every check passed."
+      ? t("Every check passed.")
       : tests > 0
-        ? `${tests} test${tests === 1 ? "" : "s"} failed${failed.length > 1 ? `, ${failed.length} checks in all` : ""}. The implementation goes back with these failures as its reasons.`
-        : `${failed.length} check${failed.length === 1 ? "" : "s"} failed. The implementation goes back with their output as its reasons.`;
+        ? `${t("{n} failed", { n: plural(tests, "test") })}${failed.length > 1 ? `, ${t("{n} in all", { n: plural(failed.length, "check") })}` : ""}. ${t("The implementation goes back with these failures as its reasons.")}`
+        : `${t("{n} failed", { n: plural(failed.length, "check") })}. ${t("The implementation goes back with their output as its reasons.")}`;
   return html`<div class="tf-all">
 <p>${lead}</p>
 <div class="row" style="flex-wrap:wrap;gap:8px">${results.map(chip)}</div>
@@ -129,11 +130,11 @@ export function checkLogHtml(text: string): Html {
   const show = (ls: readonly string[]) =>
     ls.map((l) => (brokeLine(l) ? html`<mark>${l}</mark>\n` : html`${l}\n`));
   return html`<div class="tf-log">
-<div class="row" style="flex-wrap:wrap;gap:8px 14px"><span class="meta">${ex.total.toLocaleString("en-US")} lines · ${ex.hits} say what broke, marked · the rest folded</span><span class="grow"></span><button type="button" class="btn small" data-unfold>Show every line</button><button type="button" class="btn small" data-copy="${text.length <= 2_000_000 ? text : text.slice(-2_000_000)}">Copy all</button></div>
+<div class="row" style="flex-wrap:wrap;gap:8px 14px"><span class="meta">${plural(ex.total, "line")} · ${t("{n} say what broke, marked · the rest folded", { n: ex.hits })}</span><span class="grow"></span><button type="button" class="btn small" data-unfold>${t("Show every line")}</button><button type="button" class="btn small" data-copy="${text.length <= 2_000_000 ? text : text.slice(-2_000_000)}">${t("Copy all")}</button></div>
 <pre class="log">${ex.parts.map((p) =>
     p.kind === "lines"
       ? show(p.lines)
-      : html`<details class="fold"><summary>… ${p.count.toLocaleString("en-US")} lines (${p.from + 1}–${p.from + p.count}) — show</summary>${show(lines.slice(p.from, p.from + p.count))}</details>`,
+      : html`<details class="fold"><summary>… ${t("{n} ({from}–{to}) — show", { n: plural(p.count, "line"), from: p.from + 1, to: p.from + p.count })}</summary>${show(lines.slice(p.from, p.from + p.count))}</details>`,
   )}</pre>
 </div>`;
 }
