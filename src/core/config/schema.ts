@@ -555,6 +555,33 @@ export const AgentConfigSchema = z.strictObject({
 });
 export type AgentConfig = z.infer<typeof AgentConfigSchema>;
 
+/**
+ * ADR-0003 §4: a finished run delivered as a pull request — a push of its branch and the PR through
+ * the MCP server's `*.pr.create`. `pr`: `allow` — as asked; `approve` — a person approves the PR's
+ * title and description first; `deny` — no PR from this project (Apply stays).
+ */
+export const DeliveryConfigSchema = z.strictObject({
+  pr: z.enum(["allow", "approve", "deny"]).default("allow"),
+  /** The remote the branch is pushed to. */
+  remote: z.string().min(1).default("origin"),
+  /** The branch the PR goes into; unset — the remote's default branch, else `main`. */
+  target: z.string().min(1).optional(),
+  /** The capability that opens the PR when several servers have one (`bitbucket.pr.create`). */
+  capability: z.string().min(1).optional(),
+  /** The repository on the server: `workspace` (project key) and `repo`; unset — from the remote's URL. */
+  workspace: z.string().min(1).optional(),
+  repo: z.string().min(1).optional(),
+});
+export type DeliveryConfig = z.infer<typeof DeliveryConfigSchema>;
+
+/**
+ * ADR-0006 §4: the daemon resumes runs as `service:daemon`; it uses the owner's credentials for an
+ * effect (a push, a PR) only with `actAsOwner` — on the owner's own machine, the default.
+ */
+export const DaemonConfigSchema = z.strictObject({
+  actAsOwner: z.boolean().default(true),
+});
+
 export const ActorConfigSchema = z.strictObject({
   id: z.string().min(1).optional(),
   display: z.string().min(1).optional(),
@@ -644,6 +671,7 @@ export const UserConfigSchema = z.strictObject({
   repos: z.record(ServiceNameSchema, z.string().min(1)).optional(),
   /** Scheduled eval suites this machine's daemon runs (ADR-0012 §5). */
   evals: EvalsConfigSchema.optional(),
+  daemon: DaemonConfigSchema.optional(),
 });
 export type UserConfig = z.infer<typeof UserConfigSchema>;
 
@@ -687,6 +715,8 @@ const ProjectFieldsSchema = z.strictObject({
   crossRepos: CrossReposSchema.optional(),
   /** Scheduled eval suites (ADR-0012 §5); the pool named must be in the machine's `quotaPools`. */
   evals: EvalsConfigSchema.optional(),
+  /** How a finished run may go out as a pull request (ADR-0003 §4). */
+  delivery: DeliveryConfigSchema.optional(),
 });
 
 /**
@@ -750,6 +780,8 @@ export const ResolvedConfigSchema = z.strictObject({
   contracts: z.array(ContractMapSchema).default([]),
   crossRepos: CrossReposSchema.prefault({}),
   evals: EvalsConfigSchema.prefault({}),
+  delivery: DeliveryConfigSchema.prefault({}),
+  daemon: DaemonConfigSchema.prefault({}),
   /** Capability patterns denied by the active profile (ADR-0009 §1); applied by the Tool Router. */
   deniedCapabilities: z.array(z.string().min(1)).default([]),
   /** Name of the applied profile, if any. */

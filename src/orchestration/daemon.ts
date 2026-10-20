@@ -1,4 +1,5 @@
 import type { Runtime } from "../app/runtime.ts";
+import { DAEMON_ACTOR, formatActor } from "../core/domain/actor.ts";
 import type { Run } from "../core/domain/run.ts";
 import {
   runDueEvals,
@@ -88,7 +89,8 @@ export async function daemonTick(
       continue;
     }
     try {
-      const result = await engine.execute(run.id, { owner });
+      // ADR-0006 §2: the daemon acts, on behalf of the run's owner
+      const result = await engine.execute(run.id, { owner, actor: DAEMON_ACTOR });
       resumed.push({ runId: run.id, state: result.run.state, exitCode: result.exitCode });
     } catch (error) {
       if (error instanceof LeaseHeldError) {
@@ -110,7 +112,7 @@ export async function daemonTick(
   };
   runtime.events.emit({
     kind: "daemon.tick",
-    actor: owner,
+    actor: formatActor(DAEMON_ACTOR),
     payload: {
       considered: report.considered,
       resumed: resumed.length,

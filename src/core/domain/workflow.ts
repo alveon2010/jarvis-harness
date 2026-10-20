@@ -76,6 +76,8 @@ export const WorkflowDefinitionSchema = z
     kind: TaskKindSchema.optional(),
     /** The longer workflow a finished run of this one may go on as (`spec` → `sdd`, src/app/handoff.ts). */
     next: z.string().min(1).optional(),
+    /** A run of this workflow delivers itself when done (ADR-0003 §4): `pr` — a push and a pull request. */
+    deliver: z.enum(["pr"]).optional(),
     steps: z.array(StepDefinitionSchema).min(1),
   })
   .superRefine((workflow, ctx) => {

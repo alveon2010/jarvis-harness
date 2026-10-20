@@ -27,6 +27,8 @@ version: 1
 actor:
   id: me@corp.local            # JARVIS_ACTOR важнее; без обоих — git config user.email (ADR-0006)
   display: Maxim
+daemon:
+  actAsOwner: true             # daemon пушит и открывает PR вашими credentials; false — прогон ждёт вас (ADR-0006 §4)
 
 quotaPools:                    # ADR-0018 §4
   corp-default:
@@ -517,6 +519,26 @@ agents:
 Добавленное записывается в журнал событием `budget.grant` с автором и каналом (`cli` / `ui`) и
 прибавляется к лимиту только этого шага этого прогона; конфигурация не меняется.
 
+### Доставка PR (`delivery`)
+
+Как завершённый прогон уходит pull request'ом — `jarvis apply --pr`, «Create PR» на странице, `--deliver pr`
+(ADR-0003 §4). Это решение команды: в `.jarvis/project.yaml`.
+
+```yaml
+delivery:
+  pr: allow                    # allow (по умолчанию) | approve — PR сначала одобряет человек | deny — PR не создаются
+  remote: origin               # куда пушится ветка jarvis/...
+  target: main                 # куда PR; без него — ветка по умолчанию remote'а (origin/HEAD), иначе main
+  capability: bitbucket.pr.create   # если PR умеют открывать несколько MCP-серверов
+  workspace: SHOP              # репозиторий на сервере; без них — из URL remote'а
+  repo: orders-api
+```
+
+PR открывает MCP-сервер с профилем `bitbucket` (`bitbucket.pr.create`, [integrations.md](integrations.md)); push —
+ваш git. При `approve` одобрение — артефакт `pr-request` с заголовком, описанием и ветками, решение пишется с
+актором; прогон с `--deliver pr` ждёт его в `WAITING_HUMAN`. Прогон, читавший недоверенный контент из интернета,
+свой PR без одобрения человека не создаёт и при `allow` (ADR-0016 §4).
+
 ### Режимы `humanGate`
 
 | Режим | На гейте без интерактива |
@@ -639,7 +661,8 @@ services:
 
 ## Переменные окружения
 
-Зарезервированные: `JARVIS_HOME`, `JARVIS_CONFIG`, `JARVIS_PROFILE`, `JARVIS_ACTOR`,
+Зарезервированные: `JARVIS_HOME`, `JARVIS_CONFIG`, `JARVIS_PROFILE`, `JARVIS_ACTOR`, `JARVIS_ON_BEHALF_OF` (в CI —
+автор изменения, от имени которого работает job; ADR-0006 §2),
 `JARVIS_KEYCHAIN_BACKEND`, `JARVIS_KNOWLEDGE` (репа знаний, см. выше) и переменные технического лога `JARVIS_LOG`, `JARVIS_LOG_DIR`,
 `JARVIS_LOG_KEEP_DAYS`, `JARVIS_LOG_MAX_FIELD` (см. [workflows.md](workflows.md#технический-лог)),
 `JARVIS_PROGRESS=off` — без живой строки прогресса в терминале, переменные терминала `JARVIS_INTERACTIVE`,

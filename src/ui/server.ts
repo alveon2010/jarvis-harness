@@ -36,6 +36,16 @@ import {
   rerunRequested,
   waitingCard,
 } from "../app/decide.ts";
+import {
+  type Delivered,
+  DeliveryError,
+  deliverPr,
+  PR_REQUEST,
+  type PrRequest,
+  pendingPrRequest,
+  prOf,
+  prPolicy,
+} from "../app/deliver.ts";
 import { resolveEffect, unresolvedEffectOf } from "../app/effects.ts";
 import { continuedBy } from "../app/handoff.ts";
 import {
@@ -104,6 +114,7 @@ import { knowledgeRootsOf } from "../knowledge/sources.ts";
 import { loadStandards } from "../knowledge/standards.ts";
 import { NOTE_MAX } from "../onboarding/deep.ts";
 import { findNode, type ModuleTree, moduleTree } from "../onboarding/tree.ts";
+import { UnresolvedEffectError } from "../orchestration/effects.ts";
 import type { LocalWorkflowEngine } from "../orchestration/runtime.ts";
 import { deleteBranchKeepingTip, WorktreeError, WorktreeWorkspace } from "../orchestration/worktree.ts";
 import { egressNotices, modelEgressNotices } from "../security/policy/egress.ts";
@@ -510,6 +521,9 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       "contract-rejected": html`<div class="banner ok">${t("The contract stays as agreed; the asking subtask goes on with it")}</div>`,
       "no-request": html`<div class="banner bad">${t("No such contract change request, or it is decided already")}</div>`,
       "apply-failed": html`<div class="banner bad">${t("Not applied:")} ${r.url.searchParams.get("why") ?? t("see jarvis logs")}</div>`,
+      "pr-created": html`<div class="banner ok">${t("Pushed the run's branch and opened the PR")}</div>`,
+      "pr-approve": html`<div class="banner info">${t("The project wants the PR approved first: check it below and approve it")}</div>`,
+      "pr-failed": html`<div class="banner bad">${t("No PR:")} ${r.url.searchParams.get("why") ?? t("see jarvis logs")}</div>`,
       restored: html`<div class="banner ok">${t("The branch is back — apply it, or remove it again")}</div>`,
       "restore-failed": html`<div class="banner bad">${t("The branch could not be restored (a branch of that name exists?)")}</div>`,
       "cleaned-all": html`<div class="banner ok">${t("Checkout and branch removed — the files go in the background")}</div>`,
@@ -739,6 +753,8 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
   const checkoutOn = async (run: Run): Promise<Html | undefined> => {
     const ws = run.workspace;
     if (ws.mode !== "worktree" || !isTerminal(run.state)) return undefined;
+    const pr = prOf(runtime, run);
+    const delivered = pr ? prLinkHtml(pr) : undefined;
     const exists = existsSync(ws.path);
     const branch = ws.branch;
     const branchExists =
@@ -749,8 +765,11 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       const kept =
         !!branch &&
         (await git(["rev-parse", "--verify", "-q", `refs/jarvis/removed/${branch}`], ws.repoRoot)).code === 0;
-      if (!cleaned && !kept) return undefined;
-      return html`<section class="panel" aria-labelledby="checkout"><h2 id="checkout">Checkout</h2>
+      if (!cleaned && !kept)
+        return delivered
+          ? html`<section class="panel" aria-labelledby="checkout"><h2 id="checkout">Checkout</h2>${delivered}</section>`
+          : undefined;
+      return html`<section class="panel" aria-labelledby="checkout"><h2 id="checkout">Checkout</h2>${delivered ?? ""}
 <p class="muted">Removed: no folder and no branch of this run are left.${kept ? html` Its branch's last commit is kept as <code>refs/jarvis/removed/${branch}</code>.` : ""}</p>
 ${kept && actions ? html`<form method="post" action="/runs/${encodeURIComponent(shortRunId(run.id))}/restore-branch"><input type="hidden" name="t" value="${actions.token}"><div class="row"><button type="submit" class="btn">Restore the branch</button><span class="hint">then Apply, or remove it again</span></div></form>` : ""}
 </section>`;
@@ -773,6 +792,7 @@ ${
     ? html`<form method="post" action="/runs/${encodeURIComponent(shortRunId(run.id))}/apply"><input type="hidden" name="t" value="${actions.token}"><div class="row"><button type="submit" class="btn primary">Apply to <code>${current}</code></button><span class="hint">the run's changes as one commit on the branch checked out in the repository, as <code>jarvis apply</code>; not pushed</span></div></form>`
     : ""
 }
+${delivered ?? (actions && branchExists && run.state === "COMPLETED" && prPolicy(runtime) !== "deny" ? createPrHtml(run, actions.token, pendingPrRequest(runtime, run)?.request) : "")}
 ${
   actions
     ? html`<form method="post" action="/runs/${encodeURIComponent(shortRunId(run.id))}/cleanup"><input type="hidden" name="t" value="${actions.token}">
@@ -1594,7 +1614,7 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       });
     }
     const m =
-      /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|restart|redo|clarify|eval|note|pause|cleanup|apply|restore-branch|subtask|contract|scope|tests|steer|effect|conflict)$/.exec(
+      /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|restart|redo|clarify|eval|note|pause|cleanup|apply|pr|restore-branch|subtask|contract|scope|tests|steer|effect|conflict)$/.exec(
         r.url.pathname,
       );
     const run = m ? resolveRun(m[1] as string) : undefined;
@@ -1894,6 +1914,35 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
         return redirect(
           r,
           `/runs/${short}?notice=apply-failed&why=${encodeURIComponent(error.message.slice(0, 600))}`,
+        );
+      }
+    }
+    if (m[2] === "pr") {
+      // as `jarvis apply --pr`: push the run's branch and open its PR (ADR-0003 §4); with
+      // `delivery.pr: approve` the first click shows the PR, «Approve and create PR» sends it
+      if (run.state !== "COMPLETED") return redirect(r, `/runs/${short}?notice=not-ended`);
+      if (run.workspace.mode !== "worktree") return redirect(r, `/runs/${short}?notice=no-checkout`);
+      const who = await actor();
+      if (!who) return redirect(r, `/runs/${short}?notice=actor`);
+      const pending = form.get("confirm") === "1" ? pendingPrRequest(runtime, run) : undefined;
+      if (pending)
+        recordDecision(runtime, run, {
+          actor: who,
+          artifact: pending.artifact,
+          type: PR_REQUEST,
+          decision: "approve",
+          channel: "ui",
+        });
+      try {
+        await deliverPr(runtime, run, { actor: who, channel: "ui" });
+        return redirect(r, `/runs/${short}?notice=pr-created#checkout`);
+      } catch (error) {
+        if (error instanceof DeliveryError && error.code === "approval")
+          return redirect(r, `/runs/${short}?notice=pr-approve#checkout`);
+        if (!(error instanceof DeliveryError || error instanceof UnresolvedEffectError)) throw error;
+        return redirect(
+          r,
+          `/runs/${short}?notice=pr-failed&why=${encodeURIComponent(error.message.slice(0, 600))}#checkout`,
         );
       }
     }
@@ -2485,4 +2534,25 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
         server.closeAllConnections?.();
       }),
   };
+}
+
+/** The PR a run went out as (ADR-0003 §4): its link, and who opened it — for whom, when not themselves. */
+function prLinkHtml(pr: Delivered): Html {
+  const who = pr.actor.replace(/^(user|service|ci):/, "");
+  const behalf = pr.onBehalfOf?.replace(/^(user|service|ci):/, "");
+  return html`<p class="row" data-pr>${t("Pull request:")} ${pr.url ? html`<a href="${pr.url}" rel="noreferrer noopener" target="_blank">${pr.url}</a>` : html`<code>${pr.source}</code> → <code>${pr.target}</code>`} <span class="hint">${t("by {who}", { who })}${behalf ? ` ${t("on behalf of {who}", { who: behalf })}` : ""}</span></p>`;
+}
+
+/**
+ * «Create PR» next to Apply; with `delivery.pr: approve`, after the first click, the PR as it will go
+ * out and «Approve and create PR».
+ */
+function createPrHtml(run: Run, token: string, pending: PrRequest | undefined): Html {
+  const action = `/runs/${encodeURIComponent(shortRunId(run.id))}/pr`;
+  if (pending)
+    return html`<form method="post" action="${action}" data-pr-request><input type="hidden" name="t" value="${token}"><input type="hidden" name="confirm" value="1">
+<p><b>${pending.title}</b> <span class="hint"><code>${pending.source}</code> → <code>${pending.target}</code></span></p>
+<details><summary>${t("Description")}</summary><pre style="white-space:pre-wrap">${pending.description}</pre></details>
+<div class="row"><button type="submit" class="btn primary">${t("Approve and create PR")}</button><span class="hint">${t("the approval is recorded as yours")}</span></div></form>`;
+  return html`<form method="post" action="${action}"><input type="hidden" name="t" value="${token}"><div class="row"><button type="submit" class="btn">${t("Create PR")}</button><span class="hint">${th("pushes the run's branch and opens a pull request through the MCP server, as {cmd}", { cmd: html`<code>jarvis apply --pr</code>` })}</span></div></form>`;
 }

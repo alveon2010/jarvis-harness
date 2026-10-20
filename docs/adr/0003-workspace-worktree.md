@@ -1,6 +1,9 @@
 # ADR-0003: Изоляция workspace — git worktree на каждый Run
 
-- Статус: принято
+- Статус: принято; §4 сделан целиком: `jarvis apply <run> --pr`, «Create PR» на странице прогона, сам прогон
+  с `--deliver pr` / `deliver: pr` (код — `src/app/deliver.ts`), политика `delivery.pr`
+- Не сделано: создание PR через локальный `gh` (у PR-capability есть только MCP-реализация, `gh` в модель
+  инструментов не вписывается — мимо egress-политики и журнала эффектов); профиля GitHub для MCP пока нет
 - Дата: 2026-10-03
 - Основание: [ADR-0001](0001-target-architecture.md) §4 (`Run.workspace`), §13 («Repo patch ограничивается
   текущим workspace и policy»), §15 (Git / CI), §19 (resume с checkpoint); [ADR-0002](0002-run-effects-and-lease.md)
@@ -76,6 +79,28 @@ Checkpoint в RunStore хранит sha. Resume:
 | `jarvis diff <run>` | показать diff против `baseCommit` | чтение |
 
 Policy проекта может запретить `--pr` или потребовать human approval (ADR-0001 §13).
+
+Как сделано (`src/app/deliver.ts`):
+
+- В remote уходит не служебная история ветки, а один коммит: дерево ветки Run поверх `baseCommit`
+  (`git commit-tree` с датой последнего checkpoint'а — тот же Run даёт тот же sha, ключ эффекта не меняется).
+  Push — `git push <remote> <sha>:refs/heads/jarvis/...` git'ом пользователя (его credential helper или
+  ssh-agent); токенов в аргументах, журнале и событиях нет.
+- PR открывает capability `*.pr.create` настроенного MCP-сервера (сейчас профиль `bitbucket`); если таких
+  несколько — `delivery.capability`. Репозиторий на сервере — из URL remote'а (`delivery.workspace`/`repo`
+  важнее), целевая ветка — `--target`, `delivery.target`, `origin/HEAD`, иначе `main`.
+- Push и PR — два эффекта шага `deliver` по ADR-0002: `git.push` проверяется `git ls-remote`, PR — по маркеру
+  в описании (`verify` профиля). Повторный запрос ничего не шлёт: PR уже записан артефактом `pull-request`
+  (ссылка, кто и от чьего имени), событие `run.delivered`.
+- Заголовок — `--title`, иначе `title` спеки, иначе первая строка задачи; описание — summary и цели спеки,
+  summary реализации, список файлов и нейтральная строка «Prepared by Jarvis, run <id>.» (за ней маркер).
+- `delivery.pr: allow | approve | deny` (по умолчанию `allow`). `approve` — PR сначала показывается
+  человеку (артефакт `pr-request`), одобрение записывается на него; `deny` — отказ (выход 12 в CLI).
+- Сам Run создаёт PR после успешного конца workflow, если у него `delivery: pr` (`jarvis work --deliver pr`)
+  или у workflow `deliver: pr`. При `approve` (и когда Run читал недоверенный контент из интернета,
+  ADR-0016 §4) он паркуется в `WAITING_HUMAN` на одобрении `pr-request`, daemon продолжает после решения.
+  PR, который не получился (отказ политики, нет сервера, ошибка), работу не отменяет: Run `COMPLETED` с
+  причиной в `stateReason`, PR можно создать со страницы.
 
 ### 5. Режим `cwd` (CI)
 

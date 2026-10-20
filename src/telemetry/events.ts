@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { DatabaseSync } from "node:sqlite";
 
 /** Append-only event log (ADR-0018 §2). Payloads must already be redacted (ADR-0010). */
@@ -7,8 +8,45 @@ export interface JarvisEvent {
   readonly stepId?: string;
   readonly iteration?: number;
   readonly actor?: string;
+  /** ADR-0006 §2: whose run the actor acts for when it is not the owner (the daemon resuming it). */
+  readonly onBehalfOf?: string;
   readonly payload?: Record<string, unknown>;
   readonly ts?: string;
+}
+
+/** Who acts while some code runs: `user:…`, `service:daemon`, `ci:…`, and for whom. */
+export interface ActingAs {
+  readonly actor: string;
+  readonly onBehalfOf?: string;
+}
+
+const acting = new AsyncLocalStorage<ActingAs>();
+
+/**
+ * Runs `fn` with `who` as the actor of every event emitted inside it that names none (ADR-0006 §2):
+ * a model call or a tool call deep in a step is attributed without each emitter knowing the run.
+ */
+export function actingAs<T>(who: ActingAs, fn: () => T): T {
+  return acting.run(who, fn);
+}
+
+export function currentActing(): ActingAs | undefined {
+  return acting.getStore();
+}
+
+/**
+ * The event as it is stored: the acting actor when it names none; `onBehalfOf` only when the actor is
+ * the acting one — a person's decision recorded inside a daemon's tick is theirs, for nobody else.
+ */
+export function attributed(event: JarvisEvent, who: ActingAs | undefined = currentActing()): JarvisEvent {
+  if (!who) return event;
+  const actor = event.actor ?? who.actor;
+  const onBehalfOf = event.onBehalfOf ?? (actor === who.actor ? who.onBehalfOf : undefined);
+  return {
+    ...event,
+    actor,
+    ...(onBehalfOf && onBehalfOf !== actor ? { onBehalfOf } : {}),
+  };
 }
 
 export interface StoredEvent extends JarvisEvent {
@@ -33,11 +71,12 @@ export class SqliteEventStore implements EventSink {
     this.tap = tap;
   }
 
-  emit(event: JarvisEvent): void {
+  emit(raw: JarvisEvent): void {
+    const event = attributed(raw);
     this.db
       .prepare(
-        `INSERT INTO events (ts, run_id, step_id, iteration, actor, kind, payload_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO events (ts, run_id, step_id, iteration, actor, on_behalf_of, kind, payload_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         event.ts ?? new Date().toISOString(),
@@ -45,6 +84,7 @@ export class SqliteEventStore implements EventSink {
         event.stepId ?? null,
         event.iteration ?? null,
         event.actor ?? null,
+        event.onBehalfOf ?? null,
         event.kind,
         event.payload ? JSON.stringify(event.payload) : null,
       );
@@ -92,7 +132,7 @@ export class SqliteEventStore implements EventSink {
     params.push(options.limit ?? 1000);
     const rows = this.db
       .prepare(
-        `SELECT seq, ts, run_id, step_id, iteration, actor, kind, payload_json
+        `SELECT seq, ts, run_id, step_id, iteration, actor, on_behalf_of, kind, payload_json
          FROM events WHERE ${clauses.join(" AND ")} ORDER BY seq ${options.latest ? "DESC" : "ASC"} LIMIT ?`,
       )
       .all(...params) as Array<{
@@ -102,6 +142,7 @@ export class SqliteEventStore implements EventSink {
       step_id: string | null;
       iteration: number | null;
       actor: string | null;
+      on_behalf_of: string | null;
       kind: string;
       payload_json: string | null;
     }>;
@@ -114,6 +155,7 @@ export class SqliteEventStore implements EventSink {
       ...(r.step_id ? { stepId: r.step_id } : {}),
       ...(r.iteration !== null ? { iteration: r.iteration } : {}),
       ...(r.actor ? { actor: r.actor } : {}),
+      ...(r.on_behalf_of ? { onBehalfOf: r.on_behalf_of } : {}),
       ...(r.payload_json ? { payload: JSON.parse(r.payload_json) as Record<string, unknown> } : {}),
     }));
   }
@@ -122,7 +164,8 @@ export class SqliteEventStore implements EventSink {
 export class MemoryEventStore implements EventSink {
   readonly events: JarvisEvent[] = [];
 
-  emit(event: JarvisEvent): void {
+  emit(raw: JarvisEvent): void {
+    const event = attributed(raw);
     this.events.push({ ...event, ts: event.ts ?? new Date().toISOString() });
   }
 }

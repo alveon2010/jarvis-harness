@@ -1501,6 +1501,20 @@ export const RU: Readonly<Record<string, string>> = {
   "went on without the failed checks": "пошёл дальше без упавших проверок",
   "resumed from {state}": "возобновлён из {state}",
   started: "запущен",
+  // ---- adr-0003-0006-delivery-actor
+  "on behalf of {who}": "от имени {who}",
+  "Create PR": "Создать PR",
+  "Approve and create PR": "Одобрить и создать PR",
+  "the approval is recorded as yours": "одобрение запишется на вас",
+  "pushes the run's branch and opens a pull request through the MCP server, as {cmd}":
+    "пушит ветку прогона и открывает pull request через MCP-сервер, как {cmd}",
+  "Pull request:": "Pull request:",
+  Description: "Описание",
+  "PR opened": "Открыт PR",
+  "No PR:": "PR не создан:",
+  "Pushed the run's branch and opened the PR": "Ветка прогона запушена, PR открыт",
+  "The project wants the PR approved first: check it below and approve it":
+    "В проекте PR сначала одобряют: проверьте его ниже и одобрите",
 };
 
 /**

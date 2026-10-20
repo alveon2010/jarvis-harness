@@ -120,6 +120,15 @@ function parseKind(value: string): TaskKind {
   return parsed.data;
 }
 
+const DELIVER_HELP =
+  'when the workflow is done: "pr" — push the branch and open the pull request without waiting for you (delivery.pr applies)';
+
+/** `--deliver pr`: the run delivers itself when done (ADR-0003 §4). */
+function parseDeliver(value: string): "pr" {
+  if (value.trim() !== "pr") throw new InvalidArgumentError(`expected pr; got ${value}`);
+  return "pr";
+}
+
 function silenceSqliteWarning(): void {
   const listeners = process.listeners("warning");
   process.removeAllListeners("warning");
@@ -235,10 +244,18 @@ export function buildProgram(options: RunOptions = {}): Command {
     .option("--no-run", "only create the run")
     .option("--fresh <sources>", FRESH_HELP, parseFresh)
     .option("--kind <kind>", KIND_HELP, parseKind)
+    .option("--deliver <how>", DELIVER_HELP, parseDeliver)
     .action(
       async (
         task: string,
-        opts: { workflow: string; run: boolean; base?: string; fresh?: FreshSource[]; kind?: TaskKind },
+        opts: {
+          workflow: string;
+          run: boolean;
+          base?: string;
+          fresh?: FreshSource[];
+          kind?: TaskKind;
+          deliver?: "pr";
+        },
       ) => {
         await runWork(ctxFor(), task, {
           workflow: opts.workflow,
@@ -246,6 +263,7 @@ export function buildProgram(options: RunOptions = {}): Command {
           ...(opts.base ? { base: opts.base } : {}),
           ...(opts.fresh ? { fresh: opts.fresh } : {}),
           ...(opts.kind ? { kind: opts.kind } : {}),
+          ...(opts.deliver ? { deliver: opts.deliver } : {}),
         });
       },
     );
@@ -416,11 +434,25 @@ export function buildProgram(options: RunOptions = {}): Command {
 
   program
     .command("apply <run>")
-    .description("squash the run's branch onto the current branch of the main repository (ADR-0003 §4)")
+    .description(
+      "squash the run's branch onto the current branch of the main repository, or with --pr push it and open a pull request (ADR-0003 §4)",
+    )
     .option("--message <text>", "commit message")
-    .action(async (run: string, opts: { message?: string }) => {
-      await runApply(ctxFor(), run, opts);
-    });
+    .option("--pr", "push the run's branch and open a pull request through the MCP server instead")
+    .option("--title <text>", "the PR's title (default: the spec's, else the task)")
+    .option(
+      "--target <branch>",
+      "the branch the PR goes into (default: delivery.target, else the remote's default)",
+    )
+    .option("-y, --yes", "delivery.pr: approve — approve the PR as shown without asking")
+    .action(
+      async (
+        run: string,
+        opts: { message?: string; pr?: boolean; title?: string; target?: string; yes?: boolean },
+      ) => {
+        await runApply(ctxFor(), run, opts);
+      },
+    );
 
   program
     .command("gc")

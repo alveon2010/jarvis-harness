@@ -136,6 +136,11 @@ export const RunOptionsSchema = z.strictObject({
   fresh: z.array(FreshSourceSchema).optional(),
   /** A subtask of a task across services (ADR-0025 §6): its master run and its key in the split. */
   parent: z.strictObject({ runId: z.string().min(1), key: z.string().min(1) }).optional(),
+  /**
+   * How the run delivers itself once its workflow is done (ADR-0003 §4): `pr` — the run pushes its
+   * branch and opens the PR itself instead of waiting for a person's Apply (`jarvis work --deliver pr`).
+   */
+  delivery: z.enum(["pr"]).optional(),
 });
 export type RunOptions = z.infer<typeof RunOptionsSchema>;
 

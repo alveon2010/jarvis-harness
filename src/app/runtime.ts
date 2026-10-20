@@ -118,6 +118,7 @@ export function createRuntime(loaded: LoadedConfig, options: RuntimeOptions = {}
       ...(event.stepId ? { stepId: event.stepId } : {}),
       ...(event.iteration !== undefined ? { iteration: event.iteration } : {}),
       ...(event.actor ? { actor: event.actor } : {}),
+      ...(event.onBehalfOf ? { onBehalfOf: event.onBehalfOf } : {}),
       ...(event.payload ? { payload: event.payload } : {}),
     });
   });

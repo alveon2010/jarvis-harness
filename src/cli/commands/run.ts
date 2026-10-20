@@ -4,6 +4,7 @@ import { clock } from "../../app/activity.ts";
 import { applyRun } from "../../app/applyRun.ts";
 import { changedSince, filesReadIn, nextWorkflowOf } from "../../app/continuation.ts";
 import { awaitedArtifact, DecisionTakenError, recordDecision } from "../../app/decide.ts";
+import { DeliveryError, deliverPr, PR_REQUEST, preparePr, prOf, prPolicy } from "../../app/deliver.ts";
 import { createEngine } from "../../app/engine.ts";
 import { canForget, forgetRuns } from "../../app/forget.ts";
 import { continuationStep, continuedBy, handOff } from "../../app/handoff.ts";
@@ -23,11 +24,13 @@ import type { FreshSource, Run, TaskKind, WorkspaceRef } from "../../core/domain
 import { layoutOf, rootRelative, versionedAt } from "../../core/paths.ts";
 import { recordInputs, recordKnowledgeRepoInputs } from "../../evals/inputs.ts";
 import { daemonTick } from "../../orchestration/daemon.ts";
+import { UnresolvedEffectError } from "../../orchestration/effects.ts";
 import { interruption } from "../../orchestration/interrupt.ts";
 import { leaseOwner } from "../../orchestration/lease.ts";
 import { exitCodeFor, type LocalWorkflowEngine } from "../../orchestration/runtime.ts";
 import { LeaseHeldError } from "../../orchestration/types.ts";
 import { gitIdentityEnv, WorktreeError, WorktreeWorkspace } from "../../orchestration/worktree.ts";
+import { effectMarker } from "../../storage/effects.ts";
 import { LeaseLostError, newRunId, shortRunId } from "../../storage/runStore.ts";
 import { git } from "../../tools/local/exec.ts";
 import {
@@ -751,6 +754,8 @@ export async function runWork(
     base?: string;
     fresh?: readonly FreshSource[];
     kind?: TaskKind;
+    /** `--deliver pr`: the run opens its own PR when its workflow is done (ADR-0003 §4). */
+    deliver?: "pr";
   },
 ): Promise<void> {
   const loaded = await loadForCli(ctx);
@@ -802,6 +807,7 @@ export async function runWork(
       ...((o) => (Object.keys(o).length > 0 ? { options: o } : {}))({
         ...(options.fresh?.length ? { fresh: [...options.fresh] } : {}),
         ...(options.kind ? { kind: options.kind } : {}),
+        ...(options.deliver ? { delivery: options.deliver } : {}),
       }),
     });
     runtime.events.emit({
@@ -1083,8 +1089,18 @@ export async function runDiff(ctx: CliContext, ref: string): Promise<void> {
   }
 }
 
+export interface ApplyOptions {
+  readonly message?: string;
+  /** Deliver as a pull request instead: push the branch, open the PR (ADR-0003 §4). */
+  readonly pr?: boolean;
+  readonly title?: string;
+  readonly target?: string;
+  /** `delivery.pr: approve` without a terminal: the person approves the PR as shown. */
+  readonly yes?: boolean;
+}
+
 /** `jarvis apply <run>` — squash the run branch onto the current branch (ADR-0003 §4). */
-export async function runApply(ctx: CliContext, ref: string, options: { message?: string }): Promise<void> {
+export async function runApply(ctx: CliContext, ref: string, options: ApplyOptions): Promise<void> {
   const loaded = await loadForCli(ctx);
   const runtime = createRuntime(loaded, { env: ctx.env });
   try {
@@ -1094,6 +1110,10 @@ export async function runApply(ctx: CliContext, ref: string, options: { message?
       throw new CliExit(EXIT.error);
     }
     const actor = await actorFor(ctx, runtime);
+    if (options.pr) {
+      await applyAsPr(ctx, runtime, run, actor, options);
+      return;
+    }
     try {
       const result = await applyRun(runtime, run, actor, ctx.env, options.message);
       ctx.out.result({ run: run.id, ...result }, () => {
@@ -1110,6 +1130,82 @@ export async function runApply(ctx: CliContext, ref: string, options: { message?
     }
   } finally {
     await runtime.close();
+  }
+}
+
+/**
+ * `jarvis apply <run> --pr`: the run's changes pushed as its branch and a PR opened through the MCP
+ * server (src/app/deliver.ts). With `delivery.pr: approve` the PR is shown first and the person says
+ * yes — at a terminal, or with `--yes`; the approval is recorded as theirs.
+ */
+async function applyAsPr(
+  ctx: CliContext,
+  runtime: Runtime,
+  run: Run,
+  actor: Actor,
+  options: ApplyOptions,
+): Promise<void> {
+  if (run.state !== "COMPLETED") {
+    ctx.out.error(`the run is ${run.state}: a PR is made of a completed run`);
+    throw new CliExit(EXIT.error);
+  }
+  const wanted = {
+    ...(options.title ? { title: options.title } : {}),
+    ...(options.target ? { target: options.target } : {}),
+  };
+  try {
+    if (prPolicy(runtime) === "approve" && !prOf(runtime, run)) {
+      const { artifact, request } = await preparePr(runtime, run, wanted);
+      if (!runtime.artifacts.isApproved(artifact.artifactId).approved) {
+        ctx.out.line(`${ctx.out.style.heading(request.title)}  ${request.source} → ${request.target}`);
+        ctx.out.line(ctx.out.style.muted(request.description));
+        let yes = options.yes === true;
+        if (!yes) {
+          const prompt = promptFor(ctx, runtime);
+          if (!prompt) {
+            ctx.out.error(
+              "the project wants the PR approved first (delivery.pr: approve): add --yes to approve it as shown",
+            );
+            throw new CliExit(EXIT.waitingHuman);
+          }
+          try {
+            yes = /^y(es)?$/i.test((await prompt.ask("Create this PR? [y/N] ")) ?? "");
+          } finally {
+            prompt.close();
+          }
+        }
+        if (!yes) {
+          ctx.out.line("no PR created");
+          return;
+        }
+        recordDecision(runtime, run, {
+          actor,
+          artifact,
+          type: PR_REQUEST,
+          decision: "approve",
+          channel: "cli",
+        });
+      }
+    }
+    const done = await deliverPr(runtime, run, { actor, channel: "cli", ...wanted });
+    ctx.out.result({ run: run.id, ...done }, () => {
+      const where = done.url ?? `${done.source} → ${done.target}`;
+      ctx.out.line(
+        done.already ? `already delivered: ${where}` : `pushed ${done.source} and opened the PR: ${where}`,
+      );
+    });
+  } catch (error) {
+    if (error instanceof DeliveryError) {
+      ctx.out.error(error.message);
+      throw new CliExit(error.code === "denied" ? EXIT.policyDenied : EXIT.error);
+    }
+    if (error instanceof UnresolvedEffectError) {
+      ctx.out.error(
+        `${error.message}: look for "${effectMarker(run.id, error.record.key)}" on the remote branch or in the PRs, then run this again`,
+      );
+      throw new CliExit(EXIT.error);
+    }
+    throw error;
   }
 }
 

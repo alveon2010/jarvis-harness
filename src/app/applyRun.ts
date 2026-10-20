@@ -21,17 +21,7 @@ export async function applyRun(
   const ws = run.workspace;
   const identity = { name: actor.display ?? actor.id, email: actor.id };
   const wt = new WorktreeWorkspace(ws, env, identity);
-  if (existsSync(ws.path) && runtime.loaded.config.human.review.removeMarkersAfterApproval) {
-    // ADR-0019 §5: markers leave the code once the work is approved; threads stay in the store.
-    const stripped = await removeMarkers(ws.path);
-    if (stripped.length > 0) {
-      await wt.checkpoint("jarvis: remove review markers", {
-        "Jarvis-Run": run.id,
-        "Jarvis-Kind": "review-cleanup",
-      });
-      runtime.events.emit({ kind: "review.markersRemoved", runId: run.id, payload: { files: stripped } });
-    }
-  }
+  await removeReviewMarkers(runtime, run, wt);
   const trailer = `Jarvis-Run: ${run.id}`;
   // the subject: the task's first line, short (the task may be a paragraph)
   const first = (run.task.split("\n")[0] ?? run.task).trim();
@@ -49,4 +39,20 @@ export async function applyRun(
     payload: { commit: result.commit, files: result.files.length },
   });
   return result;
+}
+
+/**
+ * ADR-0019 §5: markers leave the code once the work is approved, before it goes anywhere (Apply or a
+ * PR); the threads stay in the store.
+ */
+export async function removeReviewMarkers(runtime: Runtime, run: Run, wt: WorktreeWorkspace): Promise<void> {
+  const ws = run.workspace;
+  if (!existsSync(ws.path) || !runtime.loaded.config.human.review.removeMarkersAfterApproval) return;
+  const stripped = await removeMarkers(ws.path);
+  if (stripped.length === 0) return;
+  await wt.checkpoint("jarvis: remove review markers", {
+    "Jarvis-Run": run.id,
+    "Jarvis-Kind": "review-cleanup",
+  });
+  runtime.events.emit({ kind: "review.markersRemoved", runId: run.id, payload: { files: stripped } });
 }

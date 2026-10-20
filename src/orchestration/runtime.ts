@@ -1,6 +1,7 @@
 import { reasonOf } from "../app/activity.ts";
 import { proposeGlossaryCandidates } from "../app/candidates.ts";
 import { goOnRequested, rerunBackTo } from "../app/decide.ts";
+import { DeliveryError, deliverPr, deliversItself, PR_REQUEST, prOf } from "../app/deliver.ts";
 import { checkMasterBudget } from "../app/masterBudget.ts";
 import { pausedText, pauseRequested } from "../app/pause.ts";
 import { pendingRedo } from "../app/redo.ts";
@@ -11,6 +12,8 @@ import { checksAskOf, pauseAfterRequested } from "../app/steer.ts";
 import { syncEditable } from "../artifacts/editable.ts";
 import { BudgetExceededError, BudgetedGateway } from "../budget/runBudget.ts";
 import { EXIT } from "../cli/output.ts";
+import { onBehalfOfFromEnv } from "../core/actor/resolve.ts";
+import { type Actor, formatActor, parseActorId } from "../core/domain/actor.ts";
 import type { Run, RunState } from "../core/domain/run.ts";
 import { isTerminal } from "../core/domain/run.ts";
 import {
@@ -32,6 +35,7 @@ import { afterAnalysis, afterImplementation } from "../interaction/review/lifecy
 import { ModelError } from "../models/errors.ts";
 import { effectMarker } from "../storage/effects.ts";
 import { LeaseLostError } from "../storage/runStore.ts";
+import { actingAs, currentActing } from "../telemetry/events.ts";
 import { errorFields } from "../telemetry/log.ts";
 import { git } from "../tools/local/exec.ts";
 import { UnresolvedEffectError } from "./effects.ts";
@@ -68,6 +72,19 @@ export interface ExecuteOptions {
   readonly owner: string;
   /** Take the lease even if another process holds it (recorded with the actor by the caller). */
   readonly steal?: boolean;
+  /**
+   * Who drives this execution (ADR-0006 §2): the daemon resuming a run, a CI job; the run's owner when
+   * unset. Every event of the execution names it, and the owner as `onBehalfOf` when it is not them.
+   */
+  readonly actor?: Actor;
+  /** Whose run it is done for, when not the run's owner (CI: the change's author). */
+  readonly onBehalfOf?: Actor;
+}
+
+/** Who acts in one execution, and for whom (ADR-0006 §2). */
+interface Driver {
+  readonly actor: Actor;
+  readonly onBehalfOf?: Actor;
 }
 
 /** ADR-0009 §3: a FAILED run whose reason is a policy refusal exits 12, not 1. */
@@ -104,6 +121,8 @@ export class LocalWorkflowEngine {
   private readonly workspaces: WorkspaceFactory;
   private readonly leaseOptions: HeldLeaseOptions;
   private readonly clock: () => Date;
+  /** The actor of each execution under way, by run: the delivery at its end acts as them. */
+  private readonly drivers = new Map<string, Driver>();
 
   constructor(options: EngineOptions) {
     this.rt = options.runtime;
@@ -139,6 +158,33 @@ export class LocalWorkflowEngine {
 
   /** Starts a CREATED run or resumes a resumable one; returns when the run parks or ends. */
   async execute(runId: string, options: ExecuteOptions): Promise<ExecutionResult> {
+    const driver = this.driverOf(this.rt.runs.require(runId), options);
+    const onBehalfOf = driver.onBehalfOf ? formatActor(driver.onBehalfOf) : undefined;
+    this.drivers.set(runId, driver);
+    try {
+      return await actingAs({ actor: formatActor(driver.actor), ...(onBehalfOf ? { onBehalfOf } : {}) }, () =>
+        this.executeAs(runId, options),
+      );
+    } finally {
+      this.drivers.delete(runId);
+    }
+  }
+
+  /** The daemon acts for the run's owner; a CI job for the change's author when the job names one. */
+  private driverOf(run: Run, options: ExecuteOptions): Driver {
+    const actor = options.actor ?? run.owner;
+    const fromEnv = actor.kind === "ci" ? onBehalfOfFromEnv(this.rt.env) : undefined;
+    const behalf =
+      options.onBehalfOf ??
+      (formatActor(actor) !== formatActor(run.owner)
+        ? run.owner
+        : fromEnv
+          ? parseActorId(fromEnv)
+          : undefined);
+    return { actor, ...(behalf && formatActor(behalf) !== formatActor(actor) ? { onBehalfOf: behalf } : {}) };
+  }
+
+  private async executeAs(runId: string, options: ExecuteOptions): Promise<ExecutionResult> {
     let run = this.rt.runs.require(runId);
     if (isTerminal(run.state)) return { run, exitCode: exitCodeFor(run.state, run.stateReason) };
     const workflow = this.workflow(run.workflow);
@@ -196,6 +242,11 @@ export class LocalWorkflowEngine {
         }
         const step = findStep(workflow, run.currentStep as string);
         const iteration = run.currentIteration;
+        if (this.deliveryPending(run)) {
+          // the workflow was done; the run waited before its PR (an approval, the owner, an effect)
+          run = await this.complete(run, step, iteration, lease, workspace, "workflow done");
+          break;
+        }
         if (interruption.requested) {
           // Ctrl-C between steps: park before the next one
           run = await this.park(run, step, iteration, interrupted(), workspace);
@@ -270,7 +321,7 @@ export class LocalWorkflowEngine {
           this.emit(run, "run.state", { state: run.state });
           break;
         }
-        const next = await this.advance(run, step, iteration, outcome, workspace);
+        const next = await this.advance(run, step, iteration, outcome, workspace, lease);
         run = next.run;
         if (next.stop) break;
       }
@@ -416,6 +467,7 @@ export class LocalWorkflowEngine {
     iteration: number,
     outcome: StepOutcome,
     workspace: Workspace,
+    lease: HeldLease,
   ): Promise<{ run: Run; stop: boolean }> {
     if (outcome.status === "success") this.reviewHooks(run, step, outcome);
     let transition: ReturnType<typeof selectTransition>;
@@ -519,11 +571,10 @@ export class LocalWorkflowEngine {
         kind: "step",
         ...(headCommit ? { headCommit } : {}),
       });
-      const done = this.rt.runs.transition(run.id, "COMPLETED", { reason: "workflow done" });
-      this.emit(done, "run.state", { state: done.state });
-      noteEvalCandidate(this.rt, done);
-      this.completed(done);
-      return { run: done, stop: true };
+      return {
+        run: await this.complete(run, step, iteration, lease, workspace, "workflow done"),
+        stop: true,
+      };
     }
     if (transition.to === STEP_FAIL) {
       this.rt.checkpoints.save({
@@ -606,6 +657,107 @@ export class LocalWorkflowEngine {
       `one more round from ${to} costs about ${cost.outputTokens} output tokens (the median of ${cost.rounds}); pool ${cost.pool} has not that left: ${decision.reason ?? "its window is full"}`,
       { resumeAfter: decision.resetAt, checkpointState: { roundCost: cost } },
     );
+  }
+
+  /* ---- the end, and the delivery that may come with it (ADR-0003 §4) ---- */
+
+  /**
+   * COMPLETED — after the run's own PR when it delivers itself (`--deliver pr`, workflow `deliver: pr`).
+   * The PR waiting for a person (an approval, the owner's credentials, an effect nobody can tell) parks
+   * the run; one that cannot be made does not undo the work: the run completes and says why, and a
+   * person creates the PR from its page.
+   */
+  private async complete(
+    run: Run,
+    step: StepDefinition,
+    iteration: number,
+    lease: HeldLease,
+    workspace: Workspace,
+    reason: string,
+  ): Promise<Run> {
+    let why = reason;
+    if (deliversItself(run, this.workflow(run.workflow)) && !prOf(this.rt, run)) {
+      const driver = this.drivers.get(run.id) ?? { actor: run.owner };
+      try {
+        await deliverPr(this.rt, run, {
+          actor: driver.actor,
+          ...(driver.onBehalfOf ? { onBehalfOf: driver.onBehalfOf } : {}),
+          channel: "run",
+          lease,
+        });
+        this.closeDeliveryThread(run);
+      } catch (error) {
+        const suspend = this.deliverySuspension(error, run, step, iteration);
+        if (suspend) return this.park(run, step, iteration, suspend, workspace);
+        if (error instanceof LeaseLostError) throw error;
+        const message = error instanceof Error ? error.message : String(error);
+        this.closeDeliveryThread(run);
+        this.emit(run, "delivery.failed", {
+          reason: message,
+          ...(error instanceof DeliveryError ? { code: error.code } : {}),
+        });
+        why = `${reason}; no PR: ${message}`;
+      }
+    }
+    const done = this.rt.runs.transition(run.id, "COMPLETED", { reason: why });
+    this.emit(done, "run.state", { state: done.state, ...(why !== reason ? { reason: why } : {}) });
+    noteEvalCandidate(this.rt, done);
+    this.completed(done);
+    return done;
+  }
+
+  /** The run's workflow is done and it waits before its own PR. */
+  private deliveryPending(run: Run): boolean {
+    return this.rt.checkpoints.latest(run.id)?.state.delivery === "pending";
+  }
+
+  /** Where the PR waits for a person, the run waits with it; undefined when it does not wait. */
+  private deliverySuspension(
+    error: unknown,
+    run: Run,
+    step: StepDefinition,
+    iteration: number,
+  ): SuspendRun | undefined {
+    const pending = { delivery: "pending" };
+    if (error instanceof DeliveryError && error.code === "approval" && error.request) {
+      const request = error.request;
+      const contentRef = `${request.artifactId}@${request.version}`;
+      const thread =
+        this.rt.interactions.openFor(run.id, "approval") ??
+        this.rt.interactions.open({
+          runId: run.id,
+          kind: "approval",
+          stepId: step.id,
+          iteration,
+          contentRef,
+          openedBy: "runtime",
+          meta: { artifactType: PR_REQUEST },
+        });
+      return new SuspendRun("WAITING_HUMAN", error.message, {
+        checkpointState: {
+          ...pending,
+          awaitingApproval: { artifactId: request.artifactId, version: request.version, type: PR_REQUEST },
+        },
+        waitingFor: { kind: "approval", interactionId: thread.id, detail: PR_REQUEST },
+      });
+    }
+    if (error instanceof DeliveryError && error.code === "credentials")
+      return new SuspendRun("WAITING_HUMAN", error.message, { checkpointState: pending });
+    const suspend = this.toSuspension(error, run);
+    if (!suspend) return undefined;
+    return new SuspendRun(suspend.state, suspend.reason, {
+      ...(suspend.resumeAfter ? { resumeAfter: suspend.resumeAfter } : {}),
+      ...(suspend.waitingFor ? { waitingFor: suspend.waitingFor } : {}),
+      checkpointState: { ...suspend.checkpointState, ...pending },
+    });
+  }
+
+  private closeDeliveryThread(run: Run): void {
+    const open = this.rt.interactions.openFor(run.id, "approval");
+    if (!open || open.meta?.artifactType !== PR_REQUEST) return;
+    const request = this.rt.artifacts.listLatest(run.id, PR_REQUEST)[0];
+    const decision = request ? this.rt.artifacts.approvalsFor(request.artifactId)[0] : undefined;
+    this.rt.interactions.close(open.id, "resolved", decision?.actor.id ?? "human", open.contentRef);
   }
 
   /* ---- entering and parking ---- */
@@ -908,7 +1060,8 @@ export class LocalWorkflowEngine {
       runId: run.id,
       ...(run.currentStep ? { stepId: run.currentStep } : {}),
       iteration: run.currentIteration,
-      actor: `${run.owner.kind}:${run.owner.id}`,
+      // inside an execution its driver names itself (the daemon, for the owner); outside, the owner
+      ...(currentActing() ? {} : { actor: formatActor(run.owner) }),
       payload,
     });
   }

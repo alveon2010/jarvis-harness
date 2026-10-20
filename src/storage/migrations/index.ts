@@ -260,6 +260,14 @@ CREATE TABLE knowledge_vectors (
 ALTER TABLE runs ADD COLUMN options_json TEXT;
 `,
   },
+  {
+    version: 6,
+    name: "events_on_behalf_of",
+    sql: `
+-- ADR-0006 §2: an event done by someone other than the run's owner (the daemon) names whose run it is.
+ALTER TABLE events ADD COLUMN on_behalf_of TEXT;
+`,
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;

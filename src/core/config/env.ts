@@ -18,6 +18,8 @@ export const RESERVED_ENV = new Set([
   "JARVIS_HOME",
   "JARVIS_PROFILE",
   "JARVIS_ACTOR",
+  // whose change a CI job runs for (ADR-0006 §2, src/core/actor/resolve.ts)
+  "JARVIS_ON_BEHALF_OF",
   "JARVIS_CONFIG",
   "JARVIS_KEYCHAIN_BACKEND",
   // the knowledge repository of services without .jarvis (src/core/config/meta.ts, ADR-0025 §3)

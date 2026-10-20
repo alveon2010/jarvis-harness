@@ -1,6 +1,10 @@
 # ADR-0006: Идентичность актора в Run и audit trail
 
-- Статус: принято
+- Статус: принято; §2–4 сделаны: `actor` и `onBehalfOf` у событий (контекст исполнения,
+  `src/telemetry/events.ts`), daemon — `service:daemon` от имени владельца, CI — `JARVIS_ON_BEHALF_OF`,
+  `daemon.actAsOwner`, «от имени» в ленте прогона
+- Не сделано: `agentId` отдельным полем события (он в payload `model.call`); `actor` в таблице `effects` —
+  кто исполнил эффект, видно по его событиям `effect.*` и артефакту `pull-request`
 - Дата: 2026-10-03
 - Основание: [ADR-0001](0001-target-architecture.md) §3 (переход к shared runtime), §13 («каждый tool call
   имеет run/agent identity и audit trail», «credentials и MCP auth никогда не передаются модели»);
@@ -62,6 +66,19 @@ MCP- и git-credentials хранятся в keychain/credential helper поль�
 Нет аутентификации, ролей и прав — local-first, один пользователь. Policy Engine не принимает решений по
 актору (кроме `kind = ci` → non-interactive профиль, ADR-0009). Это осознанно: схема готова, логика
 появится вместе с backend.
+
+### Как сделано
+
+- Движок исполняет Run внутри контекста «кто действует» (`actingAs`, AsyncLocalStorage): событие без своего
+  `actor` — вызов модели, инструмента, эффект, checkpoint — получает актора исполнения и `onBehalfOf`.
+  Событие со своим актором (решение человека, записанное во время тика daemon) остаётся его и `onBehalfOf` не
+  получает. В таблице `events` — колонка `on_behalf_of` (миграция 6).
+- `jarvis daemon` исполняет Run как `service:daemon`, `onBehalfOf` — владелец Run. CI: актор — `ci:…`
+  (`JARVIS_ACTOR` при `CI`), `onBehalfOf` — из `JARVIS_ON_BEHALF_OF`, если job его задал.
+- `daemon.actAsOwner` (`~/.jarvis/config.yaml`, по умолчанию `true`): при `false` эффект, которому нужны
+  credentials владельца (push и PR доставки, ADR-0003 §4), паркует Run в `WAITING_HUMAN` с причиной;
+  `jarvis continue` владельца доводит его до конца. Credentials MCP по-прежнему разрешаются keychain'ом машины.
+- Лента «Activity» на странице прогона пишет «— daemon от имени <владелец>» там, где действовал не владелец.
 
 ## Последствия
 

@@ -989,7 +989,11 @@ export function feedItem(e: StoredEvent): FeedItem | undefined {
   const who = e.actor?.replace(/^(user|service|ci):/, "");
   const from = (c: unknown) =>
     c === "ui" ? ` ${t("from the page")}` : c === "cli" ? ` ${t("in the terminal")}` : "";
-  const by = who ? ` ${t("by {who}", { who })}` : "";
+  // ADR-0006 §2: the daemon resuming a run acts for its owner — said where the actor is
+  const behalf = e.onBehalfOf
+    ? ` ${t("on behalf of {who}", { who: e.onBehalfOf.replace(/^(user|service|ci):/, "") })}`
+    : "";
+  const by = who ? ` ${t("by {who}", { who })}${behalf}` : "";
   const at = (text: string, tone?: FeedItem["tone"]) => ({ ts: e.ts, text, ...(tone ? { tone } : {}) });
   switch (e.kind) {
     case "run.created":
@@ -1066,7 +1070,7 @@ export function feedItem(e: StoredEvent): FeedItem | undefined {
     case "run.state": {
       const state = str(p.state) ?? "?";
       const why = str(p.reason);
-      if (state === "RUNNING") return at(`${t("running")}${why ? ` — ${why}` : ""}`);
+      if (state === "RUNNING") return at(`${t("running")}${why ? ` — ${why}` : ""}${behalf ? by : ""}`);
       if (state === "COMPLETED") return at(`✓ ${t("completed")}`, "ok");
       if (state === "FAILED") return at(`✗ ${t("failed")}${why ? `: ${why}` : ""}`, "bad");
       // t("waiting budget") t("waiting human") t("suspended") t("cancelled") t("created")
@@ -1120,6 +1124,10 @@ export function feedItem(e: StoredEvent): FeedItem | undefined {
       return at(`⏸ ${t("pause asked")}${by}${from(p.channel)}`, "warn");
     case "run.applied":
       return at(`${t("applied")}${by}`, "ok");
+    case "run.delivered":
+      return at(`${t("PR opened")}${str(p.url) ? `: ${str(p.url)}` : ""}${by}`, "ok");
+    case "delivery.failed":
+      return at(`${t("No PR:")} ${str(p.reason) ?? ""}`.trim(), "warn");
     case "context.compacting": {
       const c = {
         kind: str(p.kind) ?? "compact",

@@ -231,7 +231,13 @@ Jarvis как MCP-сервер на stdio (только чтение) для IDE
 
 ## Запуск и жизнь run
 
-### `jarvis work <task> [--workflow <name>] [--base <ref>] [--no-run] [--fresh design] [--kind <вид>]`
+### `jarvis work <task> [--workflow <name>] [--base <ref>] [--no-run] [--fresh design] [--kind <вид>] [--deliver pr]`
+
+`--deliver pr` — прогон сам доставляет результат: когда workflow закончился успешно, он пушит свою ветку и
+открывает PR (как `jarvis apply --pr`), не дожидаясь Apply. То же для всех прогонов workflow — `deliver: pr` в
+его YAML. По умолчанию выключено. Действует `delivery.pr` проекта: при `approve` прогон ждёт одобрения PR в
+`WAITING_HUMAN` (`jarvis approve <run>` или страница), потом его продолжает daemon или `jarvis continue`; при
+`deny` или ошибке прогон всё равно `COMPLETED`, причина — в его состоянии.
 
 `--kind` — тип задачи: `feature`, `change`, `fix`, `refactor`, `test`, `docs`. По нему подбираются навыки и
 стандарты с `appliesTo.kinds` ([knowledge.md](knowledge.md)). Без флага — вид workflow (`fix` → fix), иначе
@@ -965,6 +971,11 @@ masked in what agents read (a code name here is a false positive)
 `WAITING_HUMAN` — когда решение уже записано (одобрение, ответ на уточнение). Упавшие и прерванные не трогает.
 `--interval` — секунды между тиками (30); `--once` — один тик.
 
+Daemon действует как `service:daemon` от имени владельца прогона: в журнале у его событий `actor` —
+`service:daemon`, `onBehalfOf` — владелец, на странице прогона — «от имени …» (ADR-0006 §2). Credentials
+владельца (push и PR при `--deliver pr`) он берёт, только если `daemon.actAsOwner: true` (по умолчанию); иначе
+прогон ждёт владельца с причиной, `jarvis continue <run>` доводит его.
+
 ### `jarvis context [run]`
 
 Контекст агента сейчас: эффективное окно, размер базы (L0–L4), история L5, текущее давление и уровень,
@@ -1001,6 +1012,20 @@ Diff worktree run относительно базового коммита.
 Squash ветки run на текущую ветку основного репозитория одним коммитом; `// REVIEW:` маркеры удаляются
 (если `human.review.removeMarkersAfterApproval`).
 
+### `jarvis apply <run> --pr [--title <text>] [--target <branch>] [--yes]`
+
+Доставка завершённого прогона pull request'ом (ADR-0003 §4): изменения прогона одним коммитом поверх его базы
+пушатся в `delivery.remote` (`origin`) веткой `jarvis/...`, PR открывается через MCP-сервер с `*.pr.create`
+(профиль `bitbucket`). Push идёт вашим git — его credential helper или ssh-agent, токены в аргументы не
+попадают. Заголовок — `--title`, иначе заголовок спеки, иначе задача; описание — из спеки и реализации, со
+списком файлов и строкой «Prepared by Jarvis, run <id>.». `--target` — куда PR (иначе `delivery.target`,
+ветка по умолчанию remote'а, `main`).
+
+Push и PR — эффекты в журнале (ADR-0002): повтор не пушит и не открывает второй PR, а показывает уже открытый.
+Ссылка на PR — в артефакте `pull-request`, в событии `run.delivered` и на странице прогона. При
+`delivery.pr: approve` команда показывает PR и спрашивает «Create this PR? [y/N]» (без терминала нужен `--yes`),
+одобрение записывается на вас; при `deny` — отказ с кодом 12. Нет сервера с PR — команда так и говорит.
+
 ### `jarvis gc [--days <n>] [--prune-branches]`
 
 Удаляет worktree прогонов `COMPLETED` и `CANCELLED` старше `workspace.retentionDays` (или `--days`); рабочие
@@ -1012,7 +1037,9 @@ Squash ветки run на текущую ветку основного репо
 прогона, а также у того, чьи изменения уже забраны (`jarvis apply` или ветка влита), ветка удаляется по умолчанию; у
 завершённого, но не применённого — нет: ветка тогда единственная копия его работы. Для `checkout: clone` удаляется клон.
 У завершённого прогона с незабранной работой там же **Apply to <ветка>** — то же, что `jarvis apply` (работает и без
-папки прогона, по его ветке). Удалённая ветка (из UI или `gc --prune-branches`) оставляет последний коммит в
+папки прогона, по его ветке), и рядом **Create PR** («Создать PR») — то же, что `jarvis apply --pr`; при
+`delivery.pr: approve` первый клик показывает заголовок и описание PR, **Approve and create PR** отправляет. После —
+ссылка на PR и кто его создал. Удалённая ветка (из UI или `gc --prune-branches`) оставляет последний коммит в
 `refs/jarvis/removed/<ветка>`: на странице прогона — **Restore the branch**.
 
 ## Участие человека

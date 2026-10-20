@@ -316,6 +316,10 @@ steps:
 
 `jarvis work HOTFIX-7 --workflow hotfix`.
 
+`deliver: pr` на уровне workflow (рядом с `entry`) — каждый его прогон, закончившись успешно, сам пушит ветку и
+открывает PR вместо того, чтобы ждать Apply; для одного прогона — `jarvis work … --deliver pr`. По умолчанию
+выключено, правила — `delivery` в [configuration.md](configuration.md#доставка-pr-delivery).
+
 ## Реализация: пункт за пунктом и сторож «читает, но не правит»
 
 Агент `implementation` получает открытый пункт плана (src/app/planProgress.ts) с текущим текстом его файлов прямо во
@@ -332,10 +336,12 @@ steps:
 
 ## События
 
-Каждое действие — строка в `events` с `runId`, `stepId`, `iteration`, `payload`:
+Каждое действие — строка в `events` с `runId`, `stepId`, `iteration`, `actor`, `payload` (и `onBehalfOf`, когда
+действует не владелец прогона — daemon, CI-job; ADR-0006 §2):
 - прогон: `run.created|state|lease|leaseLost|steal|recovered|interrupted|cancel|applied|imported|gc`;
   `run.driver` (прогон ведёт страница `jarvis ui`: начат там или подхвачен, `adopted`), `run.resumedBy`
-  (страница запустила `jarvis resume`);
+  (страница запустила `jarvis resume`), `run.delivered` (PR открыт: ссылка, capability, ветки, канал),
+  `delivery.failed` (прогон с `--deliver pr` закончился без PR и почему);
 - шаги: `step.start|finish|next|quick|error`, `workflow.loop|loopExhausted`, `loop.rerun` (повтор шага
   исчерпанной петли: `r` на карточке, кнопка `jarvis ui`);
 - агент: `agent.start` (лимиты, выданное человеком, провенанс пакета знаний) `|finish|limit`;

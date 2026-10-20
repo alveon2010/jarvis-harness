@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { ResolvedConfig } from "../config/schema.ts";
-import { type Actor, parseActorId } from "../domain/actor.ts";
+import { type Actor, formatActor, parseActorId } from "../domain/actor.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -49,4 +49,14 @@ function withKind(actor: Actor, env: NodeJS.ProcessEnv): Actor {
     return { ...actor, kind: "ci" };
   }
   return actor;
+}
+
+/**
+ * ADR-0006 §2: in CI the actor is the pipeline; whose change it runs for, when the pipeline says so —
+ * `JARVIS_ON_BEHALF_OF` (the commit's or the merge request's author, set by the job).
+ */
+export function onBehalfOfFromEnv(env: NodeJS.ProcessEnv): string | undefined {
+  const value = env.JARVIS_ON_BEHALF_OF?.trim();
+  if (!value) return undefined;
+  return formatActor(parseActorId(value));
 }
