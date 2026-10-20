@@ -498,7 +498,7 @@ export const RU: Readonly<Record<string, string>> = {
   Refactoring: "Рефакторинг",
   Tests: "Тесты",
   Docs: "Документация",
-  "Kind of task": "Вид задачи",
+  "Kind of task": "Тип задачи",
   "as the workflow says": "по workflow",
   "picks the skills and standards written for this kind of work":
     "по нему подбираются навыки и стандарты для такой работы",
@@ -509,7 +509,7 @@ export const RU: Readonly<Record<string, string>> = {
   tests: "тесты",
   docs: "документация",
   "the kind of task the skills and standards were picked by":
-    "вид задачи, по которому подобраны навыки и стандарты",
+    "тип задачи, по которому подобраны навыки и стандарты",
   "The task names": "В задаче упомянуты",
   and: "и",
   "linked by": "связанные через",
@@ -615,7 +615,7 @@ export const RU: Readonly<Record<string, string>> = {
   "Read in place from the team's documentation — change it there; jarvis copies nothing.":
     "Читается прямо из документации команды — правьте его там, jarvis ничего не копирует.",
   "for agents": "для агентов",
-  "task kinds": "виды задач",
+  "task kinds": "типы задач",
   any: "любые",
   paths: "пути",
   stacks: "стеки",
@@ -1200,7 +1200,7 @@ export const RU: Readonly<Record<string, string>> = {
   // ---- a step's skills
   "named by the workflow step": "заданы в шаге workflow",
   "picked by {what}": "подобраны по {what}",
-  "kind {kind}": "виду {kind}",
+  "kind {kind}": "типу {kind}",
   "stack {stacks}": "стеку {stacks}",
   "skills:": "навыки:",
   "no such skill: {ids}": "нет такого навыка: {ids}",
