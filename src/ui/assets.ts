@@ -217,6 +217,21 @@ th{text-align:left;color:var(--muted);font-size:13px;font-weight:500;padding:12p
 td{padding:12px 20px;border-bottom:1px solid var(--line-soft);vertical-align:top}
 tr:last-child td{border-bottom:0}
 .empty{padding:20px;color:var(--muted);font-size:14px}
+/* fewer boxes: an empty section is one quiet line; the waits a list of rows; the steps and «Redo» on the page */
+section.group>.panel.empty,section.group>[data-live=recent]>.panel.empty{background:none;border:0;box-shadow:none;padding:2px 0;color:var(--faint)}
+section.group>.cards{flex-direction:column;flex-wrap:nowrap;gap:0;background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--lift);overflow:hidden}
+section.group>.cards>.card{flex:none;border:0;border-radius:0;box-shadow:none;border-top:1px solid var(--line-soft);padding:14px 18px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 20px;align-items:center}
+section.group>.cards>.card:first-child{border-top:0}
+section.group>.cards>.card>*{grid-column:1}
+section.group>.cards>.card>.actions{grid-column:2;grid-row:1/span 3;justify-content:flex-end}
+section.group>.cards>.card h3{font-size:15px;line-height:22px;font-weight:500}
+section.group>.cards>.card p{font-size:13px;line-height:19px;color:var(--muted)}
+@media (max-width:720px){section.group>.cards>.card{grid-template-columns:minmax(0,1fr)}section.group>.cards>.card>.actions{grid-column:1;grid-row:auto;justify-content:flex-start}}
+.panel.side.steps{background:none;border:0;box-shadow:none;padding:4px 0 0;flex:0 1 280px}
+.panel.side.steps h2{font-size:13px;font-weight:500;color:var(--faint);margin-bottom:6px;padding-left:8px}
+.step.focus{background:var(--panel);box-shadow:0 0 0 1px var(--line)}
+details.panel.redo{background:none;border:0;box-shadow:none;padding:0 2px}
+details.panel.redo>summary{color:var(--muted);font-size:13.5px}
 .cols{display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start}
 .side{flex:1 1 340px;min-width:0;padding:18px 20px;display:flex;flex-direction:column;gap:2px}
 .mainc{flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:20px}
