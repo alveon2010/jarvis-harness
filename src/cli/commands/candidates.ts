@@ -1,3 +1,4 @@
+import { relative } from "node:path";
 import {
   type Candidate,
   CandidateNotPromotable,
@@ -177,7 +178,7 @@ export async function runCandidatesShow(ctx: CliContext, ref: string): Promise<v
         if (skillEdit instanceof CandidateNotPromotable) ctx.out.line(st.bad(skillEdit.message));
         else if (skillEdit)
           ctx.out.line(
-            `${st.muted("promote edits")} skill ${st.name(skillEdit.skill)} v${skillEdit.version.from} → v${skillEdit.version.to}: ${skillEdit.instructions}${skillEdit.fromBuiltin ? st.muted(" (a project copy of the built-in, which then overrides it)") : ""}`,
+            `${st.muted("promote edits")} skill ${st.name(skillEdit.skill)} v${skillEdit.version.from} → v${skillEdit.version.to}: ${relative(root, skillEdit.instructions)}${skillEdit.fromBuiltin ? st.muted(" (a project copy of the built-in, which then overrides it)") : ""}`,
           );
         else ctx.out.line(`${st.muted("promote writes")} ${targetOf(root, c, undefined)}`);
         if (c.review.length > 0) {

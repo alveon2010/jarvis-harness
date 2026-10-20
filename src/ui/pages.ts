@@ -787,7 +787,7 @@ function stepRow(s: StepRow, now: number, plan?: PlanProgress): Html {
   const tone = icon?.[1] === "info" ? "" : icon?.[1];
   return html`<li class="step ${s.status}${s.child ? " child" : ""}${s.status === "waiting" || s.status === "running" ? " focus" : ""}">
 <span class="ic ${tone ?? ""}" aria-hidden="true">${icon?.[0] ?? ""}</span>
-<span class="nm"><b>${s.id}${iteration}<span class="sr"> — ${s.status}</span></b>${notes.length > 0 ? html`<span class="note">${notes.join(" · ")}</span>` : ""}${s.skills ? stepSkillsHtml(s.skills) : ""}</span>
+<span class="nm"><b>${s.id}${iteration}<span class="sr"> — ${s.status}</span></b>${notes.length > 0 ? html`<span class="note">${notes.join(" · ")}</span>` : ""}${s.skills && (s.skills.refs.length > 0 || s.skills.how === "step") ? stepSkillsHtml(s.skills) : ""}</span>
 <span class="took">${took}</span>
 </li>`;
 }

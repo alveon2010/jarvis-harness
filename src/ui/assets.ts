@@ -788,7 +788,8 @@ p.sv-pair{margin:0;font-size:14px}
 .mdoc>summary,.mdiff>summary,.magain>summary{padding:10px 14px;cursor:pointer;font-size:14px}
 .mdoc .doc{max-height:360px;overflow:auto;padding:12px 16px;border-top:1px solid var(--line-soft)}
 .magain form{padding:0 14px 14px}
-.field.inline{flex-direction:row;align-items:center;gap:8px}
+.field.inline{flex-direction:row;align-items:center;gap:8px;flex-wrap:wrap}
+.field.inline select{width:auto;height:36px;flex:none}
 .field.inline input{height:40px;padding:0 10px;border:1px solid var(--field-line);border-radius:8px;font-family:var(--mono);font-size:13px;background:var(--panel);color:var(--ink)}
 .mdrafts{margin-top:20px;padding:16px 20px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 20px}
 .mdrafts>div{display:flex;flex-direction:column;gap:4px}
