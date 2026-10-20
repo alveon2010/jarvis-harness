@@ -807,7 +807,9 @@ export function buildProgram(options: RunOptions = {}): Command {
     });
   program
     .command("answer <threadOrRun> [text]")
-    .description("answer a clarification thread asynchronously; --accept takes the proposed rule")
+    .description(
+      "answer a clarification thread asynchronously (--accept takes the proposed rule), or a conflict with a hand edit: mine | run | merge",
+    )
     .option("--accept", "accept the proposed resolution (or --rule)", false)
     .option("--reject", "reject the thread; the run keeps waiting", false)
     .option("--rule <text>", "accept with this rule instead of the proposal")

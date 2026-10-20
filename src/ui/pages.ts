@@ -27,6 +27,7 @@ import type {
   ArtifactPage,
   BudgetCard,
   ClarifyCard,
+  ConflictCard,
   EffectCard,
   FeedItem,
   LoopCard,
@@ -353,6 +354,14 @@ ${card.proposal ? html`<p class="ok">${t("Jarvis proposes a rule — accept it o
 <p>${t("The impact reaches other services: on as a task across services, or only {service}", { service: card.report.service })}</p>
 <div class="actions"><a class="btn primary" href="${runHref(run)}#decision">${t("Decide")}</a></div>
 </article>`;
+  if (card.kind === "conflict") {
+    return html`<article class="panel card">
+<div class="row"><span class="pill wait">⏸ ${t("conflict")} · ${card.step}</span>${meta}</div>
+<h3>${firstLine(run.task)}</h3>
+<p>${t("{step} and a hand edit both changed {files}:", { step: card.step, files: plural(card.files.length, "file") })} ${cut(card.files.join(", "), 160)}${card.resolved ? html` <span class="ok">— ${t("decided: {choice}", { choice: card.resolved.choice })}</span>` : ""}</p>
+<div class="actions">${resume}<a class="${primary}" href="${runHref(run)}#decision">${card.resolved ? t("Open the run") : t("Decide")}</a></div>
+</article>`;
+  }
   return html`<article class="panel card">
 <div class="row"><span class="pill wait">⏸ ${card.what}</span>${meta}</div>
 <h3>${firstLine(run.task)}</h3>
@@ -1445,7 +1454,7 @@ ${page.untrusted ? untrustedHtml(page.untrusted) : html`<div data-live="untruste
 </section>
 <div class="mainc">
 ${review ?? ""}
-${card ? (card.kind === "loop" ? loopCardHtml(card, page, actions) : card.kind === "approval" ? approvalCardHtml(card, page, actions) : card.kind === "budget" ? budgetCardHtml(card, page, actions) : card.kind === "clarify" ? clarifyCardHtml(card, page, actions) : card.kind === "scope" ? scopeCardHtml(card, page, actions) : card.kind === "effect" ? effectCardHtml(card, page, actions) : otherCardHtml(card.what, page)) : page.wait ? waitHtml(page, page.wait, now, actions) : page.next || page.continuedBy ? continuationHtml(page, actions) : page.restart && page.resumable !== "retry" ? restartHtml(page, page.restart, actions) : page.evalReady || page.evalCase ? evalHtml(page, actions) : nowHtml(page, now, actions)}
+${card ? (card.kind === "loop" ? loopCardHtml(card, page, actions) : card.kind === "approval" ? approvalCardHtml(card, page, actions) : card.kind === "budget" ? budgetCardHtml(card, page, actions) : card.kind === "clarify" ? clarifyCardHtml(card, page, actions) : card.kind === "scope" ? scopeCardHtml(card, page, actions) : card.kind === "effect" ? effectCardHtml(card, page, actions) : card.kind === "conflict" ? conflictCardHtml(card, page, actions) : otherCardHtml(card.what, page)) : page.wait ? waitHtml(page, page.wait, now, actions) : page.next || page.continuedBy ? continuationHtml(page, actions) : page.restart && page.resumable !== "retry" ? restartHtml(page, page.restart, actions) : page.evalReady || page.evalCase ? evalHtml(page, actions) : nowHtml(page, now, actions)}
 ${page.redo && actions?.canLaunch ? redoHtml(page, page.redo, actions) : ""}
 ${page.subtasks ? subtasksHtml(page, actions) : ""}
 ${page.contractCheck ? contractCheckHtml(page.contractCheck) : ""}
@@ -1861,6 +1870,56 @@ ${
 <div class="actions"><button type="submit" name="decision" value="happened" class="btn primary">${t("It is there — go on")}</button><button type="submit" name="decision" value="again" class="btn">${t("It is not there — do it again")}</button></div>`,
       )
     : html`<div class="actions"><span class="hint">${th("In the terminal: {cmd}", { cmd: html`<code>jarvis effect ${short}</code>` })}</span></div>`
+}
+</section>`;
+}
+
+/** ADR-0019 §6.3: the ways out of a conflict with a hand edit, as `jarvis answer <run> <choice>`. */
+const CONFLICT_CHOICES: ReadonlyArray<{ choice: string; label: string; hint: string }> = [
+  // t("Keep mine") t("your files stay; the step starts again from them") t("Take the run's")
+  // t("the files go back to the run's last commit; yours are kept under refs/jarvis/set-aside")
+  // t("I combined them") t("you merged both by hand in the checkout: it is taken as it is now, the step goes on")
+  { choice: "mine", label: "Keep mine", hint: "your files stay; the step starts again from them" },
+  {
+    choice: "run",
+    label: "Take the run's",
+    hint: "the files go back to the run's last commit; yours are kept under refs/jarvis/set-aside",
+  },
+  {
+    choice: "merge",
+    label: "I combined them",
+    hint: "you merged both by hand in the checkout: it is taken as it is now, the step goes on",
+  },
+];
+
+/** A hand edit of files the step had changed: the files, the checkout, the three ways out. */
+function conflictCardHtml(card: ConflictCard, page: RunPage, actions?: Actions): Html {
+  const cmd = `jarvis answer ${shortRunId(page.run.id)} mine|run|merge`;
+  const buttons = actions
+    ? html`<div class="actions">${CONFLICT_CHOICES.map((c, i) =>
+        form(
+          actions,
+          `${runHref(page.run)}/conflict`,
+          html`<input type="hidden" name="choice" value="${c.choice}"><button type="submit" class="btn${i === 0 ? " primary" : ""} big" title="${t(c.hint)}">${t(c.label)}</button>`,
+        ),
+      )}</div>
+<ul class="reasons">${CONFLICT_CHOICES.map((c) => html`<li><span class="chip">${t(c.label)}</span><span>${t(c.hint)}</span></li>`)}</ul>`
+    : html`<div class="actions"><span class="hint">${th("Decide in the terminal: {cmd}", { cmd: html`<code>${cmd}</code>` })}</span><button type="button" class="btn" data-copy="${cmd}">${t("Copy command")}</button></div>`;
+  return html`<section class="panel decision" aria-labelledby="decision" data-live="card">
+<div class="row" style="flex-direction:column;align-items:flex-start;gap:4px">
+<span class="warn" style="font-size:13px;font-weight:500">${t("Waits for you")}</span>
+<h2 id="decision" style="font-size:22px;line-height:28px">${card.files.length === 1 ? t("{step} had changed a file you then changed by hand", { step: card.step }) : t("{step} had changed files you then changed by hand", { step: card.step })}</h2>
+<span class="muted" style="font-size:14px">${t("Jarvis does not write over a hand edit: say which version goes on.")}</span>
+</div>
+<ul class="reasons">${card.files.map((f) => html`<li>${fileRef(f)}</li>`)}</ul>
+<div class="checkout">
+<span class="muted" style="font-size:14px">${t("The run's checkout")}</span>
+<div class="row"><code class="path">${card.checkoutShown}</code>${actions ? form(actions, `${runHref(page.run)}/open`, html`<button type="submit" class="btn">${t("Open in editor")}</button>`) : ""}<button type="button" class="btn" data-copy="${card.checkout}">Copy path</button></div>
+</div>
+${
+  card.resolved
+    ? html`<div class="banner info">✓ ${card.resolved.by ? t("{choice} — decided by {who}", { choice: card.resolved.choice, who: card.resolved.by }) : t("decided: {choice}", { choice: card.resolved.choice })}</div><div class="actions">${goesOn(page, actions)}</div>`
+    : buttons
 }
 </section>`;
 }

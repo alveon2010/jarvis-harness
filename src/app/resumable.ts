@@ -1,4 +1,5 @@
 import { isTerminal, type Run } from "../core/domain/run.ts";
+import { conflictResolved } from "../interaction/conflict.ts";
 import { budgetGranted } from "./budgetStop.ts";
 import { awaitedArtifact, decisionOn, goOnRequested, rerunRequested, waitingCard } from "./decide.ts";
 import type { Runtime } from "./runtime.ts";
@@ -53,6 +54,7 @@ function decidedOn(runtime: Runtime, run: Run): boolean {
   if (kind === "budget") return budgetGranted(runtime, run.id) !== undefined;
   if (kind === "loop")
     return rerunRequested(runtime, run.id) !== undefined || goOnRequested(runtime, run.id) !== undefined;
+  if (kind === "conflict") return conflictResolved(runtime, run);
   const awaited = kind === "approval" || !kind ? awaitedArtifact(runtime, run) : undefined;
   return awaited ? decisionOn(runtime, awaited.artifact) !== undefined : false;
 }

@@ -10,6 +10,12 @@ import {
   rejectThread,
   resolveClarification,
 } from "../../interaction/clarify.ts";
+import {
+  type ConflictChoice,
+  conflictFilesOf,
+  isConflictChoice,
+  resolveConflict,
+} from "../../interaction/conflict.ts";
 import { collectReview } from "../../interaction/review/collector.ts";
 import { commentsOf, seedComments } from "../../interaction/review/lifecycle.ts";
 import type { Interaction, InteractionMessage } from "../../interaction/store.ts";
@@ -197,6 +203,8 @@ export async function runAnswer(
   try {
     const { run, thread } = findThread(ctx, runtime, ref);
     const actor = await actorFor(ctx, runtime);
+    if (thread.kind === "conflict")
+      return await answerConflict(ctx, runtime, run, thread, actor, text, options);
     const result = await humanMove(runtime, run, thread, actor, {
       ...(text !== undefined ? { text } : {}),
       ...(options.accept ? { accept: true } : {}),
@@ -233,6 +241,77 @@ export async function runAnswer(
     );
   } finally {
     await runtime.close();
+  }
+}
+
+/** What each way out of a conflict does, as the terminal says it. */
+export const CONFLICT_HELP: Record<ConflictChoice, string> = {
+  mine: "keep your files; the step starts again from them",
+  run: "take the run's files; yours are kept aside under refs/jarvis/set-aside",
+  merge: "you combined both by hand: the checkout as it is now is taken, the step goes on",
+};
+
+/** `jarvis answer <run> mine|run|merge`: the way out of a conflict with a hand edit (ADR-0019 §6.3). */
+async function answerConflict(
+  ctx: CliContext,
+  runtime: Runtime,
+  run: Run,
+  thread: Interaction,
+  actor: Actor,
+  text: string | undefined,
+  options: AnswerOptions,
+): Promise<void> {
+  const choice = text?.trim().toLowerCase();
+  if (!isConflictChoice(choice)) {
+    ctx.out.error(
+      `thread ${thread.id} is a conflict over ${conflictFilesOf(thread).join(", ") || "files"}; answer mine, run or merge`,
+    );
+    throw new CliExit(EXIT.error);
+  }
+  const result = await resolveConflict(runtime, run, thread, choice, actor.id);
+  if (options.resume) await resumeRun(ctx, runtime, run);
+  ctx.out.result(
+    { thread: result.thread, resolved: result.artifactRef, choice, setAside: result.setAside },
+    () => {
+      ctx.out.line(`conflict ${thread.id}: ${choice} — ${CONFLICT_HELP[choice]}`);
+      if (result.setAside) ctx.out.line(`your change: ${result.setAside}`);
+      ctx.out.line(`continue with \`jarvis continue ${shortRunId(run.id)}\``);
+    },
+  );
+}
+
+/**
+ * The conflict card of `jarvis continue`: the files both sides changed, then `m` keeps the person's,
+ * `r` takes the run's, `g` takes what the person combined by hand; `q` leaves it waiting.
+ */
+export async function conflictLoop(
+  ctx: CliContext,
+  runtime: Runtime,
+  run: Run,
+  thread: Interaction,
+  actor: Actor,
+  prompt: Prompt,
+): Promise<"resolved" | "detached"> {
+  const st = ctx.out.style;
+  ctx.out.line(st.warn(`${thread.stepId} had changed files you then changed by hand:`));
+  for (const f of conflictFilesOf(thread)) ctx.out.line(`  ${f}`);
+  ctx.out.line("");
+  ctx.out.line(`  m  ${CONFLICT_HELP.mine}`);
+  ctx.out.line(`  r  ${CONFLICT_HELP.run}`);
+  ctx.out.line(`  g  ${CONFLICT_HELP.merge}`);
+  ctx.out.line(`  q  leave it waiting (checkout: ${run.workspace.path})`);
+  const keys: Record<string, ConflictChoice> = { m: "mine", r: "run", g: "merge" };
+  for (;;) {
+    const input = (await prompt.ask("> "))?.trim().toLowerCase();
+    if (input === undefined || input === "" || input === "q") return "detached";
+    const choice = keys[input] ?? (isConflictChoice(input) ? input : undefined);
+    if (!choice) {
+      ctx.out.line(st.muted("  m, r, g or q"));
+      continue;
+    }
+    const result = await resolveConflict(runtime, run, thread, choice, actor.id);
+    ctx.out.line(`${choice} → ${result.artifactRef}${result.setAside ? `; yours: ${result.setAside}` : ""}`);
+    return "resolved";
   }
 }
 

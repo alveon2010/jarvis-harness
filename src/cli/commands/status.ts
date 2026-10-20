@@ -201,7 +201,9 @@ export function renderDetail(ctx: CliContext, d: RunDetail, now: Date, eventLimi
         ? `jarvis attach ${shortRunId(r.id)} | jarvis answer ${w.interactionId ?? ""} "…"`
         : w.kind === "approval"
           ? `jarvis approve ${shortRunId(r.id)} | jarvis review submit ${shortRunId(r.id)}`
-          : "";
+          : w.kind === "conflict"
+            ? `jarvis answer ${shortRunId(r.id)} mine|run|merge`
+            : "";
     out.line(
       `${f("waiting")}${st.warn(w.kind)}${w.detail ? ` (${w.detail})` : ""}${w.interactionId ? `  ${st.muted("thread")} ${w.interactionId}` : ""}${hint ? `  ${st.muted("→")} ${st.cmd(hint)}` : ""}`,
     );
@@ -363,7 +365,9 @@ export function nextCommands(d: RunDetail, goOn?: string): Array<{ cmd: string; 
           ? "answer the questions and go on"
           : r.waitingFor?.kind === "budget"
             ? "more budget and go on, or finish the step with what it has"
-            : "read, decide and go on",
+            : r.waitingFor?.kind === "conflict"
+              ? "keep your hand edit, take the run's files, or combine them, and go on"
+              : "read, decide and go on",
     });
     if (pending) out.push({ cmd: `jarvis show ${id} ${pending.type}`, why: `just read the ${pending.type}` });
   } else if (r.state === "WAITING_BUDGET") {

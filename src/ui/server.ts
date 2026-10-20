@@ -84,6 +84,7 @@ import {
   suggestionsFor,
 } from "../interaction/answers.ts";
 import { earlierRulesFor } from "../interaction/clarify.ts";
+import { isConflictChoice, resolveConflict } from "../interaction/conflict.ts";
 import { addNote } from "../interaction/notes.ts";
 import { answerFromKnowledge, plan } from "../knowledge/ask.ts";
 import { catalogOf, namedServices } from "../knowledge/catalog.ts";
@@ -523,6 +524,8 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       "no-hint": html`<div class="banner bad">${t("A hint needs your words: what to look at, what to do")}</div>`,
       "cannot-continue": html`<div class="banner bad">${t("This run cannot go on: it has not finished, has nowhere to go or went on already")}</div>`,
       "no-repo": html`<div class="banner bad">${th("Not a repository this page knows: start {cmd} in it", { cmd: html`<code>jarvis ui</code>` })}</div>`,
+      "conflict-decided": html`<div class="banner ok">${t("Decided — the checkout is as you chose; the step goes on with it")}</div>`,
+      "conflict-failed": html`<div class="banner bad">${th("Not decided: the checkout could not be changed — see the log of {cmd}", { cmd: html`<code>jarvis ui</code>` })}</div>`,
     };
     return n ? notices[n] : undefined;
   };
@@ -1540,7 +1543,7 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       });
     }
     const m =
-      /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|restart|redo|clarify|eval|note|pause|cleanup|apply|restore-branch|subtask|scope|tests|steer|effect)$/.exec(
+      /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|restart|redo|clarify|eval|note|pause|cleanup|apply|restore-branch|subtask|scope|tests|steer|effect|conflict)$/.exec(
         r.url.pathname,
       );
     const run = m ? resolveRun(m[1] as string) : undefined;
@@ -1741,6 +1744,27 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
         r,
         `/launches/${options.launcher.restartRun(run, step, (form.get("note") ?? "").slice(0, 4000)).id}`,
       );
+    }
+    if (m[2] === "conflict") {
+      // a hand edit against the step's work (ADR-0019 §6.3): the moves of `jarvis answer <run> <choice>`
+      const thread = runtime.interactions.openFor(run.id, "conflict");
+      if (run.waitingFor?.kind !== "conflict" || !thread)
+        return redirect(r, `/runs/${short}?notice=not-waiting`);
+      const choice = form.get("choice");
+      if (!isConflictChoice(choice)) return redirect(r, `/runs/${short}#decision`);
+      const who = await actor();
+      if (!who) return redirect(r, `/runs/${short}?notice=actor`);
+      try {
+        await resolveConflict(runtime, run, thread, choice, who.id);
+      } catch (error) {
+        runtime.log.error("ui.conflict", {
+          runId: run.id,
+          message: error instanceof Error ? error.message : String(error),
+        });
+        return redirect(r, `/runs/${short}?notice=conflict-failed`);
+      }
+      goOn(runtime.runs.get(run.id) ?? run);
+      return redirect(r, `/runs/${short}?notice=conflict-decided`);
     }
     if (m[2] === "continue") {
       // "Continue to sdd (cross-repos)": a master in the knowledge repository from this run (ADR-0025 §7)

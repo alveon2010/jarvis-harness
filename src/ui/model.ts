@@ -50,6 +50,7 @@ import {
   earlierRulesFor,
   latestProposal,
 } from "../interaction/clarify.ts";
+import { conflictFilesOf } from "../interaction/conflict.ts";
 import { notesOf, type RunNote } from "../interaction/notes.ts";
 import type { Interaction, InteractionMessage } from "../interaction/store.ts";
 import type { NamedService } from "../knowledge/catalog.ts";
@@ -259,6 +260,20 @@ export interface ClarifyCard {
   readonly earlier: readonly EarlierRule[];
 }
 
+/**
+ * A hand edit of files the step had changed (ADR-0019 §6.3): which files, and the three ways out.
+ * `resolved` — decided (the page, `jarvis answer`), the run goes on with it or waits for `continue`.
+ */
+export interface ConflictCard {
+  readonly kind: "conflict";
+  readonly thread: Interaction;
+  readonly step: string;
+  readonly files: readonly string[];
+  readonly checkout: string;
+  readonly checkoutShown: string;
+  readonly resolved?: { readonly choice: string; readonly by?: string };
+}
+
 export type WaitCard =
   | LoopCard
   | ApprovalCard
@@ -266,7 +281,27 @@ export type WaitCard =
   | ClarifyCard
   | ScopeCard
   | EffectCard
+  | ConflictCard
   | OtherCard;
+
+/** The conflict a run waits on, as the page shows it. */
+export function conflictCardOf(runtime: Runtime, run: Run, homeDir: string): ConflictCard | undefined {
+  const id = run.waitingFor?.interactionId;
+  const thread = id ? runtime.interactions.get(id) : runtime.interactions.openFor(run.id, "conflict");
+  if (thread?.kind !== "conflict") return undefined;
+  const choice = runtime.interactions.messages(thread.id).findLast((m) => m.role === "human")?.text;
+  return {
+    kind: "conflict",
+    thread,
+    step: thread.stepId,
+    files: conflictFilesOf(thread),
+    checkout: run.workspace.path,
+    checkoutShown: homePath(run.workspace.path, homeDir),
+    ...(thread.state === "resolved"
+      ? { resolved: { choice: choice ?? "", ...(thread.resolvedBy ? { by: thread.resolvedBy } : {}) } }
+      : {}),
+  };
+}
 
 /** The open clarification thread of a run, as the page shows it. */
 export function clarifyCardOf(runtime: Runtime, run: Run): ClarifyCard | undefined {
@@ -475,6 +510,10 @@ export async function waitCardOf(runtime: Runtime, run: Run, homeDir: string): P
         asked: asked.length > 600 ? `${asked.slice(0, 599)}…` : asked,
       };
     }
+  }
+  if (kind === "conflict") {
+    const card = conflictCardOf(runtime, run, homeDir);
+    if (card) return card;
   }
   const awaited = kind === "approval" || !kind ? awaitedArtifact(runtime, run) : undefined;
   if (awaited) {

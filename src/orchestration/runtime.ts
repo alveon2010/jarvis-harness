@@ -18,11 +18,18 @@ import {
   selectTransition,
   type WorkflowDefinition,
 } from "../core/domain/workflow.ts";
+import {
+  type HandEditConflict,
+  handEditConflict,
+  openConflict,
+  runCommitOf,
+} from "../interaction/conflict.ts";
 import { afterAnalysis, afterImplementation } from "../interaction/review/lifecycle.ts";
 import { ModelError } from "../models/errors.ts";
 import { effectMarker } from "../storage/effects.ts";
 import { LeaseLostError } from "../storage/runStore.ts";
 import { errorFields } from "../telemetry/log.ts";
+import { git } from "../tools/local/exec.ts";
 import { UnresolvedEffectError } from "./effects.ts";
 import { AgenticExecutor, ApprovalExecutor, CompositeExecutor, DeterministicExecutor } from "./executors.ts";
 import { InterruptedError, interruption } from "./interrupt.ts";
@@ -146,21 +153,34 @@ export class LocalWorkflowEngine {
       if (run.state !== "CREATED") {
         // ADR-0019 §6: the developer owns the workspace — uncommitted human edits become a
         // human checkpoint first; Jarvis never resets over them.
+        const runCommit = runCommitOf(this.rt, run.id);
         const humanEdit = await workspace.humanCheckpoint?.(run.owner.id);
-        if (humanEdit) {
+        if (humanEdit)
+          this.emit(run, "workspace.humanEdit", { commit: humanEdit.commit, files: humanEdit.files });
+        // ADR-0019 §6.3: a hand edit of a file the step itself changed — the person decides first
+        const conflict = await handEditConflict(this.rt, run, runCommit);
+        if (conflict) {
+          run = this.parkOnConflict(run, conflict);
+          return { run, exitCode: exitCodeFor(run.state, run.stateReason) };
+        }
+        const head = humanEdit ? undefined : await this.headOf(workspace);
+        if (humanEdit || (head && runCommit && head !== runCommit)) {
+          // the person's commits made in the checkout are theirs as well: taken, not reset away
+          const commit = humanEdit?.commit ?? (head as string);
+          const files = humanEdit?.files ?? (await this.filesBetween(workspace, runCommit, commit));
           this.rt.checkpoints.save({
             runId: run.id,
             stepId: run.currentStep ?? "?",
             iteration: run.currentIteration,
             kind: "step",
-            headCommit: humanEdit.commit,
-            state: { humanEdit: humanEdit.files },
+            headCommit: commit,
+            state: { humanEdit: files },
           });
-          this.emit(run, "workspace.humanEdit", { commit: humanEdit.commit, files: humanEdit.files });
+          if (!humanEdit) this.emit(run, "workspace.humanEdit", { commit, files });
         } else {
-          // ADR-0003 §3: the file state of a resumed run is exactly its last checkpoint.
-          const last = this.rt.checkpoints.latest(run.id);
-          await workspace.restore(last?.headCommit);
+          // ADR-0003 §3: the file state of a resumed run is exactly its last commit (an intra-step
+          // checkpoint has none: it is not the base of the run)
+          await workspace.restore(runCommit);
         }
       }
       run = this.enter(run, workflow);
@@ -713,6 +733,41 @@ export class LocalWorkflowEngine {
       resumeAfter: suspend.resumeAfter?.toISOString(),
     });
     return parked;
+  }
+
+  /**
+   * ADR-0019 §6.3: the run waits for the person's way out of a conflict with their hand edit. Nothing
+   * is committed or checkpointed here: the next resume sees the same conflict until it is decided.
+   */
+  private parkOnConflict(run: Run, conflict: HandEditConflict): Run {
+    const thread = openConflict(this.rt, run, conflict);
+    // the state machine parks a running run: a resumed one is running for this moment
+    const running =
+      run.state === "RUNNING"
+        ? run
+        : this.rt.runs.transition(run.id, "RUNNING", { reason: `resumed from ${run.state}` });
+    const parked = this.rt.runs.transition(running.id, "WAITING_HUMAN", {
+      reason: `${conflict.files.length} file(s) changed both by ${run.currentStep} and by hand: ${conflict.files.slice(0, 5).join(", ")}`,
+      waitingFor: { kind: "conflict", interactionId: thread.id, detail: conflict.files.join(", ") },
+    });
+    this.emit(parked, "run.state", {
+      state: parked.state,
+      reason: parked.stateReason,
+      waitingFor: parked.waitingFor,
+    });
+    return parked;
+  }
+
+  private async headOf(workspace: Workspace): Promise<string | undefined> {
+    if (workspace.ref.mode !== "worktree") return undefined;
+    const r = await git(["rev-parse", "HEAD"], workspace.ref.path);
+    return r.code === 0 ? r.stdout.trim() : undefined;
+  }
+
+  private async filesBetween(workspace: Workspace, from: string | undefined, to: string): Promise<string[]> {
+    if (!from) return [];
+    const r = await git(["diff", "--name-only", from, to], workspace.ref.path);
+    return r.code === 0 ? r.stdout.split("\n").filter(Boolean).sort() : [];
   }
 
   /** Maps runtime errors to a parking decision (ADR-0001 §19, ADR-0002 §2, ADR-0018 §4). */

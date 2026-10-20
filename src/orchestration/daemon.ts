@@ -1,5 +1,6 @@
 import type { Runtime } from "../app/runtime.ts";
 import type { Run } from "../core/domain/run.ts";
+import { conflictResolved } from "../interaction/conflict.ts";
 import { leaseOwner } from "./lease.ts";
 import type { LocalWorkflowEngine } from "./runtime.ts";
 import { LeaseHeldError } from "./types.ts";
@@ -52,6 +53,8 @@ export function resumeDecision(
       const thread = runtime.interactions.get(clarification);
       if (thread?.state === "resolved") return { resume: true };
     }
+    // ADR-0019 §6.3: a conflict with a hand edit, decided through `jarvis answer` or the page
+    if (conflictResolved(runtime, run)) return { resume: true };
     return { resume: false, reason: "waiting for a human decision" };
   }
   return { resume: false, reason: `${run.state} is not auto-resumed` };

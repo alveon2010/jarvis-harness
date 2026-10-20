@@ -273,8 +273,8 @@ describe("New task on the page", () => {
     // the browser lands on the launch: it prepares, reloads itself, and becomes the run's page
     const launchPage = await page(started.location ?? "/");
     expect(launchPage).toContain("Compact form: the upload toggle hides attached files");
-    expect(launchPage).toMatch(/Preparing the run's checkout|ended without a run/);
-    if (launchPage.includes("Preparing the run's checkout")) {
+    expect(launchPage).toMatch(/Preparing the run(?:'|&#39;)s checkout|ended without a run/);
+    if (launchPage.includes("Preparing the run&#39;s checkout")) {
       // refreshed in place, so the header's popover stays open; a full reload only without scripts
       expect(launchPage).toContain('data-tick="2000"');
       expect(launchPage).toContain('<noscript><meta http-equiv="refresh" content="2"></noscript>');

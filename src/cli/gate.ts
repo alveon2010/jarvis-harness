@@ -25,6 +25,7 @@ import type { Runtime } from "../app/runtime.ts";
 import type { Actor } from "../core/domain/actor.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import type { Run } from "../core/domain/run.ts";
+import { conflictResolved } from "../interaction/conflict.ts";
 import { questionsOf } from "../interaction/questions.ts";
 import { shortRunId } from "../storage/runStore.ts";
 import { git } from "../tools/local/exec.ts";
@@ -42,7 +43,7 @@ import {
   systemShell,
   watchCheckout,
 } from "./checkout.ts";
-import { clarifyLoop } from "./commands/human.ts";
+import { clarifyLoop, conflictLoop } from "./commands/human.ts";
 import { scopeLines } from "./commands/scope.ts";
 import type { CliContext } from "./context.ts";
 import { passthrough, titleSequence } from "./notify.ts";
@@ -788,6 +789,15 @@ export async function humanGate(
       );
     }
     return "detached";
+  }
+  if (run.waitingFor?.kind === "conflict") {
+    // ADR-0019 §6.3: a hand edit of a file the step changed — decided here, or later with `jarvis answer`
+    const thread = runtime.interactions.openFor(run.id, "conflict");
+    if (!thread) return conflictResolved(runtime, run) ? "decided" : "detached";
+    ctx.out.line();
+    return (await conflictLoop(ctx, runtime, run, thread, actor, prompt)) === "resolved"
+      ? "decided"
+      : "detached";
   }
   const open = tools.open ?? systemOpener(ctx);
   if (run.waitingFor?.kind === "budget") return budgetGate(ctx, runtime, run, prompt, actor);

@@ -1217,6 +1217,31 @@ export const RU: Readonly<Record<string, string>> = {
   "from @{v}": "из @{v}",
   "Edit it as a file: {file} — the change becomes the next version, yours, before the next step reads it (or {cmd}).":
     "Правьте как файл: {file} — правка станет следующей версией, вашей, до того как её прочитает следующий шаг (или {cmd}).",
+  // ---- a conflict with a hand edit (ADR-0019)
+  conflict: "конфликт",
+  "{step} and a hand edit both changed {files}:":
+    "{step} и ручная правка изменили одни и те же файлы ({files}):",
+  "decided: {choice}": "решено: {choice}",
+  "Keep mine": "Оставить мои",
+  "your files stay; the step starts again from them": "ваши файлы остаются, шаг начинается заново с них",
+  "Take the run's": "Взять из прогона",
+  "the files go back to the run's last commit; yours are kept under refs/jarvis/set-aside":
+    "файлы возвращаются к последнему коммиту прогона, ваши сохраняются в refs/jarvis/set-aside",
+  "I combined them": "Я объединил сам",
+  "you merged both by hand in the checkout: it is taken as it is now, the step goes on":
+    "вы свели обе версии вручную в checkout: он берётся как есть, шаг продолжается",
+  "Decide in the terminal: {cmd}": "Решите в терминале: {cmd}",
+  "{step} had changed a file you then changed by hand":
+    "{step} изменил файл, который вы потом поправили вручную",
+  "{step} had changed files you then changed by hand":
+    "{step} изменил файлы, которые вы потом поправили вручную",
+  "Jarvis does not write over a hand edit: say which version goes on.":
+    "Jarvis не перезаписывает ручную правку: скажите, с какой версией идти дальше.",
+  "{choice} — decided by {who}": "{choice} — решил {who}",
+  "Decided — the checkout is as you chose; the step goes on with it":
+    "Решено — checkout такой, как вы выбрали, шаг продолжается с ним",
+  "Not decided: the checkout could not be changed — see the log of {cmd}":
+    "Не решено: checkout не удалось изменить — смотрите лог {cmd}",
   // ---- a step's skills
   "named by the workflow step": "заданы в шаге workflow",
   "picked by {what}": "подобраны по {what}",

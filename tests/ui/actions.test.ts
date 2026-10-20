@@ -1,12 +1,16 @@
 import { execFileSync } from "node:child_process";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
+import { join } from "node:path";
 import { PassThrough, Writable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createEngine } from "../../src/app/engine.ts";
+import { resumableOf } from "../../src/app/resumable.ts";
 import { createRuntime, type Runtime } from "../../src/app/runtime.ts";
 import type { FileToOpen } from "../../src/cli/checkout.ts";
 import { run as cli } from "../../src/cli/main.ts";
 import { loadConfig } from "../../src/core/config/load.ts";
+import { openConflict } from "../../src/interaction/conflict.ts";
 import { startUiServer, type UiServer } from "../../src/ui/server.ts";
 import { type Sandbox, sandbox } from "../helpers/tmp.ts";
 
@@ -659,6 +663,92 @@ describe("steering a run from the page", () => {
     expect((await post(`/runs/${short}/steer`, { t: ui.token, what: "ask", on: "off" })).location).toBe(
       `/runs/${short}?notice=already-ended`,
     );
+  });
+});
+
+describe("a conflict with a hand edit (ADR-0019 §6.3)", () => {
+  /** A run whose step changed a.ts and a person then changed it too, parked on the conflict. */
+  function conflicted() {
+    const repo = join(sb.root, "payments-service");
+    mkdirSync(repo, { recursive: true });
+    const env = {
+      PATH: process.env.PATH ?? "",
+      GIT_AUTHOR_NAME: "t",
+      GIT_AUTHOR_EMAIL: "t@t",
+      GIT_COMMITTER_NAME: "t",
+      GIT_COMMITTER_EMAIL: "t@t",
+    };
+    const git = (args: string[]) => execFileSync("git", args, { cwd: repo, encoding: "utf8", env }).trim();
+    const commit = (text: string, message: string) => {
+      writeFileSync(join(repo, "a.ts"), text);
+      git(["add", "-A"]);
+      git(["commit", "-q", "-m", message]);
+      return git(["rev-parse", "HEAD"]);
+    };
+    git(["init", "-q", "-b", "main"]);
+    const base = commit("one\n", "init");
+    const runCommit = commit("the run\n", "jarvis: write #1 SUSPENDED");
+    const humanCommit = commit("mine\n", "human edit");
+    const r = rt.runs.create({
+      task: "Payments: retry only temporary rejections",
+      workflow: "gated",
+      owner: DEV,
+      workspace: { mode: "worktree", repoRoot: repo, path: repo, baseRef: "HEAD", baseCommit: base },
+      dataClass: "internal",
+    });
+    rt.runs.update(r.id, { currentStep: "write" });
+    rt.checkpoints.save({
+      runId: r.id,
+      stepId: "write",
+      iteration: 1,
+      kind: "suspend",
+      headCommit: runCommit,
+    });
+    rt.runs.transition(r.id, "RUNNING");
+    const run = rt.runs.require(r.id);
+    const thread = openConflict(rt, run, { files: ["a.ts"], byHand: ["a.ts"], runCommit, humanCommit });
+    rt.runs.transition(r.id, "WAITING_HUMAN", {
+      reason: "a.ts changed both by write and by hand",
+      waitingFor: { kind: "conflict", interactionId: thread.id },
+    });
+    rt.events.emit({ kind: "run.state", runId: r.id, payload: { state: "WAITING_HUMAN" } });
+    return { run: rt.runs.require(r.id), thread, repo, short: r.id.slice(4, 12), git };
+  }
+
+  it("the page names the file and takes the run's version; the person's stays aside", async () => {
+    const { run, thread, repo, short, git } = conflicted();
+    const page = await getPage(`/runs/${short}`);
+    expect(page).toContain("write had changed a file you then changed by hand");
+    expect(page).toContain("a.ts");
+    expect(page).toContain("Keep mine");
+    expect(page).toContain("Take the run&#39;s");
+    expect(page).toContain("I combined them");
+    expect(await getPage("/")).toContain("conflict · write");
+
+    const done = await post(`/runs/${short}/conflict`, { t: ui.token, choice: "run" });
+    expect(done.location).toBe(`/runs/${short}?notice=conflict-decided`);
+    expect(readFileSync(join(repo, "a.ts"), "utf8")).toBe("the run\n");
+    expect(git(["show", `refs/jarvis/set-aside/${short}/${thread.id}:a.ts`])).toBe("mine");
+    expect(rt.interactions.get(thread.id)?.state).toBe("resolved");
+    expect(rt.interactions.get(thread.id)?.resolvedBy).toBe("dev@example.com");
+    expect(resumableOf(rt, rt.runs.require(run.id))).toBe("decided");
+    expect(await getPage(`/runs/${short}`)).toContain("✓ run — decided by dev@example.com");
+    // decided once: a second press finds nothing open
+    expect((await post(`/runs/${short}/conflict`, { t: ui.token, choice: "mine" })).location).toBe(
+      `/runs/${short}?notice=not-waiting`,
+    );
+  });
+
+  it("`jarvis answer <run> mine` keeps the person's files; another word is refused", async () => {
+    const { thread, repo, short } = conflicted();
+    expect(await jarvis(["answer", short, "theirs"]).done).toBe(1);
+    expect(rt.interactions.get(thread.id)?.state).toBe("open");
+    const answered = jarvis(["answer", short, "mine"]);
+    expect(await answered.done).toBe(0);
+    expect(answered.out()).toContain("keep your files; the step starts again from them");
+    expect(readFileSync(join(repo, "a.ts"), "utf8")).toBe("mine\n");
+    expect(rt.interactions.get(thread.id)?.state).toBe("resolved");
+    expect(rt.runs.require(thread.runId).currentIteration).toBe(2);
   });
 });
 
