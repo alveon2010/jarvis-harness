@@ -1190,6 +1190,21 @@ export const RU: Readonly<Record<string, string>> = {
     "Этот прогон нельзя продолжить: он не закончен, ему некуда идти или его уже продолжили",
   "Not a repository this page knows: start {cmd} in it":
     "Этот репозиторий странице незнаком: запустите в нём {cmd}",
+  // ---- an effect whose outcome is unknown (ADR-0002)
+  "did it happen?": "получилось ли?",
+  "{step} started {capability} and lost track of whether it finished.":
+    "{step} начал {capability} и не знает, получилось ли.",
+  "Did {capability} happen?": "{capability} — получилось или нет?",
+  "The run started it at {at} and lost track of whether it finished; the system cannot be asked. Doing it twice may leave a duplicate — a second comment, a second PR.":
+    "Прогон запустил это в {at} и не знает, чем кончилось, а спросить у системы нельзя. Если сделать ещё раз, может появиться дубль — второй комментарий, второй PR.",
+  "Look for {marker} where it writes: a comment, a commit trailer, a PR description.":
+    "Поищите {marker} там, куда оно пишет: в комментарии, в trailer коммита, в описании PR.",
+  "What it was asked": "Что именно запрашивали",
+  Note: "Комментарий",
+  "optional — for the record": "необязательно — для истории",
+  "It is there — go on": "Есть — продолжить",
+  "It is not there — do it again": "Нет — сделать ещё раз",
+  "In the terminal: {cmd}": "В терминале: {cmd}",
   // ---- a step's skills
   "named by the workflow step": "заданы в шаге workflow",
   "picked by {what}": "подобраны по {what}",

@@ -27,6 +27,7 @@ import type {
   ArtifactPage,
   BudgetCard,
   ClarifyCard,
+  EffectCard,
   FeedItem,
   LoopCard,
   RunPage,
@@ -337,6 +338,13 @@ ${card.proposal ? html`<p class="ok">${t("Jarvis proposes a rule — accept it o
 <div class="actions"><a class="btn primary" href="${runHref(run)}#decision">${t("Answer")}</a></div>
 </article>`;
   }
+  if (card.kind === "effect")
+    return html`<article class="panel card">
+<div class="row"><span class="pill wait">⏸ ${t("did it happen?")} · ${card.capability}</span>${meta}</div>
+<h3>${firstLine(run.task)}</h3>
+<p>${t("{step} started {capability} and lost track of whether it finished.", { step: card.step, capability: card.capability })}</p>
+<div class="actions"><a class="btn primary" href="${runHref(run)}#decision">${t("Decide")}</a></div>
+</article>`;
   if (card.kind === "scope")
     return html`<article class="panel card">
 <div class="row"><span class="pill wait">⏸ ${t("spans services")} · ${[...new Set(card.report.spans.map((x) => x.service))].join(", ")}</span>${meta}</div>
@@ -1435,7 +1443,7 @@ ${cancelling(r) ? html`<div class="banner bad" data-live="cancelling" role="stat
 </section>
 <div class="mainc">
 ${review ?? ""}
-${card ? (card.kind === "loop" ? loopCardHtml(card, page, actions) : card.kind === "approval" ? approvalCardHtml(card, page, actions) : card.kind === "budget" ? budgetCardHtml(card, page, actions) : card.kind === "clarify" ? clarifyCardHtml(card, page, actions) : card.kind === "scope" ? scopeCardHtml(card, page, actions) : otherCardHtml(card.what, page)) : page.wait ? waitHtml(page, page.wait, now, actions) : page.next || page.continuedBy ? continuationHtml(page, actions) : page.restart && page.resumable !== "retry" ? restartHtml(page, page.restart, actions) : page.evalReady || page.evalCase ? evalHtml(page, actions) : nowHtml(page, now, actions)}
+${card ? (card.kind === "loop" ? loopCardHtml(card, page, actions) : card.kind === "approval" ? approvalCardHtml(card, page, actions) : card.kind === "budget" ? budgetCardHtml(card, page, actions) : card.kind === "clarify" ? clarifyCardHtml(card, page, actions) : card.kind === "scope" ? scopeCardHtml(card, page, actions) : card.kind === "effect" ? effectCardHtml(card, page, actions) : otherCardHtml(card.what, page)) : page.wait ? waitHtml(page, page.wait, now, actions) : page.next || page.continuedBy ? continuationHtml(page, actions) : page.restart && page.resumable !== "retry" ? restartHtml(page, page.restart, actions) : page.evalReady || page.evalCase ? evalHtml(page, actions) : nowHtml(page, now, actions)}
 ${page.redo && actions?.canLaunch ? redoHtml(page, page.redo, actions) : ""}
 ${page.subtasks ? subtasksHtml(page, actions) : ""}
 ${page.contractCheck ? contractCheckHtml(page.contractCheck) : ""}
@@ -1807,6 +1815,31 @@ ${
         html`<div class="actions"><label class="field" style="max-width:220px">Suite<input type="text" name="suite" value="default" pattern="[a-z0-9][a-z0-9-]{0,40}" required></label><button type="submit" class="btn primary big">Make an eval case</button><span class="hint">same as <code>${cmd}</code>; it lands in <code>evals/&lt;suite&gt;/</code> of the repository</span></div>`,
       )
     : html`<div class="actions"><span class="hint"><code>${cmd}</code></span><button type="button" class="btn" data-copy="${cmd}">Copy command</button></div>`
+}
+</section>`;
+}
+
+/**
+ * ADR-0002 §2: the run started a change in an external system and cannot tell whether it happened. The
+ * person looks for the marker and says; the page records it (src/app/effects.ts) and the run goes on.
+ */
+function effectCardHtml(card: EffectCard, page: RunPage, actions?: Actions): Html {
+  const short = shortRunId(page.run.id);
+  return html`<section class="panel decision" aria-labelledby="decision" data-live="card">
+<span class="warn" style="font-size:13px;font-weight:500">${t("Waits for you")} · ${card.step}</span>
+<h2 id="decision">${th("Did {capability} happen?", { capability: html`<code>${card.capability}</code>` })}</h2>
+<p>${t("The run started it at {at} and lost track of whether it finished; the system cannot be asked. Doing it twice may leave a duplicate — a second comment, a second PR.", { at: wallClock(card.startedAt) })}</p>
+<p>${th("Look for {marker} where it writes: a comment, a commit trailer, a PR description.", { marker: html`<code>${card.marker}</code>` })}</p>
+<details><summary>${t("What it was asked")}</summary><pre class="log">${card.asked}</pre></details>
+${
+  actions
+    ? form(
+        actions,
+        `/runs/${encodeURIComponent(short)}/effect`,
+        html`<label class="field">${t("Note")} <span class="hint">${t("optional — for the record")}</span><input type="text" name="note" maxlength="400"></label>
+<div class="actions"><button type="submit" name="decision" value="happened" class="btn primary">${t("It is there — go on")}</button><button type="submit" name="decision" value="again" class="btn">${t("It is not there — do it again")}</button></div>`,
+      )
+    : html`<div class="actions"><span class="hint">${th("In the terminal: {cmd}", { cmd: html`<code>jarvis effect ${short}</code>` })}</span></div>`
 }
 </section>`;
 }

@@ -341,6 +341,11 @@ export function nextCommands(d: RunDetail, goOn?: string): Array<{ cmd: string; 
     // ADR-0025 §7: the task reaches other services
     out.push({ cmd: `jarvis scope ${id} --cross`, why: "go on as a task across services" });
     out.push({ cmd: `jarvis scope ${id} --single --resume`, why: "only this service: go on to the plan" });
+  } else if (r.state === "WAITING_HUMAN" && r.waitingFor?.kind === "effect") {
+    // ADR-0002 §2: did the external change happen? the person looks and says
+    out.push({ cmd: `jarvis effect ${id}`, why: "what was tried and where to look" });
+    out.push({ cmd: `jarvis effect ${id} --happened`, why: "it is there: go on without doing it again" });
+    out.push({ cmd: `jarvis effect ${id} --again`, why: "it is not there: do it again" });
   } else if (r.state === "WAITING_HUMAN") {
     // one command, no flags: it asks right there (questions, accept, send back) and goes on
     out.push({

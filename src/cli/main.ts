@@ -23,6 +23,7 @@ import { runConfigShow } from "./commands/config.ts";
 import { runContext, runReshape } from "./commands/context.ts";
 import { runDbBackup, runDbMigrate, runDbStatus } from "./commands/db.ts";
 import { renderDoctor, runDoctor } from "./commands/doctor.ts";
+import { runEffect } from "./commands/effect.ts";
 import { runEvalsBaseline, runEvalsDiff, runEvalsRun, runEvalsRunToCase } from "./commands/evals.ts";
 import { runExplain } from "./commands/explain.ts";
 import { runHooksInstall, runHooksStatus, runHooksUninstall, runPrePush } from "./commands/hooks.ts";
@@ -569,6 +570,18 @@ export function buildProgram(options: RunOptions = {}): Command {
     .option("--events <n>", "number of recent events to show", (v: string) => Number(v))
     .action(async (run: string | undefined, opts: { all?: boolean; watch?: number; events?: number }) => {
       await runStatus(ctxFor(), run, opts);
+    });
+
+  program
+    .command("effect <run>")
+    .description(
+      "a run waits on an effect whose outcome is unknown: what was tried, and --happened or --again (ADR-0002 §2)",
+    )
+    .option("--happened", "it is there: record it done, the run goes on without doing it again")
+    .option("--again", "it is not there: the run does it again")
+    .option("--note <text>", "why, for the record")
+    .action(async (run: string, opts: { happened?: boolean; again?: boolean; note?: string }) => {
+      await runEffect(ctxFor(), run, opts);
     });
 
   program

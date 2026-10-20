@@ -13,6 +13,7 @@ import {
   rerunRequested,
   waitingCard,
 } from "../app/decide.ts";
+import { unresolvedEffectOf } from "../app/effects.ts";
 import { continuedBy } from "../app/handoff.ts";
 import { Journey, type LoopReport, type StepReport } from "../app/journey.ts";
 import { pauseRequested } from "../app/pause.ts";
@@ -216,6 +217,17 @@ export interface OtherCard {
   readonly what: string;
 }
 
+/** ADR-0002 §2: an external change whose outcome nobody can tell — did it happen? (src/app/effects.ts) */
+export interface EffectCard {
+  readonly kind: "effect";
+  readonly capability: string;
+  readonly step: string;
+  readonly startedAt: string;
+  readonly marker: string;
+  /** What it was asked, as JSON, cut for the page. */
+  readonly asked: string;
+}
+
 /** ADR-0025 §7: an sdd whose impact reaches other services — on as a task across services, or here only. */
 export interface ScopeCard {
   readonly kind: "scope";
@@ -239,7 +251,14 @@ export interface ClarifyCard {
   readonly earlier: readonly EarlierRule[];
 }
 
-export type WaitCard = LoopCard | ApprovalCard | BudgetCard | ClarifyCard | ScopeCard | OtherCard;
+export type WaitCard =
+  | LoopCard
+  | ApprovalCard
+  | BudgetCard
+  | ClarifyCard
+  | ScopeCard
+  | EffectCard
+  | OtherCard;
 
 /** The open clarification thread of a run, as the page shows it. */
 export function clarifyCardOf(runtime: Runtime, run: Run): ClarifyCard | undefined {
@@ -434,6 +453,20 @@ export async function waitCardOf(runtime: Runtime, run: Run, homeDir: string): P
   if (kind === "scope") {
     const report = scopeOf(runtime, run);
     if (report) return { kind: "scope", report };
+  }
+  if (kind === "effect") {
+    const open = unresolvedEffectOf(runtime, run);
+    if (open) {
+      const asked = JSON.stringify(open.args ?? null);
+      return {
+        kind: "effect",
+        capability: open.record.capability,
+        step: open.record.stepId,
+        startedAt: open.record.createdAt,
+        marker: open.marker,
+        asked: asked.length > 600 ? `${asked.slice(0, 599)}…` : asked,
+      };
+    }
   }
   const awaited = kind === "approval" || !kind ? awaitedArtifact(runtime, run) : undefined;
   if (awaited) {

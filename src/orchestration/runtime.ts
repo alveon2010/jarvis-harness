@@ -19,6 +19,7 @@ import {
 } from "../core/domain/workflow.ts";
 import { afterAnalysis, afterImplementation } from "../interaction/review/lifecycle.ts";
 import { ModelError } from "../models/errors.ts";
+import { effectMarker } from "../storage/effects.ts";
 import { LeaseLostError } from "../storage/runStore.ts";
 import { errorFields } from "../telemetry/log.ts";
 import { UnresolvedEffectError } from "./effects.ts";
@@ -723,6 +724,34 @@ export class LocalWorkflowEngine {
       });
     }
     if (error instanceof UnresolvedEffectError) {
+      // what was tried and where its traces would be, for the person who decides (src/app/effects.ts)
+      const record = error.record;
+      this.rt.artifacts.put({
+        runId: run.id,
+        type: "effect-unresolved",
+        name: `${record.key.slice(0, 12)}.json`,
+        content: JSON.stringify(
+          {
+            capability: record.capability,
+            step: record.stepId,
+            iteration: record.iteration,
+            startedAt: record.createdAt,
+            args: this.rt.effects.args(record),
+            marker: effectMarker(run.id, record.key),
+            lookFor: `the text "${effectMarker(run.id, record.key)}" in the system ${record.capability} writes to (a comment, a commit trailer, a PR description)`,
+            decide: [
+              `jarvis effect ${run.id.slice(4, 12)} --happened   (it is there: go on without doing it again)`,
+              `jarvis effect ${run.id.slice(4, 12)} --again      (it is not there: do it again)`,
+            ],
+          },
+          null,
+          2,
+        ),
+        mediaType: "application/json",
+        provenance: { kind: "tool", capability: "runtime.effects" },
+        stepId: record.stepId,
+        iteration: record.iteration,
+      });
       return new SuspendRun("WAITING_HUMAN", error.message, {
         checkpointState: { unresolvedEffect: error.record.key },
         waitingFor: { kind: "effect", detail: error.record.capability },

@@ -29,6 +29,7 @@ import {
   rerunRequested,
   waitingCard,
 } from "../app/decide.ts";
+import { resolveEffect, unresolvedEffectOf } from "../app/effects.ts";
 import { continuedBy } from "../app/handoff.ts";
 import {
   addGlossaryTerm,
@@ -1539,7 +1540,7 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       });
     }
     const m =
-      /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|restart|redo|clarify|eval|note|pause|cleanup|apply|restore-branch|subtask|scope|tests|steer)$/.exec(
+      /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|restart|redo|clarify|eval|note|pause|cleanup|apply|restore-branch|subtask|scope|tests|steer|effect)$/.exec(
         r.url.pathname,
       );
     const run = m ? resolveRun(m[1] as string) : undefined;
@@ -1911,6 +1912,18 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       if (form.get("what") === "ask") setChecksAsk(runtime, run, on, by);
       else if (form.get("what") === "stop-after") requestPauseAfter(runtime, run, by, !on);
       return redirect(r, `/runs/${short}`);
+    }
+    if (m[2] === "effect") {
+      // ADR-0002 §2: did the external change happen? the person's answer, then the run goes on
+      if (!unresolvedEffectOf(runtime, run)) return redirect(r, `/runs/${short}?notice=not-waiting`);
+      const who = await actor();
+      if (!who) return redirect(r, `/runs/${short}?notice=actor`);
+      const decision = form.get("decision");
+      if (decision !== "happened" && decision !== "again") return redirect(r, `/runs/${short}`);
+      const note = (form.get("note") ?? "").trim().slice(0, 400);
+      resolveEffect(runtime, run, decision, who, "ui", note || undefined);
+      goOn(runtime.runs.get(run.id) ?? run);
+      return redirect(r, `/runs/${short}?notice=resumed`);
     }
     if (m[2] === "tests") {
       // failed checks stopped the run (src/app/rounds.ts): the person's choice, with their words
