@@ -92,22 +92,44 @@ function rowToArtifact(row: ArtifactRow): ArtifactVersion {
   });
 }
 
+/**
+ * What masks secrets in an artifact's text before it is stored (ADR-0010 §1: write-time, nothing raw
+ * in a durable store); `at` says whose artifact, for the redaction's event.
+ */
+export type ArtifactRedact = (text: string, at: { runId: string; stepId?: string }) => string;
+
 export class ArtifactStore {
   private readonly db: DatabaseSync;
   private readonly blobs: BlobStore;
   private readonly clock: () => Date;
+  private readonly redact: ArtifactRedact;
 
-  constructor(db: DatabaseSync, blobs: BlobStore, clock: () => Date = () => new Date()) {
+  constructor(
+    db: DatabaseSync,
+    blobs: BlobStore,
+    clock: () => Date = () => new Date(),
+    redact: ArtifactRedact = (text) => text,
+  ) {
     this.db = db;
     this.blobs = blobs;
     this.clock = clock;
+    this.redact = redact;
+  }
+
+  /** Text is redacted; binary content (images, archives) is stored as given. */
+  private redacted(content: Buffer | string, at: { runId: string; stepId?: string }): Buffer | string {
+    return typeof content === "string" ? this.redact(content, at) : content;
   }
 
   /** Creates version 1, or the next version when the logical artifact already exists. */
   put(input: CreateArtifactInput): ArtifactVersion {
     const artifactId = artifactIdFor(input.runId, input.type, input.name);
     const latest = this.latest(artifactId);
-    const blob = this.blobs.put(input.content, input.mediaType);
+    const content = this.redacted(input.content, {
+      runId: input.runId,
+      ...(input.stepId ? { stepId: input.stepId } : {}),
+    });
+    const blob = this.blobs.put(content, input.mediaType);
     const version = latest ? latest.version + 1 : 1;
     this.insert({
       artifactId,
@@ -206,9 +228,14 @@ export class ArtifactStore {
    * ADR-0005 §3: compares `content` with the latest version; a difference becomes a new version
    * with `provenance.kind = human` and a unified diff against the parent.
    */
-  recordHumanEdit(artifactId: string, content: string, actor: Actor, comment?: string): HumanEditResult {
+  recordHumanEdit(artifactId: string, edited: string, actor: Actor, comment?: string): HumanEditResult {
     const latest = this.latest(artifactId);
     if (!latest) throw new Error(`artifact ${artifactId} not found`);
+    // a token pasted into a spec by hand is masked like one an agent wrote
+    const content = this.redact(edited, {
+      runId: latest.runId,
+      ...(latest.stepId ? { stepId: latest.stepId } : {}),
+    });
     if (contentRefOf(content) === latest.contentRef) return { artifact: latest, changed: false };
     const before = this.text(latest);
     const diff = unifiedDiff(

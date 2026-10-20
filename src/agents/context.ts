@@ -20,6 +20,7 @@ import { renderPackage } from "../knowledge/package.ts";
 import type { EngineeringContextPackage } from "../knowledge/resolver.ts";
 import type { Message } from "../models/types.ts";
 import type { StepContext } from "../orchestration/types.ts";
+import { recordRedaction } from "../security/redactionStats.ts";
 import type { CapabilityDescriptor } from "../tools/types.ts";
 import type { AgentDefinition } from "./definition.ts";
 import { contentHash } from "./rereads.ts";
@@ -378,6 +379,17 @@ export async function outlinesFor(
   return out;
 }
 
+/** A file's text on its way into a model request: redacted, and the redaction counted (ADR-0010 §4). */
+function redactForModel(ctx: StepContext, text: string): string {
+  const report = ctx.runtime.redactor.redact(text);
+  recordRedaction(ctx.runtime.events, report, {
+    boundary: "model-request",
+    runId: ctx.run.id,
+    stepId: ctx.step.id,
+  });
+  return report.text;
+}
+
 /**
  * The files earlier steps of this run (and of the run it went on from) read, in their current
  * content, most read first: the next agent starts with them instead of reading them again. Pilot:
@@ -403,7 +415,7 @@ export function codeReadInRun(
     if (!full.startsWith(`${resolve(root)}/`) || !existsSync(full)) continue;
     const buffer = readFileSync(full);
     if (buffer.includes(0)) continue;
-    const text = ctx.runtime.redactor.redact(buffer.toString("utf8")).text;
+    const text = redactForModel(ctx, buffer.toString("utf8"));
     const numbered = numberedLines(text);
     // a long file: its outline and the parts read before, not all of it
     const symbols = outlines?.get(path);
@@ -459,7 +471,7 @@ export function planStepNow(
     }
     // redacted as every other way a file reaches the model (it was not: a secret in a plan step's file
     // went into the prompt as it was)
-    const text = ctx.runtime.redactor.redact(readFileSync(full, "utf8")).text;
+    const text = redactForModel(ctx, readFileSync(full, "utf8"));
     // a long file: its outline and the methods the step names
     const symbols = outlines?.get(path);
     const named = symbols

@@ -10,7 +10,14 @@ import { McpPool, ToolsCache } from "../../mcp/client/pool.ts";
 import { McpToolProvider, type ServerReport } from "../../mcp/provider.ts";
 import { ProbeStore, probeDrift, probeIsStale } from "../../models/probe.ts";
 import { evaluateEgress, formatEgressLine } from "../../security/policy/egress.ts";
+import {
+  formatRedactionStats,
+  highEntropyBurst,
+  type RedactionWindows,
+  redactionWindows,
+} from "../../security/redactionStats.ts";
 import { LATEST_SCHEMA_VERSION, openDatabase, SchemaTooNewError } from "../../storage/index.ts";
+import { SqliteEventStore } from "../../telemetry/events.ts";
 import { logLevelFrom, logSettingsFrom } from "../../telemetry/log.ts";
 import { hasRipgrep } from "../../tools/local/exec.ts";
 import type { CliContext } from "../context.ts";
@@ -31,6 +38,8 @@ export interface Check {
 export interface DoctorReport {
   readonly checks: readonly Check[];
   readonly egress?: string;
+  /** What the Redactor masked over the last day and week (ADR-0010 §4). */
+  readonly redactions?: RedactionWindows;
   readonly ok: boolean;
 }
 
@@ -46,7 +55,13 @@ function compareVersions(a: string, b: string): number {
   return 0;
 }
 
-function check(id: string, status: CheckStatus, subject: string, detail: string, hint?: string): Check {
+export function check(
+  id: string,
+  status: CheckStatus,
+  subject: string,
+  detail: string,
+  hint?: string,
+): Check {
   return hint ? { id, status, subject, detail, hint } : { id, status, subject, detail };
 }
 
@@ -444,16 +459,50 @@ export async function runDoctor(ctx: CliContext): Promise<DoctorReport> {
     }
 
     checks.push(...databaseChecks(home.dbFile), logCheck(home.logsDir, ctx.env));
+    const redactions = readRedactions(home.dbFile);
+    if (redactions) checks.push(redactionCheck(redactions));
     const report: DoctorReport = {
       checks,
       egress: formatEgressLine(egress),
+      ...(redactions ? { redactions } : {}),
       ok: !checks.some((c) => c.status === "fail"),
     };
     return report;
   }
 
   checks.push(...databaseChecks(home.dbFile), logCheck(home.logsDir, ctx.env));
-  return { checks, ok: !checks.some((c) => c.status === "fail") };
+  const redactions = readRedactions(home.dbFile);
+  if (redactions) checks.push(redactionCheck(redactions));
+  return { checks, ...(redactions ? { redactions } : {}), ok: !checks.some((c) => c.status === "fail") };
+}
+
+/** The journal's redaction counts (ADR-0010 §4); none without a database doctor can read. */
+export function readRedactions(dbFile: string, now: Date = new Date()): RedactionWindows | undefined {
+  if (!existsSync(dbFile)) return undefined;
+  try {
+    const opened = openDatabase(dbFile, { migrate: false });
+    try {
+      return redactionWindows(new SqliteEventStore(opened.db), now);
+    } finally {
+      opened.close();
+    }
+  } catch {
+    // a newer or broken schema is the database check's to report
+    return undefined;
+  }
+}
+
+export function redactionCheck(w: RedactionWindows): Check {
+  const detail = `24h ${formatRedactionStats(w.last24h)} · 7d ${formatRedactionStats(w.last7d)}`;
+  return highEntropyBurst(w.last24h)
+    ? check(
+        "redactions",
+        "warn",
+        "redactions",
+        detail,
+        "many high-entropy guesses: look at what the project keeps in code; `jarvis show <run>` lists their shapes",
+      )
+    : check("redactions", "ok", "redactions", detail);
 }
 
 function mcpReports(loaded: LoadedConfig, env: NodeJS.ProcessEnv): ServerReport[] {
@@ -515,12 +564,12 @@ function databaseChecks(dbFile: string): Check[] {
   }
 }
 
-interface SecretRefAt {
+export interface SecretRefAt {
   readonly path: string;
   readonly value: `env:${string}` | `keychain:${string}`;
 }
 
-function collectSecretRefs(loaded: LoadedConfig): SecretRefAt[] {
+export function collectSecretRefs(loaded: LoadedConfig): SecretRefAt[] {
   const refs: SecretRefAt[] = [];
   const visit = (value: unknown, path: string) => {
     if (isSecretRef(value)) {

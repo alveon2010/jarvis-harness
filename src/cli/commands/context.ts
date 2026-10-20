@@ -1,6 +1,7 @@
 import {
   currentTranscript,
   inspectContext,
+  type RedactedSpans,
   type ReshapeKind,
   reshapeContext,
 } from "../../agents/contextOps.ts";
@@ -25,6 +26,31 @@ function pick(ctx: CliContext, runtime: Runtime, ref: string | undefined): Run {
 }
 
 const pct = (x: number) => `${Math.round(x * 100)}%`;
+
+const SHOWN_SPANS = 10;
+
+/**
+ * The masked places in what the model sees (ADR-0010 §4), each with the message it is in and the
+ * text around it, the placeholder highlighted: a masked path or name is told from a masked token here.
+ */
+function renderRedactions(ctx: CliContext, r: RedactedSpans): void {
+  const st = ctx.out.style;
+  if (r.total === 0) {
+    ctx.out.line(`redacted ${st.muted("nothing")}`);
+    return;
+  }
+  const types = Object.entries(r.byType)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([t, n]) => `${t} ×${n}`)
+    .join(", ");
+  ctx.out.line(`redacted ${r.total} place${r.total === 1 ? "" : "s"}  (${types})`);
+  for (const s of r.spans.slice(0, SHOWN_SPANS)) {
+    const where = `#${s.message} ${s.tool ?? s.role}`;
+    ctx.out.line(`  ${st.muted(where)}  ${s.excerpt.replace(s.placeholder, st.warn(s.placeholder))}`);
+  }
+  if (r.total > SHOWN_SPANS)
+    ctx.out.line(st.muted(`  … ${r.total - SHOWN_SPANS} more (\`jarvis --json context\` lists them)`));
+}
 
 /** `jarvis context [run]` — what the agent's context looks like right now (ADR-0013). */
 export async function runContext(ctx: CliContext, ref: string | undefined): Promise<void> {
@@ -55,6 +81,7 @@ export async function runContext(ctx: CliContext, ref: string | undefined): Prom
       ctx.out.line(
         `so far   peak ${pct(view.peakPressure)}  trims ${view.trims}  compactions ${view.compactions}  resets ${view.resets}`,
       );
+      renderRedactions(ctx, view.redactions);
     });
   } finally {
     await runtime.close();

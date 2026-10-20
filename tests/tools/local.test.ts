@@ -204,7 +204,15 @@ describe("local tools", () => {
     expect(config.ok).toBe(true);
     expect(config.text).not.toContain("AKIAIOSFODNN7EXAMPLE");
     expect(config.text).toMatch(/\[REDACTED:aws-access-key:/);
-    expect(rt.events.list({ kind: "security.redaction" })).toHaveLength(1);
+    const redactions = rt.events.list({ kind: "security.redaction" });
+    expect(redactions).toHaveLength(1);
+    expect(redactions[0]?.payload).toMatchObject({
+      boundary: "tool",
+      capability: "repo.read",
+      count: 1,
+      byType: { "aws-access-key": 1 },
+    });
+    expect(JSON.stringify(redactions[0])).not.toContain("AKIA");
     const search = await tools.invoke("repo.search", { pattern: "AKIA" });
     expect(search.text).not.toContain("AKIAIOSFODNN7EXAMPLE");
     expect(search.text).not.toContain(".env");

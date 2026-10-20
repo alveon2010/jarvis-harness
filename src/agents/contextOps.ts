@@ -73,6 +73,63 @@ export interface ContextView {
   readonly trims: number;
   readonly compactions: number;
   readonly resets: number;
+  /** Where the Redactor masked something in what the model sees (ADR-0010 §4). */
+  readonly redactions: RedactedSpans;
+}
+
+export interface RedactedSpan {
+  /** 1-based position of the message in the transcript. */
+  readonly message: number;
+  readonly role: Message["role"];
+  /** The tool whose result this is (tool messages). */
+  readonly tool?: string;
+  readonly type: string;
+  readonly placeholder: string;
+  /** The text around the placeholder as the model sees it (already redacted), on one line. */
+  readonly excerpt: string;
+}
+
+export interface RedactedSpans {
+  readonly total: number;
+  readonly byType: Record<string, number>;
+  /** The first MAX_SPANS of them, in transcript order. */
+  readonly spans: readonly RedactedSpan[];
+}
+
+const PLACEHOLDER = /\[REDACTED:([a-z0-9-]+):[0-9a-f]{8}\]/g;
+const MAX_SPANS = 200;
+
+const oneLine = (s: string) => s.replace(/\s+/g, " ");
+
+/** Every placeholder in the transcript, with the message it is in and a little text around it. */
+export function redactedSpans(transcript: readonly Message[]): RedactedSpans {
+  const toolOf = new Map<string, string>();
+  for (const m of transcript) for (const c of m.toolCalls ?? []) toolOf.set(c.id, c.name);
+  const spans: RedactedSpan[] = [];
+  const byType: Record<string, number> = {};
+  let total = 0;
+  transcript.forEach((m, i) => {
+    for (const match of m.content.matchAll(PLACEHOLDER)) {
+      const type = match[1] as string;
+      total += 1;
+      byType[type] = (byType[type] ?? 0) + 1;
+      if (spans.length >= MAX_SPANS) continue;
+      const at = match.index ?? 0;
+      const end = at + match[0].length;
+      const before = oneLine(m.content.slice(Math.max(0, at - 40), at)).trimStart();
+      const after = oneLine(m.content.slice(end, end + 24)).trimEnd();
+      const tool = m.toolCallId ? toolOf.get(m.toolCallId) : undefined;
+      spans.push({
+        message: i + 1,
+        role: m.role,
+        ...(tool ? { tool } : {}),
+        type,
+        placeholder: match[0],
+        excerpt: `${at > 40 ? "…" : ""}${before}${match[0]}${after}${end + 24 < m.content.length ? "…" : ""}`,
+      });
+    }
+  });
+  return { total, byType, spans };
 }
 
 export function inspectContext(rt: Runtime, run: Run): ContextView | undefined {
@@ -110,6 +167,7 @@ export function inspectContext(rt: Runtime, run: Run): ContextView | undefined {
     trims: t.state.trims ?? 0,
     compactions: t.state.compactions ?? 0,
     resets: t.state.resets ?? 0,
+    redactions: redactedSpans(t.transcript),
   };
 }
 

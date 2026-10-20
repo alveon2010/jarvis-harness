@@ -23,6 +23,7 @@ import { runConfigShow } from "./commands/config.ts";
 import { runContext, runReshape } from "./commands/context.ts";
 import { runDbBackup, runDbMigrate, runDbStatus } from "./commands/db.ts";
 import { renderDoctor, runDoctor } from "./commands/doctor.ts";
+import { renderSecurityReport, runSecurityReport } from "./commands/doctorSecurity.ts";
 import { runEffect } from "./commands/effect.ts";
 import { runEvalsBaseline, runEvalsDiff, runEvalsRun, runEvalsRunToCase } from "./commands/evals.ts";
 import { runExplain } from "./commands/explain.ts";
@@ -189,8 +190,18 @@ export function buildProgram(options: RunOptions = {}): Command {
   program
     .command("doctor")
     .description("check environment, configuration, database, secrets and egress policy")
-    .action(async () => {
+    .option(
+      "--security",
+      "only security: redactions, egress by model and MCP server, exceptions, secrets, denied paths (ADR-0010)",
+    )
+    .action(async (opts: { security?: boolean }) => {
       const ctx = ctxFor();
+      if (opts.security) {
+        const security = await runSecurityReport(ctx);
+        ctx.out.result(security, () => renderSecurityReport(ctx, security));
+        if (ctx.out.json && !security.ok) throw new CliExit(EXIT.error);
+        return;
+      }
       const report = await runDoctor(ctx);
       ctx.out.result(report, () => renderDoctor(ctx, report));
       if (ctx.out.json && !report.ok) throw new CliExit(EXIT.error);

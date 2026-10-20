@@ -23,6 +23,7 @@ import { ModelGateway } from "../models/gateway.ts";
 import { ProbeStore } from "../models/probe.ts";
 import { FileCalibrationStore, TokenEstimator } from "../models/tokens.ts";
 import { Keychain, KeychainSecretResolver } from "../security/credentials/keychain.ts";
+import { recordRedaction } from "../security/redactionStats.ts";
 import {
   compilePatterns,
   DEFAULT_DENIED_PATHS,
@@ -197,7 +198,11 @@ export function createRuntime(loaded: LoadedConfig, options: RuntimeOptions = {}
     probes,
     runs: new SqliteRunStore(db.db),
     blobs,
-    artifacts: new ArtifactStore(db.db, blobs),
+    artifacts: new ArtifactStore(db.db, blobs, undefined, (text, at) => {
+      const report = redactor.redact(text);
+      recordRedaction(events, report, { boundary: "artifact", ...at });
+      return report.text;
+    }),
     checkpoints: new CheckpointStore(db.db),
     history: new StepHistoryStore(db.db),
     effects: new EffectJournal(db.db, blobs),

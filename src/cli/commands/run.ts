@@ -1108,7 +1108,7 @@ export async function runGc(
  * (by type, name or any unique part of `type/name`) printed for reading. Pilot: `jarvis spec`
  * stopped at "awaiting approval" and there was no command to read the spec it asked to approve.
  */
-/** What the redactor masked in tool output, per step, with the shapes of the high-entropy guesses. */
+/** What the redactor masked in what agents read, per step, with the shapes of the high-entropy guesses. */
 function redactionsOf(
   runtime: Runtime,
   runId: string,
@@ -1128,10 +1128,13 @@ function redactionsOf(
   >();
   for (const e of runtime.events.list({ runId, kind: "security.redaction" })) {
     const p = (e.payload ?? {}) as {
+      boundary?: string;
       count?: number;
       byType?: Record<string, number>;
       samples?: Array<{ placeholder: string; shape: string; before: string }>;
     };
+    // what agents read: tool output and files put into a model request, not what they wrote
+    if (p.boundary === "artifact") continue;
     const step = e.stepId ?? "-";
     const acc = by.get(step) ?? {
       count: 0,

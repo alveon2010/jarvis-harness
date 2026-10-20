@@ -6,6 +6,7 @@ import { globMatches } from "../knowledge/frontmatter.ts";
 import { runEffect } from "../orchestration/effects.ts";
 import type { HeldLease } from "../orchestration/lease.ts";
 import { egressExceptionFor, networkAllowed } from "../security/policy/egress.ts";
+import { recordRedaction } from "../security/redactionStats.ts";
 import type { PathPolicy, Redactor } from "../security/redactor.ts";
 import { effectMarker } from "../storage/effects.ts";
 import { matchesAny, type ToolRegistry } from "./registry.ts";
@@ -309,20 +310,13 @@ export class BoundTools {
       text = `${Buffer.from(text, "utf8").subarray(0, max).toString("utf8")}\n…[truncated: full output ${Buffer.byteLength(text)} bytes, blob ${fullRef.slice(0, 12)}]`;
       truncated = true;
     }
-    if (redactedText.count > 0) {
-      this.rt.events.emit({
-        kind: "security.redaction",
-        runId: this.ctx.run.id,
-        stepId: this.ctx.stepId,
-        payload: {
-          boundary: "tool",
-          capability: capability.name,
-          count: redactedText.count,
-          byType: redactedText.byType,
-          ...(redactedText.samples ? { samples: redactedText.samples } : {}),
-        },
-      });
-    }
+    recordRedaction(this.rt.events, redactedText, {
+      boundary: "tool",
+      runId: this.ctx.run.id,
+      stepId: this.ctx.stepId,
+      capability: capability.name,
+      ...(redactedText.samples ? { samples: redactedText.samples } : {}),
+    });
     return {
       capability: capability.name,
       ok: output.ok,
