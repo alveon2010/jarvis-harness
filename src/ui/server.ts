@@ -102,7 +102,7 @@ import { git } from "../tools/local/exec.ts";
 import { type AskView, askContent, askOfRun, recentAsks } from "./ask.ts";
 import { SCRIPT, STYLE } from "./assets.ts";
 import { type DiffFile, type Html, html, parseDiff } from "./html.ts";
-import { inLang, LANG_COOKIE, langOf } from "./i18n.ts";
+import { inLang, LANG_COOKIE, LANGS, type Lang, lang, langOf, t, th } from "./i18n.ts";
 import {
   ARCHITECTURE,
   docsContent,
@@ -290,23 +290,30 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
    * the JSON the page asks for — a request never waits for the journal (pilot: the popover stayed
    * shut while the numbers were being collected).
    */
-  const PENDING_MODELS = JSON.stringify({
-    state: "pending",
-    title: "Models: collecting the stats…",
-    html: modelsPending().value,
-  });
-  let modelsJson: string | undefined;
+  // each language's JSON is made here, outside a request: the page asks for the one of its cookie
+  const perLang = (make: () => string): Record<Lang, string> =>
+    Object.fromEntries(LANGS.map((l) => [l, inLang(l, make)])) as Record<Lang, string>;
+  const PENDING_MODELS = perLang(() =>
+    JSON.stringify({
+      state: "pending",
+      title: t("Models: collecting the stats…"),
+      html: modelsPending().value,
+    }),
+  );
+  let modelsJson: Record<Lang, string> | undefined;
   let healthSoon: ReturnType<typeof setTimeout> | undefined;
   const computeHealth = () => {
     healthSoon = undefined;
     try {
       const health = modelsHealthOf(runtime);
-      modelsJson = JSON.stringify({
-        state: health.state,
-        title: modelsSummary(health),
-        html: modelsPopover(health).value,
-        ...((b) => (b ? { badge: b } : {}))(modelsBadge(health)),
-      });
+      modelsJson = perLang(() =>
+        JSON.stringify({
+          state: health.state,
+          title: modelsSummary(health),
+          html: modelsPopover(health).value,
+          ...((b) => (b ? { badge: b } : {}))(modelsBadge(health)),
+        }),
+      );
     } catch {
       // a busy database: the next round tries again
     }
@@ -325,24 +332,24 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
    * hour, and whether each server answers — a connection of its own at start, every 10 minutes and on
    * "Check now" (a server started by uvx or npx takes seconds to come up: never in a request).
    */
-  const PENDING_MCP = JSON.stringify({
-    state: "pending",
-    title: "MCP: checking the servers…",
-    html: mcpPending().value,
-  });
+  const PENDING_MCP = perLang(() =>
+    JSON.stringify({ state: "pending", title: t("MCP: checking the servers…"), html: mcpPending().value }),
+  );
   const probes = new Map<string, McpProbe>();
   const checking = new Set<string>();
-  let mcpJson: string | undefined;
+  let mcpJson: Record<Lang, string> | undefined;
   const computeMcp = () => {
     try {
       const health = mcpHealthOf(runtime, probes, checking);
       const first = health.servers.some((s) => s.checking && !s.probe);
-      mcpJson = JSON.stringify({
-        state: first ? "pending" : health.state,
-        checking: health.servers.some((s) => s.checking),
-        title: first ? "MCP: checking the servers…" : mcpSummary(health),
-        html: mcpPopover(health, options.readOnly ? {} : { checkToken: token }).value,
-      });
+      mcpJson = perLang(() =>
+        JSON.stringify({
+          state: first ? "pending" : health.state,
+          checking: health.servers.some((s) => s.checking),
+          title: first ? t("MCP: checking the servers…") : mcpSummary(health),
+          html: mcpPopover(health, options.readOnly ? {} : { checkToken: token }).value,
+        }),
+      );
     } catch {
       // a busy database: the next round tries again
     }
@@ -424,8 +431,8 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
     page(
       r,
       404,
-      { title: "Not found", page: "error" },
-      errorContent(404, message, html`<a href="/">All runs</a>`),
+      { title: t("Not found"), page: "error" },
+      errorContent(404, message, html`<a href="/">${t("All runs")}</a>`),
     );
 
   /** The session token: from the address the first time (then a cookie and a clean address), or the cookie. */
@@ -445,12 +452,13 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
   const resolveRun = (ref: string): Run | undefined => runtime.runs.resolve(decodeURIComponent(ref));
 
   const diffOf = async (run: Run): Promise<{ files?: DiffFile[]; note?: string }> => {
-    if (!existsSync(run.workspace.path)) return { note: `The run's checkout is gone: ${run.workspace.path}` };
+    if (!existsSync(run.workspace.path))
+      return { note: t("The run's checkout is gone: {path}", { path: run.workspace.path }) };
     const base = run.workspace.baseCommit ?? run.workspace.baseRef;
     const r = await git(["diff", "--no-color", "--no-ext-diff", base], run.workspace.path, {
       maxBytes: 4 * 1024 * 1024,
     });
-    if (r.code !== 0) return { note: "No diff: the checkout is not a git repository here." };
+    if (r.code !== 0) return { note: t("No diff: the checkout is not a git repository here.") };
     return { files: parseDiff(r.stdout) };
   };
 
@@ -461,57 +469,57 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
   /** What a POST came back with, as a fixed message: nothing from the address is shown as markup. */
   const noticeOf = (r: Request): Html | undefined => {
     const n = r.url.searchParams.get("notice");
-    const editor = r.url.searchParams.get("editor") ?? "your editor";
+    const editor = r.url.searchParams.get("editor") ?? t("your editor");
     const notices: Record<string, Html> = {
-      opened: html`<div class="banner ok">↗ opened in ${editor} — the page watches the checkout: save there, then run the step again</div>`,
-      "no-editor": html`<div class="banner bad">No editor found — set JARVIS_EDITOR (code, idea, webstorm…) where you start <code>jarvis ui</code></div>`,
-      "no-checkout": html`<div class="banner bad">The run's checkout is gone</div>`,
-      actor: html`<div class="banner bad">Cannot determine who decides: set JARVIS_ACTOR, actor.id or git config user.email (ADR-0006)</div>`,
-      taken: html`<div class="banner bad">This version was decided meanwhile (in a terminal or another window): yours is not recorded</div>`,
-      stale: html`<div class="banner bad">The run no longer waits for this version: nothing recorded</div>`,
-      empty: html`<div class="banner bad">Say what to change — a comment, or comments on lines of the diff</div>`,
-      "not-waiting": html`<div class="banner bad">The run no longer waits here: nothing recorded</div>`,
-      amount: html`<div class="banner bad">Say how many more — a whole number above zero</div>`,
-      resumed: html`<div class="banner ok">Resumed — it goes on in the background from where it stopped</div>`,
-      cancelled: html`<div class="banner ok">Cancelled — nothing runs it any more; its checkout and artifacts stay</div>`,
-      "pause-requested": html`<div class="banner ok">Pause requested — the run stops after its current model or tool call and keeps its place</div>`,
-      "not-running": html`<div class="banner info">Nothing runs it now — there is nothing to pause</div>`,
-      "cancel-requested": html`<div class="banner ok">Cancel requested — the process running it stops at its next safe point (after the current model or tool call)</div>`,
-      "already-ended": html`<div class="banner bad">The run has ended already: nothing to cancel</div>`,
-      cleaned: html`<div class="banner ok">Checkout removed — the files go in the background; the branch stays</div>`,
-      applied: html`<div class="banner ok">Applied: ${r.url.searchParams.get("files") ?? "?"} file(s) as <code>${r.url.searchParams.get("commit") ?? ""}</code> on the branch checked out in the repository — not pushed</div>`,
-      "went-cross": html`<div class="banner ok">Going on as a task across services: the research and the spec are here — next, the split to approve</div>`,
-      "knowledge-no-code": html`<div class="banner bad">Fix a bug runs in one service: pick it in Where — or Implement across services</div>`,
-      "cross-elsewhere": html`<div class="banner bad">A task across services runs in All services: pick it in Where</div>`,
-      "subtask-started": html`<div class="banner ok">The subtask starts in its service's repository — it shows up here in a moment</div>`,
-      "subtask-publishing": html`<div class="banner ok">publish-local runs again in the library's checkout — the services waiting for it start when it passes</div>`,
-      "subtask-dropped": html`<div class="banner ok">Dropped from the task; once the others are done the master goes on without it</div>`,
-      "no-subtask": html`<div class="banner bad">No such subtask, or its service has no repository on this machine</div>`,
-      "apply-failed": html`<div class="banner bad">Not applied: ${r.url.searchParams.get("why") ?? "see jarvis logs"}</div>`,
-      restored: html`<div class="banner ok">The branch is back — apply it, or remove it again</div>`,
-      "restore-failed": html`<div class="banner bad">The branch could not be restored (a branch of that name exists?)</div>`,
-      "cleaned-all": html`<div class="banner ok">Checkout and branch removed — the files go in the background</div>`,
-      "cleaned-branch-kept": html`<div class="banner bad">Checkout removed; the branch could not be deleted (checked out somewhere?) — <code>git branch -D</code> it by hand</div>`,
-      "not-ended": html`<div class="banner bad">The run has not ended: cancel it first, then clean up</div>`,
-      resuming: html`<div class="banner ok">It is being resumed already</div>`,
-      "no-launcher": html`<div class="banner bad">This page cannot start runs: resume it with <code>jarvis resume</code></div>`,
-      started: html`<div class="banner ok">Started — it prepares its checkout and shows up under Running; where it needs you, it waits here</div>`,
-      "no-task": html`<div class="banner bad">Say what to do and pick a workflow</div>`,
-      noted: html`<div class="banner ok">The note goes to the agent with its next model call — binding, and for every step after it</div>`,
-      "no-note": html`<div class="banner bad">Write the note first</div>`,
-      "eval-made": html`<div class="banner ok">The eval case is written: review its case.yaml, then record it once${
+      opened: html`<div class="banner ok">↗ ${t("opened in {editor} — the page watches the checkout: save there, then run the step again", { editor })}</div>`,
+      "no-editor": html`<div class="banner bad">${th("No editor found — set JARVIS_EDITOR (code, idea, webstorm…) where you start {cmd}", { cmd: html`<code>jarvis ui</code>` })}</div>`,
+      "no-checkout": html`<div class="banner bad">${t("The run's checkout is gone")}</div>`,
+      actor: html`<div class="banner bad">${t("Cannot determine who decides: set JARVIS_ACTOR, actor.id or git config user.email (ADR-0006)")}</div>`,
+      taken: html`<div class="banner bad">${t("This version was decided meanwhile (in a terminal or another window): yours is not recorded")}</div>`,
+      stale: html`<div class="banner bad">${t("The run no longer waits for this version: nothing recorded")}</div>`,
+      empty: html`<div class="banner bad">${t("Say what to change — a comment, or comments on lines of the diff")}</div>`,
+      "not-waiting": html`<div class="banner bad">${t("The run no longer waits here: nothing recorded")}</div>`,
+      amount: html`<div class="banner bad">${t("Say how many more — a whole number above zero")}</div>`,
+      resumed: html`<div class="banner ok">${t("Resumed — it goes on in the background from where it stopped")}</div>`,
+      cancelled: html`<div class="banner ok">${t("Cancelled — nothing runs it any more; its checkout and artifacts stay")}</div>`,
+      "pause-requested": html`<div class="banner ok">${t("Pause requested — the run stops after its current model or tool call and keeps its place")}</div>`,
+      "not-running": html`<div class="banner info">${t("Nothing runs it now — there is nothing to pause")}</div>`,
+      "cancel-requested": html`<div class="banner ok">${t("Cancel requested — the process running it stops at its next safe point (after the current model or tool call)")}</div>`,
+      "already-ended": html`<div class="banner bad">${t("The run has ended already: nothing to cancel")}</div>`,
+      cleaned: html`<div class="banner ok">${t("Checkout removed — the files go in the background; the branch stays")}</div>`,
+      applied: html`<div class="banner ok">${th("Applied: {n} file(s) as {commit} on the branch checked out in the repository — not pushed", { n: r.url.searchParams.get("files") ?? "?", commit: html`<code>${r.url.searchParams.get("commit") ?? ""}</code>` })}</div>`,
+      "went-cross": html`<div class="banner ok">${t("Going on as a task across services: the research and the spec are here — next, the split to approve")}</div>`,
+      "knowledge-no-code": html`<div class="banner bad">${t("Fix a bug runs in one service: pick it in Where — or Implement across services")}</div>`,
+      "cross-elsewhere": html`<div class="banner bad">${t("A task across services runs in All services: pick it in Where")}</div>`,
+      "subtask-started": html`<div class="banner ok">${t("The subtask starts in its service's repository — it shows up here in a moment")}</div>`,
+      "subtask-publishing": html`<div class="banner ok">${t("publish-local runs again in the library's checkout — the services waiting for it start when it passes")}</div>`,
+      "subtask-dropped": html`<div class="banner ok">${t("Dropped from the task; once the others are done the master goes on without it")}</div>`,
+      "no-subtask": html`<div class="banner bad">${t("No such subtask, or its service has no repository on this machine")}</div>`,
+      "apply-failed": html`<div class="banner bad">${t("Not applied:")} ${r.url.searchParams.get("why") ?? t("see jarvis logs")}</div>`,
+      restored: html`<div class="banner ok">${t("The branch is back — apply it, or remove it again")}</div>`,
+      "restore-failed": html`<div class="banner bad">${t("The branch could not be restored (a branch of that name exists?)")}</div>`,
+      "cleaned-all": html`<div class="banner ok">${t("Checkout and branch removed — the files go in the background")}</div>`,
+      "cleaned-branch-kept": html`<div class="banner bad">${th("Checkout removed; the branch could not be deleted (checked out somewhere?) — {cmd} it by hand", { cmd: html`<code>git branch -D</code>` })}</div>`,
+      "not-ended": html`<div class="banner bad">${t("The run has not ended: cancel it first, then clean up")}</div>`,
+      resuming: html`<div class="banner ok">${t("It is being resumed already")}</div>`,
+      "no-launcher": html`<div class="banner bad">${th("This page cannot start runs: resume it with {cmd}", { cmd: html`<code>jarvis resume</code>` })}</div>`,
+      started: html`<div class="banner ok">${t("Started — it prepares its checkout and shows up under Running; where it needs you, it waits here")}</div>`,
+      "no-task": html`<div class="banner bad">${t("Say what to do and pick a workflow")}</div>`,
+      noted: html`<div class="banner ok">${t("The note goes to the agent with its next model call — binding, and for every step after it")}</div>`,
+      "no-note": html`<div class="banner bad">${t("Write the note first")}</div>`,
+      "eval-made": html`<div class="banner ok">${t("The eval case is written: review its case.yaml, then record it once")}${
         r.url.searchParams.get("skipped")
-          ? ` · ${r.url.searchParams.get("skipped")} knowledge file(s) changed after the run began are not in its overlay`
+          ? ` · ${t("{n} knowledge file(s) changed after the run began are not in its overlay", { n: r.url.searchParams.get("skipped") ?? "" })}`
           : ""
       }</div>`,
-      "eval-failed": html`<div class="banner bad">No eval case written — see the log of <code>jarvis ui</code> (a run that ended, a repository git can archive)</div>`,
-      "eval-suite": html`<div class="banner bad">A suite is a short name: lowercase letters, digits and dashes</div>`,
-      "no-answer": html`<div class="banner bad">Write the answer first</div>`,
-      clarified: html`<div class="banner ok">The rule is recorded — the step goes on with it in the background</div>`,
-      "no-rule": html`<div class="banner bad">Nothing to accept yet: Jarvis has not proposed a rule — answer, or write the rule yourself</div>`,
-      "no-hint": html`<div class="banner bad">A hint needs your words: what to look at, what to do</div>`,
-      "cannot-continue": html`<div class="banner bad">This run cannot go on: it has not finished, has nowhere to go or went on already</div>`,
-      "no-repo": html`<div class="banner bad">Not a repository this page knows: start <code>jarvis ui</code> in it</div>`,
+      "eval-failed": html`<div class="banner bad">${th("No eval case written — see the log of {cmd} (a run that ended, a repository git can archive)", { cmd: html`<code>jarvis ui</code>` })}</div>`,
+      "eval-suite": html`<div class="banner bad">${t("A suite is a short name: lowercase letters, digits and dashes")}</div>`,
+      "no-answer": html`<div class="banner bad">${t("Write the answer first")}</div>`,
+      clarified: html`<div class="banner ok">${t("The rule is recorded — the step goes on with it in the background")}</div>`,
+      "no-rule": html`<div class="banner bad">${t("Nothing to accept yet: Jarvis has not proposed a rule — answer, or write the rule yourself")}</div>`,
+      "no-hint": html`<div class="banner bad">${t("A hint needs your words: what to look at, what to do")}</div>`,
+      "cannot-continue": html`<div class="banner bad">${t("This run cannot go on: it has not finished, has nowhere to go or went on already")}</div>`,
+      "no-repo": html`<div class="banner bad">${th("Not a repository this page knows: start {cmd} in it", { cmd: html`<code>jarvis ui</code>` })}</div>`,
     };
     return n ? notices[n] : undefined;
   };
@@ -1507,7 +1515,7 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       const sent = (await formOf(r.req)).get("t");
       if (!sent || !same(sent, token)) return send(r, 403, forbiddenPage());
       void checkMcp();
-      return send(r, 202, mcpJson ?? PENDING_MCP, "application/json; charset=utf-8", {
+      return send(r, 202, (mcpJson ?? PENDING_MCP)[lang()], "application/json; charset=utf-8", {
         "Cache-Control": "no-store",
       });
     }
@@ -2150,12 +2158,12 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
           workflow = undefined;
         }
         const d = await diffOf(run);
-        const t = tryOutOf(runtime, run, {
+        const tr = tryOutOf(runtime, run, {
           ...(workflow ? { workflow } : {}),
           homeDir: options.homeDir,
           changed: (d.files ?? []).map((f) => f.path),
         });
-        if (t) Object.assign(extras, { tryOut: t });
+        if (tr) Object.assign(extras, { tryOut: tr });
         Object.assign(extras, d.files ? { diff: d.files } : {}, d.note ? { diffNote: d.note } : {});
       }
       return page(
@@ -2174,7 +2182,7 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
     if (path === "/models.json") {
       // the header's indicator: answered from the last computed state at once, never computed here
       if (!modelsJson) scheduleHealth(0);
-      return send(r, 200, modelsJson ?? PENDING_MODELS, "application/json; charset=utf-8", {
+      return send(r, 200, (modelsJson ?? PENDING_MODELS)[lang()], "application/json; charset=utf-8", {
         "Cache-Control": "no-store",
       });
     }
@@ -2215,7 +2223,7 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
     }
     if (path === "/mcp.json") {
       if (!mcpJson) computeMcp();
-      return send(r, 200, mcpJson ?? PENDING_MCP, "application/json; charset=utf-8", {
+      return send(r, 200, (mcpJson ?? PENDING_MCP)[lang()], "application/json; charset=utf-8", {
         "Cache-Control": "no-store",
       });
     }

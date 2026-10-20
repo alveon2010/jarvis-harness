@@ -20,7 +20,7 @@ import type { EgressNotice, ModelEgressNotice } from "../security/policy/egress.
 import { shortRunId } from "../storage/runStore.ts";
 import { checkLogHtml, checksHtml, checksOf } from "./checks.ts";
 import { type DiffFile, escapeHtml, type Html, html, join, markdownToHtml, type Part, raw } from "./html.ts";
-import { LANG_COOKIE, lang, plural, t, units, when } from "./i18n.ts";
+import { LANG_COOKIE, lang, plural, t, th, units, when } from "./i18n.ts";
 import type {
   ApprovalCard,
   ArtifactPage,
@@ -161,10 +161,10 @@ ${
   (chrome.egress && chrome.egress.length > 0) || (chrome.modelEgress && chrome.modelEgress.length > 0)
     ? html`<div class="egress" role="note"><div class="wrap">${(chrome.egress ?? []).map(
         (n) =>
-          html`<p><span aria-hidden="true">⚠</span> <b>dataClass ${n.dataClass}</b> — MCP server <code>${n.server}</code> goes to the ${n.network} by an exception, reads only: ${n.reason}</p>`,
+          html`<p><span aria-hidden="true">⚠</span> <b>dataClass ${n.dataClass}</b> — ${th("MCP server {server} goes to the {network} by an exception, reads only: {reason}", { server: html`<code>${n.server}</code>`, network: n.network, reason: n.reason })}</p>`,
       )}${(chrome.modelEgress ?? []).map(
         (n) =>
-          html`<p><span aria-hidden="true">⚠</span> <b>dataClass ${n.dataClass}</b> — model <code>${n.model}</code> is a cloud model, allowed by an exception: ${n.reason}</p>`,
+          html`<p><span aria-hidden="true">⚠</span> <b>dataClass ${n.dataClass}</b> — ${th("model {model} is a cloud model, allowed by an exception: {reason}", { model: html`<code>${n.model}</code>`, reason: n.reason })}</p>`,
       )}</div></div>`
     : ""
 }
@@ -481,8 +481,8 @@ export function restartHintHtml(run: Run, plan: RestartPlan, actions: Actions): 
   const gates = kept.filter((s) => s.kind === "approval" && s.approved).length;
   const what = kept
     .filter((s) => s.kind !== "approval")
-    .map((s) => (approved.includes(s.id) ? `${s.id} (approved)` : s.id));
-  return html`<div class="banner info"><b>${run.state === "FAILED" ? "A failed" : "A cancelled"} ${run.workflow} of this task</b> (<a href="/runs/${short}">${short}</a>${run.currentStep ? `, stopped at ${run.currentStep}` : ""}) can start again from <b>${plan.startAt}</b>: ${what.join(", ")} go in${gates > 0 ? `, ${plural(gates, "approval")} kept` : ""}. ${form(actions, `/runs/${short}/restart`, html`<input type="hidden" name="step" value="${plan.startAt}"><button type="submit" class="btn">Start again from ${plan.startAt}</button>`, ' style="display:inline"')}</div>`;
+    .map((s) => (approved.includes(s.id) ? `${s.id} (${t("approved")})` : s.id));
+  return html`<div class="banner info"><b>${run.state === "FAILED" ? t("A failed {workflow} of this task", { workflow: run.workflow }) : t("A cancelled {workflow} of this task", { workflow: run.workflow })}</b> (<a href="/runs/${short}">${short}</a>${run.currentStep ? `, ${t("stopped at {step}", { step: run.currentStep })}` : ""}) ${th("can start again from {step}: {kept} go in", { step: html`<b>${plan.startAt}</b>`, kept: what.join(", ") })}${gates > 0 ? `, ${t("{n} kept", { n: plural(gates, "approval") })}` : ""}. ${form(actions, `/runs/${short}/restart`, html`<input type="hidden" name="step" value="${plan.startAt}"><button type="submit" class="btn">${t("Start again from {step}", { step: plan.startAt })}</button>`, ' style="display:inline"')}</div>`;
 }
 
 /**
@@ -498,7 +498,7 @@ export function startFromHtml(
   if (!input.targets.has(input.workflow) || !input.task.trim()) return html``;
   const key = issueKeyOf(input.task);
   if (!point)
-    return html`<p class="hint">No finished research of ${key ?? "this task"} in this repository — ${input.workflow} runs from the start.</p>`;
+    return html`<p class="hint">${key ? t("No finished research of {key} in this repository — {workflow} runs from the start.", { key, workflow: input.workflow }) : t("No finished research of this task in this repository — {workflow} runs from the start.", { workflow: input.workflow })}</p>`;
   const r = point.run;
   const stale = isStale(point);
   const facts = [
@@ -507,22 +507,22 @@ export function startFromHtml(
     ...(point.since && !stale
       ? [
           point.since.commits === 0
-            ? "no new commits since"
-            : `${plural(point.since.commits, "commit")} since, none touch what it read`,
+            ? t("no new commits since")
+            : t("{n} since, none touch what it read", { n: plural(point.since.commits, "commit") }),
         ]
       : []),
-    ...(point.since ? [] : ["can't tell whether the code changed since"]),
+    ...(point.since ? [] : [t("can't tell whether the code changed since")]),
   ];
   const touched = point.since?.touched ?? [];
   const shown = touched.slice(0, 3);
   return html`<div class="from">
-<label class="check"><input type="checkbox" name="from" value="${r.id}"${stale ? "" : " checked"}> <span><b>Start from the ${r.workflow} of ${whenShort(r.updatedAt, now)}</b> <span class="meta">— ${facts.join(" · ")}</span></span></label>
+<label class="check"><input type="checkbox" name="from" value="${r.id}"${stale ? "" : " checked"}> <span><b>${t("Start from the {workflow} of {when}", { workflow: r.workflow, when: whenShort(r.updatedAt, now) })}</b> <span class="meta">— ${facts.join(" · ")}</span></span></label>
 ${
   stale
-    ? html`<p class="sub warn">⚠ code changed since: ${plural(point.since?.commits ?? 0, "commit")}, ${plural(touched.length, "file")} it read among them (${shown.map((f, i) => html`${i > 0 ? ", " : ""}${fileRef(f)}`)}${touched.length > shown.length ? ", …" : ""}) — a new research is safer</p>`
+    ? html`<p class="sub warn">⚠ ${th("code changed since: {commits}, {files} it read among them ({list}) — a new research is safer", { commits: plural(point.since?.commits ?? 0, "commit"), files: plural(touched.length, "file"), list: html`${shown.map((f, i) => html`${i > 0 ? ", " : ""}${fileRef(f)}`)}${touched.length > shown.length ? ", …" : ""}` })}</p>`
     : ""
 }
-<p class="sub hint">${stale ? `Unchecked: ${input.workflow} runs from the start, with a new research.` : `${input.workflow} begins at ${point.continuation.startAt} with it; the steps it did are not run again.`} <a href="/runs/${shortRunId(r.id)}" target="_blank" rel="noopener">Open the ${r.workflow}</a></p>
+<p class="sub hint">${stale ? t("Unchecked: {workflow} runs from the start, with a new research.", { workflow: input.workflow }) : t("{workflow} begins at {step} with it; the steps it did are not run again.", { workflow: input.workflow, step: point.continuation.startAt })} <a href="/runs/${shortRunId(r.id)}" target="_blank" rel="noopener">${t("Open the {workflow}", { workflow: r.workflow })}</a></p>
 </div>`;
 }
 
@@ -1821,11 +1821,11 @@ export function documentHtml(name: string, text: string, doc?: Record<string, un
 export function diffFileHtml(f: DiffFile, index: number, comments: boolean): Html {
   const status =
     f.status === "added"
-      ? " · new"
+      ? ` · ${t("new")}`
       : f.status === "deleted"
-        ? " · deleted"
+        ? ` · ${t("deleted")}`
         : f.status === "renamed"
-          ? ` · from ${f.oldPath ?? "?"}`
+          ? ` · ${t("from {path}", { path: f.oldPath ?? "?" })}`
           : "";
   const shown = f.lines.slice(0, 3000);
   const rows = shown.map((l) => {
@@ -1836,11 +1836,11 @@ export function diffFileHtml(f: DiffFile, index: number, comments: boolean): Htm
     const sign = l.kind === "add" ? "+" : l.kind === "del" ? "−" : "";
     const line = l.newLine ?? l.oldLine;
     const can = comments && l.newLine !== undefined;
-    return html`<div class="dl ${l.kind === "context" ? "ctx" : l.kind}"${can ? html` data-path="${f.path}" data-line="${line}"` : ""}>${comments ? html`<span class="cm">${can ? html`<button type="button" data-comment aria-label="Comment on ${f.path} line ${line}">+</button>` : ""}</span>` : ""}<span class="n">${l.oldLine ?? ""}</span><span class="n">${l.newLine !== undefined && f.status !== "deleted" ? html`<a href="${openHref(f.path, l.newLine)}" title="Open in the editor">${l.newLine}</a>` : ""}</span><span class="s" aria-hidden="true">${sign}</span><span class="c">${l.text}</span></div>`;
+    return html`<div class="dl ${l.kind === "context" ? "ctx" : l.kind}"${can ? html` data-path="${f.path}" data-line="${line}"` : ""}>${comments ? html`<span class="cm">${can ? html`<button type="button" data-comment aria-label="${t("Comment on {path} line {line}", { path: f.path, line: String(line) })}">+</button>` : ""}</span>` : ""}<span class="n">${l.oldLine ?? ""}</span><span class="n">${l.newLine !== undefined && f.status !== "deleted" ? html`<a href="${openHref(f.path, l.newLine)}" title="${t("Open in the editor")}">${l.newLine}</a>` : ""}</span><span class="s" aria-hidden="true">${sign}</span><span class="c">${l.text}</span></div>`;
   });
   return html`<details class="panel file"${index < 12 ? html` open` : ""}>
-<summary><span class="fname">${f.path}${f.status !== "deleted" ? html` <a class="open" href="${openHref(f.path)}" title="Open in the editor">↗</a>` : ""}</span><span class="fstat"><span class="ok">+${f.added}</span> <span class="bad">−${f.removed}</span>${status}</span></summary>
-<div class="scroll"><div class="diff" role="table" aria-label="Changes in ${f.path}">${rows}${f.lines.length > shown.length ? html`<div class="dl note"><span class="c">… ${f.lines.length - shown.length} more lines: jarvis diff</span></div>` : ""}</div></div>
+<summary><span class="fname">${f.path}${f.status !== "deleted" ? html` <a class="open" href="${openHref(f.path)}" title="${t("Open in the editor")}">↗</a>` : ""}</span><span class="fstat"><span class="ok">+${f.added}</span> <span class="bad">−${f.removed}</span>${status}</span></summary>
+<div class="scroll"><div class="diff" role="table" aria-label="${t("Changes in {path}", { path: f.path })}">${rows}${f.lines.length > shown.length ? html`<div class="dl note"><span class="c">… ${t("{n} more: jarvis diff", { n: plural(f.lines.length - shown.length, "line") })}</span></div>` : ""}</div></div>
 </details>`;
 }
 
@@ -1865,15 +1865,17 @@ export interface ArtifactExtras {
 }
 
 /** The split's start order when a library of the map changes: it first, who uses it after its change is accepted. */
+// t("{libs} is a library of the map ({kind}): it changes first. The services that use it ({uses}) start once its change is accepted and published by {publish}, against the new version.")
+// t("{libs} are libraries of the map ({kind}): they change first. The services that use them ({uses}) start once their changes are accepted and published by {publish}, against the new version.")
 export function startOrderHtml(order: NonNullable<ArtifactExtras["startOrder"]>): Html {
   const libs = order.filter((x) => x.library).map((x) => x.service);
-  return html`<section class="panel start-order" aria-labelledby="start-h"><h2 id="start-h">How the subtasks start</h2>
-<p class="hint">${libs.join(", ")} ${libs.length === 1 ? "is a library" : "are libraries"} of the map (<code>kind: library</code>): ${libs.length === 1 ? "it changes" : "they change"} first. The services that use ${libs.length === 1 ? "it" : "them"} (<code>uses</code>) start once ${libs.length === 1 ? "its change is" : "their changes are"} accepted and published by <code>publish-local</code>, against the new version.</p>
+  return html`<section class="panel start-order" aria-labelledby="start-h"><h2 id="start-h">${t("How the subtasks start")}</h2>
+<p class="hint">${th(libs.length === 1 ? "{libs} is a library of the map ({kind}): it changes first. The services that use it ({uses}) start once its change is accepted and published by {publish}, against the new version." : "{libs} are libraries of the map ({kind}): they change first. The services that use them ({uses}) start once their changes are accepted and published by {publish}, against the new version.", { libs: libs.join(", "), kind: html`<code>kind: library</code>`, uses: html`<code>uses</code>`, publish: html`<code>publish-local</code>` })}</p>
 <ol class="start-list">${order.map(
     (x) =>
-      html`<li><b>${x.service}</b>${x.library ? html` <span class="pill lib">library</span>` : ""} <span class="muted">${x.after.length > 0 ? `starts after ${x.after.join(", ")} is accepted` : "starts at once"}</span></li>`,
+      html`<li><b>${x.service}</b>${x.library ? html` <span class="pill lib">library</span>` : ""} <span class="muted">${x.after.length > 0 ? t("starts after {list} is accepted", { list: x.after.join(", ") }) : t("starts at once")}</span></li>`,
   )}</ol>
-<p class="hint">Started anyway, a service builds against the version it has: «Start now anyway» on the master's page.</p>
+<p class="hint">${t("Started anyway, a service builds against the version it has: «Start now anyway» on the master's page.")}</p>
 </section>`;
 }
 
@@ -1904,9 +1906,11 @@ function questionsHtml(page: ArtifactPage, extras: ArtifactExtras): Html {
   const calls = items.filter((x) => x.kind === "decision").length;
   const tally = q.suggestions
     ? [
-        fromSources > 0 ? `${fromSources} answered from the sources` : "",
-        calls > 0 ? `${calls} your call` : "",
-        items.length - fromSources - calls > 0 ? `${items.length - fromSources - calls} need you` : "",
+        fromSources > 0 ? t("answered from the sources: {n}", { n: fromSources }) : "",
+        calls > 0 ? t("your call: {n}", { n: calls }) : "",
+        items.length - fromSources - calls > 0
+          ? t("need you: {n}", { n: items.length - fromSources - calls })
+          : "",
       ]
         .filter(Boolean)
         .join(" · ")
@@ -1923,36 +1927,36 @@ function questionsHtml(page: ArtifactPage, extras: ArtifactExtras): Html {
       s?.kind === "answer" ? "jarvis" : s?.kind === "decision" ? s.options.findIndex((o) => o.suggested) : -1;
     const hint =
       s?.kind === "answer" && s.answer
-        ? html`<label class="opt">${radio(n, "jarvis", true)}<span><span class="lbl">✦ From the sources</span><span class="said">${s.answer}</span>${sourceChips(s.sources)}</span></label>`
+        ? html`<label class="opt">${radio(n, "jarvis", true)}<span><span class="lbl">✦ ${t("From the sources")}</span><span class="said">${s.answer}</span>${sourceChips(s.sources)}</span></label>`
         : s?.kind === "decision"
-          ? html`<p class="lbl">✦ The sources don't settle it — your call</p>${sourceChips(s.sources)}${s.options.map(
+          ? html`<p class="lbl">✦ ${t("The sources don't settle it — your call")}</p>${sourceChips(s.sources)}${s.options.map(
               (o, k) =>
-                html`<label class="opt">${radio(n, `opt-${String(k)}`, o.suggested)}<span><span class="said">${o.text}</span>${o.note || o.suggested ? html`<small>${o.suggested ? "suggested" : ""}${o.suggested && o.note ? ": " : ""}${o.note}</small>` : ""}</span></label>`,
+                html`<label class="opt">${radio(n, `opt-${String(k)}`, o.suggested)}<span><span class="said">${o.text}</span>${o.note || o.suggested ? html`<small>${o.suggested ? t("suggested") : ""}${o.suggested && o.note ? ": " : ""}${o.note}</small>` : ""}</span></label>`,
             )}`
           : s?.unbacked && s.answer
-            ? html`<label class="opt guess">${radio(n, "jarvis", false)}<span><span class="lbl">✦ Jarvis's guess — no source confirms it</span><span class="said">${s.answer}</span></span></label>`
+            ? html`<label class="opt guess">${radio(n, "jarvis", false)}<span><span class="lbl">✦ ${t("Jarvis's guess — no source confirms it")}</span><span class="said">${s.answer}</span></span></label>`
             : s
-              ? html`<p class="lbl">✦ Only someone else can say: the analyst, legal, another team</p>`
+              ? html`<p class="lbl">✦ ${t("Only someone else can say: the analyst, legal, another team")}</p>`
               : "";
     const own = live
-      ? html`<label class="opt own">${radio(n, "own", picked === -1)}<span><span class="lbl">My answer</span><textarea name="qa-text-${String(n)}" form="decide-form" rows="2" maxlength="4000" placeholder="${s?.kind === "answer" ? "Instead of Jarvis's answer…" : "Your answer…"}" data-own="${String(n)}"></textarea></span></label>
-<div class="qrow"><label class="pick">${radio(n, "analyst", false)} Ask the analyst</label><label class="pick">${radio(n, "scope", false)} Not in scope</label></div>`
+      ? html`<label class="opt own">${radio(n, "own", picked === -1)}<span><span class="lbl">${t("My answer")}</span><textarea name="qa-text-${String(n)}" form="decide-form" rows="2" maxlength="4000" placeholder="${s?.kind === "answer" ? t("Instead of Jarvis's answer…") : t("Your answer…")}" data-own="${String(n)}"></textarea></span></label>
+<div class="qrow"><label class="pick">${radio(n, "analyst", false)} ${t("Ask the analyst")}</label><label class="pick">${radio(n, "scope", false)} ${t("Not in scope")}</label></div>`
       : "";
     const answered = given
-      ? html`<div class="done">${given.mode === "analyst" ? "↗ for the analyst" : given.mode === "scope" ? "out of scope" : given.text} <span class="meta">— answered</span></div>`
+      ? html`<div class="done">${given.mode === "analyst" ? `↗ ${t("for the analyst")}` : given.mode === "scope" ? t("out of scope") : given.text} <span class="meta">— ${t("answered")}</span></div>`
       : "";
     return html`<fieldset class="q">
-<legend class="sr">Question ${String(n)}</legend><span class="n${answered ? " ok" : ""}" aria-hidden="true">${answered ? "✓" : String(n)}</span>
+<legend class="sr">${t("Question {n}", { n })}</legend><span class="n${answered ? " ok" : ""}" aria-hidden="true">${answered ? "✓" : String(n)}</span>
 <div class="body"><p class="qtext">${question}</p>${s && s.about.length > 0 ? html`<div class="about">${s.about.map((x) => html`<span class="tag">${x}</span>`)}</div>` : ""}
 ${answered || html`${hint}${own}`}</div>
 </fieldset>`;
   };
   const preparing =
     extras.preparing && !q.suggestions
-      ? html`<div class="qs-prep row"><span class="spin" aria-hidden="true"></span><span class="meta">Jarvis prepares answers from the issue, its pages, the design and the research — about a minute</span></div>`
+      ? html`<div class="qs-prep row"><span class="spin" aria-hidden="true"></span><span class="meta">${t("Jarvis prepares answers from the issue, its pages, the design and the research — about a minute")}</span></div>`
       : "";
   return html`<section class="panel qs" id="questions" aria-labelledby="qs-h" data-live="questions">
-<div class="qs-head"><span class="pill wait">${q.list.length} open question${q.list.length === 1 ? "" : "s"}</span><h2 id="qs-h">${live ? "Answer before accepting" : "Open questions"}</h2>${tally ? html`<span class="meta">${tally}</span>` : ""}</div>
+<div class="qs-head"><span class="pill wait">${plural(q.list.length, "open question")}</span><h2 id="qs-h">${live ? t("Answer before accepting") : t("Open questions")}</h2>${tally ? html`<span class="meta">${tally}</span>` : ""}</div>
 ${preparing}
 ${q.list.map(card)}
 ${
@@ -1961,11 +1965,11 @@ ${
         extras.actions,
         `${runHref(page.run)}/decide`,
         html`<input type="hidden" name="artifact" value="${page.artifact.artifactId}"><input type="hidden" name="version" value="${page.artifact.version}"><input type="hidden" name="lines" value="">
-<span class="sum">Answered questions go back with «Send back» — the next version must follow them; the rest stays open.</span>
-<details class="note"><summary>+ A note</summary><label class="field grow">Anything else to change<textarea name="comment" rows="3" placeholder="What the answers above do not cover"></textarea></label></details>
-<div class="actions"><button type="submit" name="decision" value="request_changes" class="btn strong big">Send back with the answers</button>
-<button type="submit" name="decision" value="approve" class="btn accept big">Accept as is</button>
-<span class="hint">${page.terminal ? "The terminal waiting there picks the decision up and goes on." : html`Same as <code>a</code> / <code>c</code> on the terminal's card.`}</span></div>`,
+<span class="sum">${t("Answered questions go back with «Send back» — the next version must follow them; the rest stays open.")}</span>
+<details class="note"><summary>+ ${t("A note")}</summary><label class="field grow">${t("Anything else to change")}<textarea name="comment" rows="3" placeholder="${t("What the answers above do not cover")}"></textarea></label></details>
+<div class="actions"><button type="submit" name="decision" value="request_changes" class="btn strong big">${t("Send back with the answers")}</button>
+<button type="submit" name="decision" value="approve" class="btn accept big">${t("Accept as is")}</button>
+<span class="hint">${page.terminal ? t("The terminal waiting there picks the decision up and goes on.") : th("Same as {a} / {c} on the terminal's card.", { a: html`<code>a</code>`, c: html`<code>c</code>` })}</span></div>`,
         html` class="dock" data-decision id="decide-form"`,
       )
     : ""
@@ -1973,6 +1977,7 @@ ${
 </section>`;
 }
 
+// t("awaiting your approval")
 export function artifactContent(page: ArtifactPage, extras: ArtifactExtras): Html {
   const a = page.artifact;
   const f = page.facts;
@@ -1988,7 +1993,7 @@ export function artifactContent(page: ArtifactPage, extras: ArtifactExtras): Htm
   const glyph = { ok: "✓", bad: "✗", wait: "↻", info: "⏸" }[tone];
   const who =
     a.provenance.kind === "agent"
-      ? `agent ${a.provenance.agentId}`
+      ? t("agent {id}", { id: a.provenance.agentId })
       : a.provenance.kind === "human"
         ? `${a.provenance.actor.id}`
         : a.provenance.kind;
@@ -2008,18 +2013,18 @@ export function artifactContent(page: ArtifactPage, extras: ArtifactExtras): Htm
   const aside =
     !asked && (page.awaited || page.decision || f)
       ? html`<aside class="panel aside" aria-labelledby="your-decision" data-live="decision">
-<h2 id="your-decision">${page.awaited ? "Your decision" : page.decision ? "Decision" : "In brief"}</h2>
+<h2 id="your-decision">${page.awaited ? t("Your decision") : page.decision ? t("Decision") : t("In brief")}</h2>
 ${f?.summary ? html`<p style="font-size:14px;line-height:21px;color:var(--ink-2)">${cut(f.summary, 400)}</p>` : ""}
 ${
   requirements.length > 0
-    ? html`<div class="facts"><span class="lbl">Requirements</span>${requirements.slice(0, 8).map((x) => html`<span>${cut(reqText(x), 140)}</span>`)}${requirements.length > 8 ? html`<span class="muted">+${requirements.length - 8} more</span>` : ""}</div>`
+    ? html`<div class="facts"><span class="lbl">${t("Requirements")}</span>${requirements.slice(0, 8).map((x) => html`<span>${cut(reqText(x), 140)}</span>`)}${requirements.length > 8 ? html`<span class="muted">${t("+{n} more", { n: requirements.length - 8 })}</span>` : ""}</div>`
     : ""
 }
-${f && f.risks.length > 0 ? html`<div class="facts"><span class="lbl">Risks</span>${f.risks.slice(0, 4).map((x) => html`<span>${cut(x, 200)}</span>`)}</div>` : ""}
-${f && f.openQuestions.length > 0 && !page.questions ? html`<div class="facts"><span class="lbl warn">Open questions</span>${f.openQuestions.map((x, i) => html`<span>${i + 1}) ${cut(x, 200)}</span>`)}</div>` : ""}
+${f && f.risks.length > 0 ? html`<div class="facts"><span class="lbl">${t("Risks")}</span>${f.risks.slice(0, 4).map((x) => html`<span>${cut(x, 200)}</span>`)}</div>` : ""}
+${f && f.openQuestions.length > 0 && !page.questions ? html`<div class="facts"><span class="lbl warn">${t("Open questions")}</span>${f.openQuestions.map((x, i) => html`<span>${i + 1}) ${cut(x, 200)}</span>`)}</div>` : ""}
 ${
   page.decision
-    ? html`<div class="banner ${tone === "info" ? "info" : tone === "wait" ? "info" : tone}">${glyph} ${page.state} by ${page.decision.approval.actor.id}${page.decision.channel === "ui" ? " in the browser" : page.decision.channel === "cli" ? " in the terminal" : ""}${page.decision.approval.comment ? html`<br><span style="white-space:pre-wrap">${page.decision.approval.comment.length > 1200 ? `${page.decision.approval.comment.slice(0, 1199)}…` : page.decision.approval.comment}</span>` : ""}</div>`
+    ? html`<div class="banner ${tone === "info" ? "info" : tone === "wait" ? "info" : tone}">${glyph} ${t("{state} by {actor}", { state: t(page.state), actor: page.decision.approval.actor.id })}${page.decision.channel === "ui" ? ` ${t("in the browser")}` : page.decision.channel === "cli" ? ` ${t("in the terminal")}` : ""}${page.decision.approval.comment ? html`<br><span style="white-space:pre-wrap">${page.decision.approval.comment.length > 1200 ? `${page.decision.approval.comment.slice(0, 1199)}…` : page.decision.approval.comment}</span>` : ""}</div>`
     : ""
 }
 ${page.decision && page.atGate ? html`<div class="decide">${goesOn(page, extras.actions)}</div>` : ""}
@@ -2030,26 +2035,26 @@ ${
         `${runHref(page.run)}/decide`,
         html`<input type="hidden" name="artifact" value="${a.artifactId}"><input type="hidden" name="version" value="${a.version}"><input type="hidden" name="lines" value="">
 <div class="decide">
-<label for="comment">What to change <span class="muted">(for Send back; line comments on the diff go with it)</span></label>
+<label for="comment">${t("What to change")} <span class="muted">(${t("for Send back; line comments on the diff go with it")})</span></label>
 <textarea id="comment" name="comment" rows="3"></textarea>
-<button type="submit" name="decision" value="approve" class="btn accept big">Accept</button>
-<button type="submit" name="decision" value="request_changes" class="btn strong big" data-send-back>Send back</button>
-<span class="hint">Same as <code>a</code> / <code>c</code> on the terminal's card. ${page.terminal ? "The terminal waiting there picks the decision up and goes on." : html`No terminal waits: the run goes on with <code>jarvis continue ${shortRunId(page.run.id)}</code>.`}</span>
+<button type="submit" name="decision" value="approve" class="btn accept big">${t("Accept")}</button>
+<button type="submit" name="decision" value="request_changes" class="btn strong big" data-send-back>${t("Send back")}</button>
+<span class="hint">${th("Same as {a} / {c} on the terminal's card.", { a: html`<code>a</code>`, c: html`<code>c</code>` })} ${page.terminal ? t("The terminal waiting there picks the decision up and goes on.") : th("No terminal waits: the run goes on with {cmd}.", { cmd: html`<code>jarvis continue ${shortRunId(page.run.id)}</code>` })}</span>
 </div>`,
         html` data-decision`,
       )
     : page.awaited
-      ? html`<div class="decide"><span class="hint">Decide in the terminal: <code>jarvis continue ${shortRunId(page.run.id)}</code> — <code>a</code> accepts, <code>c</code> sends back.</span><button type="button" class="btn" data-copy="jarvis continue ${shortRunId(page.run.id)}">Copy command</button></div>`
+      ? html`<div class="decide"><span class="hint">${th("Decide in the terminal: {cmd} — {a} accepts, {c} sends back.", { cmd: html`<code>jarvis continue ${shortRunId(page.run.id)}</code>`, a: html`<code>a</code>`, c: html`<code>c</code>` })}</span><button type="button" class="btn" data-copy="jarvis continue ${shortRunId(page.run.id)}">${t("Copy command")}</button></div>`
       : ""
 }
 </aside>`
       : "";
   return html`<div style="display:flex;flex-direction:column;gap:8px" data-live="head">
-<div class="row">${page.state ? html`<span class="pill ${tone}">${glyph} ${page.state}</span>` : ""}<span class="meta" style="font-size:13px">${a.type}/${a.name}@${a.version} · ${a.stepId ?? "-"}${a.iteration && a.iteration > 1 ? `#${a.iteration}` : ""} · ${who} · run ${shortRunId(page.run.id)}</span></div>
+<div class="row">${page.state ? html`<span class="pill ${tone}">${glyph} ${t(page.state)}</span>` : ""}<span class="meta" style="font-size:13px">${a.type}/${a.name}@${a.version} · ${a.stepId ?? "-"}${a.iteration && a.iteration > 1 ? `#${a.iteration}` : ""} · ${who} · run ${shortRunId(page.run.id)}</span></div>
 <h1>${title}</h1>
 ${
   page.versions.length > 1
-    ? html`<nav class="versions" aria-label="Versions"><span style="background:none;color:var(--muted);padding:0">version</span>${page.versions.map(
+    ? html`<nav class="versions" aria-label="${t("Versions")}"><span style="background:none;color:var(--muted);padding:0">${t("version")}</span>${page.versions.map(
         (v) =>
           v === a.version
             ? html`<span aria-current="page">${v}</span>`
@@ -2059,10 +2064,10 @@ ${
 }
 </div>
 ${extras.banner ?? ""}
-${partial ? html`<div class="banner bad">⚠ incomplete: agent ${partial.agentId} hit its ${partial.limit} limit — what it did not cover is unknown</div>` : ""}
+${partial ? html`<div class="banner bad">⚠ ${t("incomplete: agent {agent} hit its {limit} limit — what it did not cover is unknown", { agent: partial.agentId, limit: partial.limit })}</div>` : ""}
 ${
   diff || page.questions || extras.tryOut
-    ? html`<nav class="tabs" aria-label="Sections">${page.questions ? html`<a href="#questions">Questions <span class="muted">${page.questions.list.length}</span></a>` : ""}${extras.tryOut ? html`<a href="#try">Try it</a>` : ""}<a href="#document">${diff ? "Summary" : "Document"}</a>${diff ? html`<a href="#files">Files changed <span class="muted">${diff.length}</span></a>` : ""}</nav>`
+    ? html`<nav class="tabs" aria-label="${t("Sections")}">${page.questions ? html`<a href="#questions">${t("Questions")} <span class="muted">${page.questions.list.length}</span></a>` : ""}${extras.tryOut ? html`<a href="#try">${t("Try it")}</a>` : ""}<a href="#document">${diff ? t("Summary") : t("Document")}</a>${diff ? html`<a href="#files">${t("Files changed")} <span class="muted">${diff.length}</span></a>` : ""}</nav>`
     : ""
 }
 <div class="cols">
@@ -2070,15 +2075,15 @@ ${
 ${questionsHtml(page, extras)}
 ${extras.tryOut ? tryHtml(extras.tryOut, page, extras) : ""}
 ${extras.startOrder?.some((x) => x.library) ? startOrderHtml(extras.startOrder) : ""}
-<section id="document" class="panel doc" aria-label="Document">${a.type === "check-log" ? checkLogHtml(page.text) : ((checks) => (checks ? checksHtml(page.run, checks) : documentHtml(a.name, page.text, f?.doc)))(a.type === "checks" ? checksOf(parseJson(page.text)) : undefined)}</section>
+<section id="document" class="panel doc" aria-label="${t("Document")}">${a.type === "check-log" ? checkLogHtml(page.text) : ((checks) => (checks ? checksHtml(page.run, checks) : documentHtml(a.name, page.text, f?.doc)))(a.type === "checks" ? checksOf(parseJson(page.text)) : undefined)}</section>
 ${
   diff
-    ? html`<section id="files" class="group" aria-labelledby="files-h"><h2 id="files-h">Files changed <span class="muted" style="font-weight:400">${diff.length}</span></h2>${
+    ? html`<section id="files" class="group" aria-labelledby="files-h"><h2 id="files-h">${t("Files changed")} <span class="muted" style="font-weight:400">${diff.length}</span></h2>${
         diff.length > 0
           ? diff.map((x, i) =>
               diffFileHtml(x, i, extras.comments === true && page.awaited && extras.actions !== undefined),
             )
-          : html`<div class="panel empty">No changes against the base.</div>`
+          : html`<div class="panel empty">${t("No changes against the base.")}</div>`
       }</section>`
     : extras.diffNote
       ? html`<p class="muted">${extras.diffNote}</p>`
@@ -2090,7 +2095,7 @@ ${aside}
 }
 
 export function errorContent(status: number, message: string, hint?: Part): Html {
-  return html`<div class="lede"><h1>${status === 404 ? "Not found" : "Something went wrong"}</h1></div>
+  return html`<div class="lede"><h1>${status === 404 ? t("Not found") : t("Something went wrong")}</h1></div>
 <div class="panel empty"><p>${message}</p>${hint ? html`<p class="muted" style="margin-top:8px">${hint}</p>` : ""}</div>`;
 }
 
@@ -2103,6 +2108,7 @@ export { escapeHtml };
 
 /* ---- the models indicator (ADR-0023): a dot in the header, the details in a popover ---- */
 
+// t("ok") t("busy") t("down") t("idle")
 const HEALTH: Record<HealthState, { label: string; pill: string }> = {
   ok: { label: "ok", pill: "ok" },
   busy: { label: "busy", pill: "wait" },
@@ -2112,11 +2118,11 @@ const HEALTH: Record<HealthState, { label: string; pill: string }> = {
 
 /** One line for the indicator's tooltip: the worst model and why; and what is unlimited now. */
 export function modelsSummary(h: ModelsHealth): string {
-  if (h.models.length === 0) return "Models: none configured";
+  if (h.models.length === 0) return t("Models: none configured");
   const worst = h.models.find((m) => m.state === h.state);
   const why = worst?.reasons[0];
   const free = unlimitedNow(h);
-  return `Models: ${HEALTH[h.state].label}${worst && h.state !== "ok" && h.state !== "idle" ? ` — ${worst.id}${why ? `: ${why}` : ""}` : ""}${free ? ` · ${free.id}: ${unlimitedText(free.unlimited)}` : ""}`;
+  return `${t("Models")}: ${t(HEALTH[h.state].label)}${worst && h.state !== "ok" && h.state !== "idle" ? ` — ${worst.id}${why ? `: ${why}` : ""}` : ""}${free ? ` · ${free.id}: ${unlimitedText(free.unlimited)}` : ""}`;
 }
 
 /** The model unlimited now that matters most: the one whose unlimited hours are on, else a pool with no limits. */
@@ -2129,7 +2135,7 @@ function unlimitedNow(h: ModelsHealth): (ModelHealth & { unlimited: Unlimited })
 export function modelsBadge(h: ModelsHealth): string | undefined {
   const free = unlimitedNow(h);
   if (!free?.unlimited.now) return undefined;
-  return free.unlimited.until ? `∞ until ${whenAt(free.unlimited.until)}` : "∞";
+  return free.unlimited.until ? `∞ ${t("until {at}", { at: whenAt(free.unlimited.until) })}` : "∞";
 }
 
 /** `14:30` today, `Mon 07:00` another day. */
@@ -2138,15 +2144,17 @@ function whenAt(ts: string): string {
   const time = at.toTimeString().slice(0, 5);
   return at.toDateString() === new Date().toDateString()
     ? time
-    : `${at.toLocaleDateString("en-GB", { weekday: "short" })} ${time}`;
+    : `${at.toLocaleDateString(lang() === "ru" ? "ru-RU" : "en-GB", { weekday: "short" })} ${time}`;
 }
 
 function unlimitedText(u: Unlimited): string {
   if (u.now)
     return u.always
-      ? "unlimited (its pool has no limits)"
-      : `unlimited hours${u.until ? ` until ${whenAt(u.until)}` : ""}`;
-  return u.next ? `unlimited hours from ${whenAt(u.next)}` : "";
+      ? t("unlimited (its pool has no limits)")
+      : u.until
+        ? t("unlimited hours until {at}", { at: whenAt(u.until) })
+        : t("unlimited hours");
+  return u.next ? t("unlimited hours from {at}", { at: whenAt(u.next) }) : "";
 }
 
 const pct = (share: number) => `${Math.round(share * 100)}%`;
@@ -2157,33 +2165,33 @@ function modelHtml(m: ModelHealth): Html {
   const used = w?.share !== undefined ? Math.min(100, Math.round(w.share * 100)) : undefined;
   const r = m.recent;
   const lineOf = [
-    `${r.calls} call${r.calls === 1 ? "" : "s"}`,
-    ...(r.failed > 0 ? [`${r.failed} failed`] : []),
-    ...(r.retries > 0 ? [`${r.retries} retr${r.retries === 1 ? "y" : "ies"}`] : []),
+    plural(r.calls, "call"),
+    ...(r.failed > 0 ? [t("failed: {n}", { n: r.failed })] : []),
+    ...(r.retries > 0 ? [plural(r.retries, "retry", "retries")] : []),
     ...(r.latencyP50Ms ? [`p50 ${duration(r.latencyP50Ms)}`] : []),
-    ...(r.lastCallAt ? [`last ${wall(r.lastCallAt)}`] : []),
+    ...(r.lastCallAt ? [t("last at {at}", { at: wall(r.lastCallAt) })] : []),
   ].join(" · ");
   const waiting = [
-    ...m.waiting.model.map((id) => ({ id, why: "the model" })),
-    ...m.waiting.quota.map((id) => ({ id, why: "quota" })),
+    ...m.waiting.model.map((id) => ({ id, why: t("the model") })),
+    ...m.waiting.quota.map((id) => ({ id, why: t("quota") })),
   ];
   return html`<li class="mh">
-<div class="row"><span class="dot" data-state="${m.state}" aria-hidden="true"></span><b class="mono">${m.id}</b><span class="pill ${HEALTH[m.state].pill}">${HEALTH[m.state].label}</span>${m.unlimited?.now ? html`<span class="pill ok">∞ ${unlimitedText(m.unlimited)}</span>` : ""}</div>
+<div class="row"><span class="dot" data-state="${m.state}" aria-hidden="true"></span><b class="mono">${m.id}</b><span class="pill ${HEALTH[m.state].pill}">${t(HEALTH[m.state].label)}</span>${m.unlimited?.now ? html`<span class="pill ok">∞ ${unlimitedText(m.unlimited)}</span>` : ""}</div>
 ${m.reasons.length > 0 ? html`<ul class="why">${m.reasons.map((x) => html`<li>${x}</li>`)}</ul>` : ""}
 ${
   w
-    ? html`<div class="win">${used !== undefined ? html`<div class="bar" role="img" aria-label="quota window ${used}% used"><span class="${w.share !== undefined && w.share >= 1 ? "full" : w.share !== undefined && w.share >= w.soft ? "soft" : ""}" style="width:${used}%"></span></div>` : ""}
-<span class="meta">${w.inputLimit || w.inputTokens > 0 ? `${kilo(w.inputTokens)}${w.inputLimit ? ` / ${kilo(w.inputLimit)}` : ""} input · ` : ""}${kilo(w.outputTokens)}${w.outputLimit ? ` / ${kilo(w.outputLimit)}` : ""} output tok · ${w.requests}${w.requestLimit ? ` / ${w.requestLimit}` : ""} requests · ${w.minutes} min window${w.share !== undefined ? ` · ${pct(w.share)}` : ""}</span></div>`
+    ? html`<div class="win">${used !== undefined ? html`<div class="bar" role="img" aria-label="${t("quota window {n}% used", { n: used })}"><span class="${w.share !== undefined && w.share >= 1 ? "full" : w.share !== undefined && w.share >= w.soft ? "soft" : ""}" style="width:${used}%"></span></div>` : ""}
+<span class="meta">${w.inputLimit || w.inputTokens > 0 ? `${kilo(w.inputTokens)}${w.inputLimit ? ` / ${kilo(w.inputLimit)}` : ""} ${t("input")} · ` : ""}${kilo(w.outputTokens)}${w.outputLimit ? ` / ${kilo(w.outputLimit)}` : ""} ${t("output tok")} · ${w.requests}${w.requestLimit ? ` / ${w.requestLimit}` : ""} ${t("requests")} · ${t("{n} min window", { n: w.minutes })}${w.share !== undefined ? ` · ${pct(w.share)}` : ""}</span></div>`
     : ""
 }
 ${m.unlimited && !m.unlimited.now && m.unlimited.next ? html`<span class="meta">${unlimitedText(m.unlimited)}</span>` : ""}
-${m.inFlight.calls > 0 ? html`<span class="meta now-line"><span class="spin" aria-hidden="true"></span>${m.inFlight.calls} request${m.inFlight.calls === 1 ? "" : "s"} being answered now${m.inFlight.longestMs ? ` · longest ${duration(m.inFlight.longestMs)}` : ""}</span>` : ""}
-<span class="meta">last ${r.minutes} min: ${lineOf}</span>
+${m.inFlight.calls > 0 ? html`<span class="meta now-line"><span class="spin" aria-hidden="true"></span>${t("{n} being answered now", { n: plural(m.inFlight.calls, "request") })}${m.inFlight.longestMs ? ` · ${t("longest {d}", { d: units(duration(m.inFlight.longestMs)) })}` : ""}</span>` : ""}
+<span class="meta">${t("last {n} min:", { n: r.minutes })} ${lineOf}</span>
 ${m.perf ? perfHtml(m.perf) : ""}
-${r.lastFailure ? html`<span class="meta">last failure ${wall(r.lastFailure.at)} · ${r.lastFailure.reason}</span>` : ""}
+${r.lastFailure ? html`<span class="meta">${t("last failure {at}", { at: wall(r.lastFailure.at) })} · ${r.lastFailure.reason}</span>` : ""}
 ${
   waiting.length > 0
-    ? html`<span class="meta">waiting: ${join(
+    ? html`<span class="meta">${t("waiting:")} ${join(
         waiting.map((x) => html`<a href="/runs/${x.id}">${x.id}</a> (${x.why})`),
         ", ",
       )}</span>`
@@ -2197,26 +2205,34 @@ function perfHtml(p: ModelPerf): Html {
   const pcs = (v: { p50: number; p90: number; max: number } | undefined, f: (n: number) => string) =>
     v ? `p50 ${f(v.p50)} · p90 ${f(v.p90)} · max ${f(v.max)}` : "—";
   const rows: Array<[string, string]> = [
-    ["latency", pcs(p.latencyMs, duration)],
+    [t("latency"), pcs(p.latencyMs, duration)],
     ...(p.firstTokenMs
-      ? ([["first token", `${pcs(p.firstTokenMs, duration)} · ${p.streamed} streamed`]] as Array<
-          [string, string]
-        >)
+      ? ([
+          [t("first token"), `${pcs(p.firstTokenMs, duration)} · ${t("streamed: {n}", { n: p.streamed })}`],
+        ] as Array<[string, string]>)
       : []),
-    ["speed", pcs(p.outputPerSecond, (n) => `${Math.round(n)} tok/s`)],
-    ["throughput", `${kilo(p.outputPerMinute)} out · ${kilo(p.promptPerMinute)} in tok/min`],
+    [t("speed"), pcs(p.outputPerSecond, (n) => `${Math.round(n)} tok/s`)],
     [
-      "per call",
-      `in avg ${kilo(p.prompt.avg)} (max ${kilo(p.prompt.max)}) · out avg ${kilo(p.output.avg)} (max ${kilo(p.output.max)})`,
-    ],
-    ["total", `${kilo(p.prompt.total)} in · ${kilo(p.output.total)} out`],
-    [
-      "cache",
-      `${Math.round(p.cachedShare * 100)}% cached${p.prefixReuseP50 !== undefined ? ` · prefix reusable p50 ${Math.round(p.prefixReuseP50 * 100)}%` : ""}`,
+      t("throughput"),
+      t("{out} out · {in} in tok/min", { out: kilo(p.outputPerMinute), in: kilo(p.promptPerMinute) }),
     ],
     [
-      "answers",
-      `${Math.round(p.successRate * 1000) / 10}% ok${p.retriedCalls > 0 ? ` · ${p.retriedCalls} after a retry` : ""}${p.cut > 0 ? ` · ${p.cut} cut at maxOutput` : ""}`,
+      t("per call"),
+      t("in avg {in} (max {inMax}) · out avg {out} (max {outMax})", {
+        in: kilo(p.prompt.avg),
+        inMax: kilo(p.prompt.max),
+        out: kilo(p.output.avg),
+        outMax: kilo(p.output.max),
+      }),
+    ],
+    [t("total"), t("{in} in · {out} out", { in: kilo(p.prompt.total), out: kilo(p.output.total) })],
+    [
+      t("cache"),
+      `${t("{n}% cached", { n: Math.round(p.cachedShare * 100) })}${p.prefixReuseP50 !== undefined ? ` · ${t("prefix reusable p50 {n}%", { n: Math.round(p.prefixReuseP50 * 100) })}` : ""}`,
+    ],
+    [
+      t("answers"),
+      `${Math.round(p.successRate * 1000) / 10}% ok${p.retriedCalls > 0 ? ` · ${t("{n} after a retry", { n: p.retriedCalls })}` : ""}${p.cut > 0 ? ` · ${t("{n} cut at maxOutput", { n: p.cut })}` : ""}`,
     ],
   ];
   return html`<dl class="perf">${rows.map(([k, v]) => html`<dt>${k}</dt><dd>${v}</dd>`)}</dl>`;
@@ -2224,28 +2240,28 @@ function perfHtml(p: ModelPerf): Html {
 
 /** The popover's body: each model, then where the full numbers are. */
 export function modelsPopover(h: ModelsHealth): Html {
-  return html`<div class="pop-head"><b>Models</b><span class="pill ${HEALTH[h.state].pill}">${HEALTH[h.state].label}</span><span class="meta">at ${wall(h.at)}</span></div>
+  return html`<div class="pop-head"><b>${t("Models")}</b><span class="pill ${HEALTH[h.state].pill}">${t(HEALTH[h.state].label)}</span><span class="meta">${t("at {at}", { at: wall(h.at) })}</span></div>
 ${
   h.models.length > 0
     ? html`<ul class="mhs">${h.models.map(modelHtml)}</ul>`
-    : html`<p class="muted">No models configured — add one to ~/.jarvis/config.yaml.</p>`
+    : html`<p class="muted">${t("No models configured — add one to ~/.jarvis/config.yaml.")}</p>`
 }
 ${h.load ? loadHtml(h.load) : ""}
-<p class="hint">In the terminal: <code>jarvis models stats</code> (latency, failures, tokens) · <code>jarvis models list</code> (pools, probes)</p>`;
+<p class="hint">${th("In the terminal: {stats} (latency, failures, tokens) · {list} (pools, probes)", { stats: html`<code>jarvis models stats</code>`, list: html`<code>jarvis models list</code>` })}</p>`;
 }
 
 /** Requests at once over every run: what a pool's concurrency limit would cap (none is applied yet). */
 function loadHtml(load: NonNullable<ModelsHealth["load"]>): Html {
   const n = load.inFlight.length;
-  return html`<div class="mh mload"><div class="row"><b>At once</b><span class="meta">${n === 0 ? "no model request now" : `${n} request${n === 1 ? "" : "s"} now`}${load.peak ? ` · peak today ${load.peak.count} at ${wall(load.peak.at)}` : ""}</span></div>
-${n > 0 ? html`<ul class="mload-runs">${load.inFlight.map((f) => html`<li><a href="/runs/${f.run}">${f.run}</a> <span class="meta">${f.step}${f.modelId ? ` · ${f.modelId}` : ""} · waiting ${clock(Math.max(0, f.waitingMs))}</span></li>`)}</ul>` : ""}
-<p class="hint">Over every run and process. <code>maxConcurrency</code> of a model holds within one run only; nothing caps runs together yet (a pool's <code>limits.concurrency</code>): watch this if the platform starts answering 429.</p></div>`;
+  return html`<div class="mh mload"><div class="row"><b>${t("At once")}</b><span class="meta">${n === 0 ? t("no model request now") : t("{n} now", { n: plural(n, "request") })}${load.peak ? ` · ${t("peak today {n} at {at}", { n: load.peak.count, at: wall(load.peak.at) })}` : ""}</span></div>
+${n > 0 ? html`<ul class="mload-runs">${load.inFlight.map((f) => html`<li><a href="/runs/${f.run}">${f.run}</a> <span class="meta">${f.step}${f.modelId ? ` · ${f.modelId}` : ""} · ${t("waiting {d}", { d: clock(Math.max(0, f.waitingMs)) })}</span></li>`)}</ul>` : ""}
+<p class="hint">${th("Over every run and process. {max} of a model holds within one run only; nothing caps runs together yet (a pool's {limit}): watch this if the platform starts answering 429.", { max: html`<code>maxConcurrency</code>`, limit: html`<code>limits.concurrency</code>` })}</p></div>`;
 }
 
 /** The popover before the first numbers: open at once, saying what it waits for. */
 export function modelsPending(): Html {
-  return html`<div class="pop-head"><b>Models</b><span class="spin" aria-hidden="true"></span><span class="meta">waiting for data</span></div>
-<p class="muted">Collecting the models' stats — each pool's quota window and the last half hour of calls. It shows up here in a moment.</p>`;
+  return html`<div class="pop-head"><b>${t("Models")}</b><span class="spin" aria-hidden="true"></span><span class="meta">${t("waiting for data")}</span></div>
+<p class="muted">${t("Collecting the models' stats — each pool's quota window and the last half hour of calls. It shows up here in a moment.")}</p>`;
 }
 
 /**
@@ -2257,28 +2273,28 @@ export function launchContent(l: LaunchView & { readonly repo: string }, now: nu
   const failed = l.exitCode !== null;
   const age = ticking(now - Date.parse(l.startedAt));
   return html`<div data-live="launch" style="display:flex;flex-direction:column;gap:28px"><div class="lede-col" style="display:flex;flex-direction:column;gap:8px">
-<div class="row"><span class="pill ${failed ? "bad" : "info"}">${failed ? (l.exitCode === 0 ? "ended without a run" : `failed to start · exit ${l.exitCode}`) : "◌ starting"}</span><span class="meta">${l.workflow} · started ${age} ago · ${home(l.repo, homeDir)}</span></div>
+<div class="row"><span class="pill ${failed ? "bad" : "info"}">${failed ? (l.exitCode === 0 ? t("ended without a run") : t("failed to start · exit {code}", { code: String(l.exitCode) })) : `◌ ${t("starting")}`}</span><span class="meta">${l.workflow} · ${th("started {age} ago", { age })} · ${home(l.repo, homeDir)}</span></div>
 <h1>${firstLine(l.task)}</h1>
 </div>
 ${
   failed
-    ? html`<section class="panel now"><p>The task did not become a run. Its output is below; fix the cause and start it again.</p><div class="actions"><a class="btn primary" href="/#new">New task</a></div></section>`
-    : html`<section class="panel now" aria-live="polite"><div class="row"><span class="spin" aria-hidden="true"></span><b>Preparing the run's checkout</b></div>
-<p class="muted">A worktree of the repository and its workspace setup (installing, building) — for a monorepo that takes a few minutes. This page turns into the run's page by itself as soon as the run begins.</p></section>`
+    ? html`<section class="panel now"><p>${t("The task did not become a run. Its output is below; fix the cause and start it again.")}</p><div class="actions"><a class="btn primary" href="/#new">${t("New task")}</a></div></section>`
+    : html`<section class="panel now" aria-live="polite"><div class="row"><span class="spin" aria-hidden="true"></span><b>${t("Preparing the run's checkout")}</b></div>
+<p class="muted">${t("A worktree of the repository and its workspace setup (installing, building) — for a monorepo that takes a few minutes. This page turns into the run's page by itself as soon as the run begins.")}</p></section>`
 }
-<section class="panel feed" aria-labelledby="output"><h2 id="output">Output</h2>
+<section class="panel feed" aria-labelledby="output"><h2 id="output">${t("Output")}</h2>
 ${l.tail ? html`<pre class="tail">${l.tail}</pre>` : html`<p class="muted">${t("Nothing yet.")}</p>`}
-<span class="meta">log ${home(l.log, homeDir)}</span></section></div>`;
+<span class="meta">${t("log")} ${home(l.log, homeDir)}</span></section></div>`;
 }
 
 /* ---- the MCP indicator (ADR-0023, ADR-0017): the same dot and popover as the models' ---- */
 
 /** One line for the indicator's tooltip: the worst server and why. */
 export function mcpSummary(h: McpHealth): string {
-  if (h.servers.length === 0) return "MCP: no servers configured";
+  if (h.servers.length === 0) return t("MCP: no servers configured");
   const worst = h.servers.find((s) => s.state === h.state);
   const why = worst?.reasons[0];
-  return `MCP: ${HEALTH[h.state].label}${worst && h.state !== "ok" && h.state !== "idle" ? ` — ${worst.id}${why ? `: ${why}` : ""}` : ""}`;
+  return `MCP: ${t(HEALTH[h.state].label)}${worst && h.state !== "ok" && h.state !== "idle" ? ` — ${worst.id}${why ? `: ${why}` : ""}` : ""}`;
 }
 
 const day = (ts: string) => `${ts.slice(0, 10)} ${wall(ts)}`;
@@ -2287,50 +2303,60 @@ const names = (xs: readonly string[]) => (xs.length > 0 ? xs.join(", ") : "—")
 function serverHtml(s: McpServerHealth): Html {
   const p = s.probe;
   const check = s.checking
-    ? "checking now…"
+    ? t("checking now…")
     : p
       ? p.ok
-        ? `answered ${wall(p.at)} · ${p.tools ?? 0} tools · ${duration(p.ms ?? 0)}`
-        : `no answer ${wall(p.at)} · ${p.error ?? "error"}`
-      : "not checked yet";
+        ? `${t("answered {at}", { at: wall(p.at) })} · ${plural(p.tools ?? 0, "tool")} · ${duration(p.ms ?? 0)}`
+        : `${t("no answer {at}", { at: wall(p.at) })} · ${p.error ?? t("error")}`
+      : t("not checked yet");
   const r = s.recent;
   const calls =
     r.calls + r.denied === 0
-      ? "none"
+      ? t("none")
       : [
-          `${r.calls} call${r.calls === 1 ? "" : "s"}`,
-          ...(r.failed > 0 ? [`${r.failed} failed`] : []),
-          ...(r.denied > 0 ? [`${r.denied} denied by policy`] : []),
-          ...(r.lastCallAt ? [`last ${wall(r.lastCallAt)}`] : []),
+          plural(r.calls, "call"),
+          ...(r.failed > 0 ? [t("failed: {n}", { n: r.failed })] : []),
+          ...(r.denied > 0 ? [t("denied by policy: {n}", { n: r.denied })] : []),
+          ...(r.lastCallAt ? [t("last at {at}", { at: wall(r.lastCallAt) })] : []),
         ].join(" · ");
   const rows: Array<[string, string]> = [
     ...(s.egressException
       ? ([
-          ["egress", `out of the project's data class by an exception, reads only: ${s.egressException}`],
+          [
+            "egress",
+            t("out of the project's data class by an exception, reads only: {why}", {
+              why: s.egressException,
+            }),
+          ],
         ] as Array<[string, string]>)
       : []),
-    ["check", check],
-    ["discovered", s.discovered ? `${day(s.discovered.at)} · ${s.discovered.count} tools` : "never"],
-    ["exposed", names(s.exposed)],
+    [t("check"), check],
+    [
+      t("discovered"),
+      s.discovered ? `${day(s.discovered.at)} · ${plural(s.discovered.count, "tool")}` : t("never"),
+    ],
+    [t("exposed"), names(s.exposed)],
     ...(s.denied.length > 0
-      ? ([["denied", `${names(s.denied)} (allow / deny)`]] as Array<[string, string]>)
+      ? ([[t("denied"), `${names(s.denied)} (allow / deny)`]] as Array<[string, string]>)
       : []),
     ...(s.unmapped.length > 0
-      ? ([["unmapped", `${names(s.unmapped)} (the server lacks the tool)`]] as Array<[string, string]>)
+      ? ([[t("unmapped"), `${names(s.unmapped)} (${t("the server lacks the tool")})`]] as Array<
+          [string, string]
+        >)
       : []),
     ...(s.notAllowed.length > 0
       ? ([
           [
-            "not allowed",
-            `${s.notAllowed.length} tool${s.notAllowed.length === 1 ? "" : "s"} without a profile entry: ${s.notAllowed.slice(0, 6).join(", ")}${s.notAllowed.length > 6 ? ", …" : ""}`,
+            t("not allowed"),
+            `${t("{n} without a profile entry:", { n: plural(s.notAllowed.length, "tool") })} ${s.notAllowed.slice(0, 6).join(", ")}${s.notAllowed.length > 6 ? ", …" : ""}`,
           ],
         ] as Array<[string, string]>)
       : []),
-    [`last ${r.minutes} min`, calls],
+    [t("last {n} min", { n: r.minutes }), calls],
     ...(r.latencyMs
       ? ([
           [
-            "latency",
+            t("latency"),
             `p50 ${duration(r.latencyMs.p50)} · p90 ${duration(r.latencyMs.p90)} · max ${duration(r.latencyMs.max)}`,
           ],
         ] as Array<[string, string]>)
@@ -2338,9 +2364,11 @@ function serverHtml(s: McpServerHealth): Html {
     ...(r.byCapability.length > 0
       ? ([
           [
-            "used",
+            t("used"),
             r.byCapability
-              .map((c) => `${c.name} ${c.calls}${c.failed > 0 ? ` (${c.failed} failed)` : ""}`)
+              .map(
+                (c) => `${c.name} ${c.calls}${c.failed > 0 ? ` (${t("failed: {n}", { n: c.failed })})` : ""}`,
+              )
               .join(" · "),
           ],
         ] as Array<[string, string]>)
@@ -2348,14 +2376,14 @@ function serverHtml(s: McpServerHealth): Html {
     ...(r.lastFailure
       ? ([
           [
-            "last failure",
+            t("last failure"),
             `${wall(r.lastFailure.at)} · ${r.lastFailure.capability} · ${r.lastFailure.reason}`,
           ],
         ] as Array<[string, string]>)
       : []),
   ];
   return html`<li class="mh">
-<div class="row"><span class="dot" data-state="${s.checking && !p ? "pending" : s.state}" aria-hidden="true"></span><b class="mono">${s.id}</b><span class="pill ${HEALTH[s.state].pill}">${HEALTH[s.state].label}</span><span class="meta">${s.profile ? `profile ${s.profile}` : s.readOnly ? "readOnly" : "no profile"} · ${s.network}${s.egressException ? " ⚠" : s.egressAllowed ? "" : " ✗"} · ${s.transport}</span></div>
+<div class="row"><span class="dot" data-state="${s.checking && !p ? "pending" : s.state}" aria-hidden="true"></span><b class="mono">${s.id}</b><span class="pill ${HEALTH[s.state].pill}">${t(HEALTH[s.state].label)}</span><span class="meta">${s.profile ? t("profile {name}", { name: s.profile }) : s.readOnly ? "readOnly" : t("no profile")} · ${s.network}${s.egressException ? " ⚠" : s.egressAllowed ? "" : " ✗"} · ${s.transport}</span></div>
 ${s.reasons.length > 0 ? html`<ul class="why">${s.reasons.map((x) => html`<li>${x}</li>`)}</ul>` : ""}
 <span class="meta mono">${s.target}${s.auth ? ` · auth ${s.auth}` : ""}</span>
 <dl class="perf">${rows.map(([k, v]) => html`<dt>${k}</dt><dd>${v}</dd>`)}</dl>
@@ -2365,23 +2393,23 @@ ${s.reasons.length > 0 ? html`<ul class="why">${s.reasons.map((x) => html`<li>${
 /** The popover's body: each server, a check on demand, then where the rest is. */
 export function mcpPopover(h: McpHealth, options: { readonly checkToken?: string } = {}): Html {
   const checking = h.servers.some((s) => s.checking);
-  return html`<div class="pop-head"><b>MCP</b><span class="pill ${HEALTH[h.state].pill}">${HEALTH[h.state].label}</span><span class="meta">at ${wall(h.at)}</span>${
+  return html`<div class="pop-head"><b>MCP</b><span class="pill ${HEALTH[h.state].pill}">${t(HEALTH[h.state].label)}</span><span class="meta">${t("at {at}", { at: wall(h.at) })}</span>${
     options.checkToken && h.servers.length > 0
       ? checking
         ? html`<span class="spin" aria-hidden="true"></span>`
-        : html`<button type="button" class="btn small" data-mcp-check="${options.checkToken}">Check now</button>`
+        : html`<button type="button" class="btn small" data-mcp-check="${options.checkToken}">${t("Check now")}</button>`
       : ""
   }</div>
 ${
   h.servers.length > 0
     ? html`<ul class="mhs">${h.servers.map(serverHtml)}</ul>`
-    : html`<p class="muted">No MCP servers — add them under mcp.servers in ~/.jarvis/config.yaml or .jarvis/project.yaml.</p>`
+    : html`<p class="muted">${t("No MCP servers — add them under mcp.servers in ~/.jarvis/config.yaml or .jarvis/project.yaml.")}</p>`
 }
-<p class="hint">In the terminal: <code>jarvis mcp list --refresh</code> (connect and list) · <code>jarvis doctor</code> (credentials) · <code>jarvis auth set &lt;id&gt;</code> (a token)</p>`;
+<p class="hint">${th("In the terminal: {list} (connect and list) · {doctor} (credentials) · {auth} (a token)", { list: html`<code>jarvis mcp list --refresh</code>`, doctor: html`<code>jarvis doctor</code>`, auth: html`<code>jarvis auth set &lt;id&gt;</code>` })}</p>`;
 }
 
 /** The popover before the first answer: open at once, saying what it waits for. */
 export function mcpPending(): Html {
-  return html`<div class="pop-head"><b>MCP</b><span class="spin" aria-hidden="true"></span><span class="meta">waiting for data</span></div>
-<p class="muted">Reading the MCP servers' state and checking that each answers — the first check of a server started by uvx or npx takes a few seconds.</p>`;
+  return html`<div class="pop-head"><b>MCP</b><span class="spin" aria-hidden="true"></span><span class="meta">${t("waiting for data")}</span></div>
+<p class="muted">${t("Reading the MCP servers' state and checking that each answers — the first check of a server started by uvx or npx takes a few seconds.")}</p>`;
 }

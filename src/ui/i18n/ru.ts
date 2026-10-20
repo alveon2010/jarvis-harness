@@ -894,6 +894,291 @@ export const RU: Readonly<Record<string, string>> = {
     "строк о том, что сломалось: {n}, они выделены · остальное свёрнуто",
   "Show every line": "Показать все строки",
   "Copy all": "Скопировать всё",
+  // ---- data class banners, restart, start from
+  "MCP server {server} goes to the {network} by an exception, reads only: {reason}":
+    "MCP-сервер {server} ходит в {network} в порядке исключения, только читает: {reason}",
+  "model {model} is a cloud model, allowed by an exception: {reason}":
+    "модель {model} облачная, разрешена в порядке исключения: {reason}",
+  approved: "одобрено",
+  "A failed {workflow} of this task": "Упавший {workflow} этой задачи",
+  "A cancelled {workflow} of this task": "Отменённый {workflow} этой задачи",
+  "stopped at {step}": "остановился на {step}",
+  "can start again from {step}: {kept} go in": "можно перезапустить с {step}: {kept} переносятся",
+  "{n} kept": "{n} сохраняются",
+  "Start again from {step}": "Перезапустить с {step}",
+  "No finished research of {key} in this repository — {workflow} runs from the start.":
+    "Законченного research по {key} в этом репозитории нет — {workflow} пойдёт с начала.",
+  "No finished research of this task in this repository — {workflow} runs from the start.":
+    "Законченного research по этой задаче в этом репозитории нет — {workflow} пойдёт с начала.",
+  "no new commits since": "новых коммитов с тех пор нет",
+  "{n} since, none touch what it read": "{n} с тех пор, но прочитанное ими не затронуто",
+  "can't tell whether the code changed since": "не удалось понять, менялся ли код с тех пор",
+  "Start from the {workflow} of {when}": "Продолжить {workflow} от {when}",
+  "code changed since: {commits}, {files} it read among them ({list}) — a new research is safer":
+    "код с тех пор менялся: {commits}, среди них прочитанные {files} ({list}) — надёжнее новый research",
+  "Unchecked: {workflow} runs from the start, with a new research.":
+    "Без галочки {workflow} пойдёт с начала, с новым research.",
+  "{workflow} begins at {step} with it; the steps it did are not run again.":
+    "С ним {workflow} начнётся с {step}; сделанные шаги не повторяются.",
+  "Open the {workflow}": "Открыть {workflow}",
+  // ---- diff
+  new: "новый",
+  deleted: "удалён",
+  "from {path}": "из {path}",
+  "Comment on {path} line {line}": "Комментарий к {path}, строка {line}",
+  "Open in the editor": "Открыть в редакторе",
+  "Changes in {path}": "Изменения в {path}",
+  "{n} more: jarvis diff": "ещё {n}: jarvis diff",
+  // ---- the split's start order
+  "How the subtasks start": "Как стартуют подзадачи",
+  "{libs} is a library of the map ({kind}): it changes first. The services that use it ({uses}) start once its change is accepted and published by {publish}, against the new version.":
+    "{libs} — библиотека карты ({kind}): она меняется первой. Сервисы, которые её используют ({uses}), стартуют, когда её изменение примут и опубликуют через {publish}, — уже на новой версии.",
+  "{libs} are libraries of the map ({kind}): they change first. The services that use them ({uses}) start once their changes are accepted and published by {publish}, against the new version.":
+    "{libs} — библиотеки карты ({kind}): они меняются первыми. Сервисы, которые их используют ({uses}), стартуют, когда их изменения примут и опубликуют через {publish}, — уже на новой версии.",
+  "starts after {list} is accepted": "стартует, когда примут {list}",
+  "starts at once": "стартует сразу",
+  "Started anyway, a service builds against the version it has: «Start now anyway» on the master's page.":
+    "Если запустить раньше, сервис соберётся с той версией, что у него есть: «Всё равно запустить» на странице master.",
+  // ---- open questions
+  "answered from the sources: {n}": "отвечено по источникам: {n}",
+  "your call: {n}": "решать вам: {n}",
+  "need you: {n}": "нужен человек: {n}",
+  "From the sources": "По источникам",
+  "The sources don't settle it — your call": "Источники этого не решают — решать вам",
+  suggested: "предлагаем",
+  "Jarvis's guess — no source confirms it": "Догадка Jarvis — ни один источник её не подтверждает",
+  "Only someone else can say: the analyst, legal, another team":
+    "Ответить может только кто-то другой: аналитик, юристы, другая команда",
+  "My answer": "Свой ответ",
+  "Instead of Jarvis's answer…": "Вместо ответа Jarvis…",
+  "Your answer…": "Ваш ответ…",
+  "Ask the analyst": "Спросить аналитика",
+  "Not in scope": "Не в рамках задачи",
+  "for the analyst": "к аналитику",
+  "out of scope": "вне рамок задачи",
+  "Question {n}": "Вопрос {n}",
+  "Jarvis prepares answers from the issue, its pages, the design and the research — about a minute":
+    "Jarvis готовит ответы по задаче, её страницам, дизайну и research — около минуты",
+  "Answer before accepting": "Ответьте перед тем, как принять",
+  "Open questions": "Открытые вопросы",
+  "Answered questions go back with «Send back» — the next version must follow them; the rest stays open.":
+    "Ответы уходят вместе с «Вернуть на доработку» — следующая версия обязана их учесть; остальные вопросы остаются открытыми.",
+  "A note": "Комментарий",
+  "Anything else to change": "Что ещё поменять",
+  "What the answers above do not cover": "То, чего не покрывают ответы выше",
+  "Send back with the answers": "Вернуть с ответами",
+  "Accept as is": "Принять как есть",
+  "The terminal waiting there picks the decision up and goes on.":
+    "Терминал, который там ждёт, подхватит решение и продолжит.",
+  "Same as {a} / {c} on the terminal's card.": "То же, что {a} / {c} на карточке в терминале.",
+  // ---- the artifact page
+  "awaiting your approval": "ждёт вашего одобрения",
+  "agent {id}": "агент {id}",
+  "Your decision": "Ваше решение",
+  Decision: "Решение",
+  "In brief": "Коротко",
+  Requirements: "Требования",
+  Risks: "Риски",
+  "What to change": "Что поменять",
+  "for Send back; line comments on the diff go with it":
+    "для «Вернуть на доработку»; комментарии к строкам диффа уйдут вместе с ним",
+  "No terminal waits: the run goes on with {cmd}.": "Терминал не ждёт: прогон продолжит {cmd}.",
+  "Decide in the terminal: {cmd} — {a} accepts, {c} sends back.":
+    "Решение — в терминале: {cmd}; {a} принимает, {c} возвращает.",
+  Versions: "Версии",
+  version: "версия",
+  "incomplete: agent {agent} hit its {limit} limit — what it did not cover is unknown":
+    "неполное: агент {agent} упёрся в лимит {limit} — что он не охватил, неизвестно",
+  Sections: "Разделы",
+  Questions: "Вопросы",
+  "Try it": "Попробовать",
+  Summary: "Итог",
+  "Files changed": "Изменённые файлы",
+  "No changes against the base.": "Относительно базы изменений нет.",
+  "Not found": "Не найдено",
+  "Something went wrong": "Что-то пошло не так",
+  // ---- models and MCP popovers
+  ok: "ok",
+  busy: "занят",
+  down: "недоступен",
+  idle: "простаивает",
+  "Models: none configured": "Модели: не настроены",
+  "until {at}": "до {at}",
+  "unlimited (its pool has no limits)": "без лимитов (у пула их нет)",
+  "unlimited hours until {at}": "безлимитные часы до {at}",
+  "unlimited hours": "безлимитные часы",
+  "unlimited hours from {at}": "безлимитные часы с {at}",
+  "failed: {n}": "сбоев: {n}",
+  "last at {at}": "последний в {at}",
+  "the model": "модель",
+  quota: "квота",
+  "quota window {n}% used": "окно квоты использовано на {n}%",
+  input: "вход",
+  "output tok": "выходных ток.",
+  requests: "запросов",
+  "{n} min window": "окно {n} мин",
+  "{n} being answered now": "сейчас в работе: {n}",
+  "longest {d}": "самый долгий {d}",
+  "last {n} min:": "за последние {n} мин:",
+  "last failure {at}": "последний сбой в {at}",
+  "waiting:": "ждут:",
+  latency: "задержка",
+  "first token": "первый токен",
+  "streamed: {n}": "потоком: {n}",
+  speed: "скорость",
+  throughput: "поток",
+  "{out} out · {in} in tok/min": "{out} выход · {in} вход ток/мин",
+  "in avg {in} (max {inMax}) · out avg {out} (max {outMax})":
+    "вход в среднем {in} (макс. {inMax}) · выход в среднем {out} (макс. {outMax})",
+  total: "всего",
+  "{in} in · {out} out": "{in} вход · {out} выход",
+  cache: "кэш",
+  "{n}% cached": "{n}% из кэша",
+  "prefix reusable p50 {n}%": "переиспользуемый префикс p50 {n}%",
+  answers: "ответы",
+  "{n} after a retry": "{n} после повтора",
+  "{n} cut at maxOutput": "{n} обрезано по maxOutput",
+  "at {at}": "на {at}",
+  "No models configured — add one to ~/.jarvis/config.yaml.":
+    "Модели не настроены — добавьте модель в ~/.jarvis/config.yaml.",
+  "In the terminal: {stats} (latency, failures, tokens) · {list} (pools, probes)":
+    "В терминале: {stats} (задержки, сбои, токены) · {list} (пулы, проверки)",
+  "At once": "Одновременно",
+  "no model request now": "запросов к моделям сейчас нет",
+  "{n} now": "сейчас {n}",
+  "peak today {n} at {at}": "пик сегодня {n} в {at}",
+  "waiting {d}": "ждёт {d}",
+  "Over every run and process. {max} of a model holds within one run only; nothing caps runs together yet (a pool's {limit}): watch this if the platform starts answering 429.":
+    "По всем прогонам и процессам. {max} модели действует только внутри одного прогона, общего ограничения на прогоны пока нет ({limit} пула): следите за этим, если платформа начнёт отвечать 429.",
+  "waiting for data": "ждём данные",
+  "Collecting the models' stats — each pool's quota window and the last half hour of calls. It shows up here in a moment.":
+    "Собираем статистику моделей — окно квоты каждого пула и вызовы за последние полчаса. Через пару секунд она появится здесь.",
+  // ---- launch page
+  "failed to start · exit {code}": "не запустился · код {code}",
+  "started {age} ago": "запущен {age} назад",
+  "The task did not become a run. Its output is below; fix the cause and start it again.":
+    "Прогон из задачи не получился. Вывод ниже — устраните причину и запустите снова.",
+  "Preparing the run's checkout": "Готовим checkout прогона",
+  "A worktree of the repository and its workspace setup (installing, building) — for a monorepo that takes a few minutes. This page turns into the run's page by itself as soon as the run begins.":
+    "Worktree репозитория и подготовка окружения (установка, сборка) — для монорепо это несколько минут. Как только прогон начнётся, эта страница сама станет его страницей.",
+  Output: "Вывод",
+  // ---- MCP
+  "MCP: no servers configured": "MCP: серверы не настроены",
+  "checking now…": "проверяем…",
+  "answered {at}": "ответил в {at}",
+  "no answer {at}": "не ответил в {at}",
+  "{state} by {actor}": "{state}: {actor}",
+  error: "ошибка",
+  "not checked yet": "ещё не проверялся",
+  "denied by policy: {n}": "запрещено политикой: {n}",
+  "out of the project's data class by an exception, reads only: {why}":
+    "вне класса данных проекта в порядке исключения, только читает: {why}",
+  discovered: "обнаружены",
+  never: "никогда",
+  exposed: "доступны",
+  denied: "запрещены",
+  unmapped: "не сопоставлены",
+  "the server lacks the tool": "у сервера нет такого инструмента",
+  "{n} without a profile entry:": "{n} без записи в профиле:",
+  "last {n} min": "за {n} мин",
+  used: "использование",
+  "last failure": "последний сбой",
+  "profile {name}": "профиль {name}",
+  "no profile": "без профиля",
+  "Check now": "Проверить сейчас",
+  "No MCP servers — add them under mcp.servers in ~/.jarvis/config.yaml or .jarvis/project.yaml.":
+    "MCP-серверов нет — добавьте их в mcp.servers в ~/.jarvis/config.yaml или .jarvis/project.yaml.",
+  "In the terminal: {list} (connect and list) · {doctor} (credentials) · {auth} (a token)":
+    "В терминале: {list} (подключиться и показать) · {doctor} (доступы) · {auth} (токен)",
+  "Reading the MCP servers' state and checking that each answers — the first check of a server started by uvx or npx takes a few seconds.":
+    "Читаем состояние MCP-серверов и проверяем, что каждый отвечает. Первая проверка сервера, запущенного через uvx или npx, занимает несколько секунд.",
+  // ---- server notices
+  "All runs": "Все прогоны",
+  "The run's checkout is gone: {path}": "Checkout прогона удалён: {path}",
+  "No diff: the checkout is not a git repository here.": "Диффа нет: checkout здесь не git-репозиторий.",
+  "your editor": "ваш редактор",
+  "opened in {editor} — the page watches the checkout: save there, then run the step again":
+    "открыто в {editor} — страница следит за checkout: сохраните там и запустите шаг заново",
+  "No editor found — set JARVIS_EDITOR (code, idea, webstorm…) where you start {cmd}":
+    "Редактор не найден — задайте JARVIS_EDITOR (code, idea, webstorm…) там, где запускаете {cmd}",
+  "The run's checkout is gone": "Checkout прогона удалён",
+  "Cannot determine who decides: set JARVIS_ACTOR, actor.id or git config user.email (ADR-0006)":
+    "Непонятно, кто принимает решение: задайте JARVIS_ACTOR, actor.id или git config user.email (ADR-0006)",
+  "This version was decided meanwhile (in a terminal or another window): yours is not recorded":
+    "По этой версии уже решили (в терминале или другом окне) — ваше решение не записано",
+  "The run no longer waits for this version: nothing recorded":
+    "Прогон больше не ждёт эту версию — ничего не записано",
+  "Say what to change — a comment, or comments on lines of the diff":
+    "Напишите, что поменять — комментарий или комментарии к строкам диффа",
+  "The run no longer waits here: nothing recorded": "Прогон здесь больше не ждёт — ничего не записано",
+  "Say how many more — a whole number above zero": "Укажите, сколько ещё — целое число больше нуля",
+  "Resumed — it goes on in the background from where it stopped":
+    "Продолжен — идёт в фоне с того места, где остановился",
+  "Cancelled — nothing runs it any more; its checkout and artifacts stay":
+    "Отменён — больше не выполняется; checkout и артефакты остаются",
+  "Pause requested — the run stops after its current model or tool call and keeps its place":
+    "Пауза запрошена — прогон остановится после текущего вызова модели или инструмента и сохранит место",
+  "Nothing runs it now — there is nothing to pause": "Сейчас он не выполняется — ставить на паузу нечего",
+  "Cancel requested — the process running it stops at its next safe point (after the current model or tool call)":
+    "Отмена запрошена — процесс остановится в ближайшей безопасной точке (после текущего вызова модели или инструмента)",
+  "The run has ended already: nothing to cancel": "Прогон уже закончился — отменять нечего",
+  "Checkout removed — the files go in the background; the branch stays":
+    "Checkout удалён — файлы удаляются в фоне, ветка остаётся",
+  "Applied: {n} file(s) as {commit} on the branch checked out in the repository — not pushed":
+    "Применено: файлов — {n}, коммит {commit} в текущей ветке репозитория; не запушено",
+  "Going on as a task across services: the research and the spec are here — next, the split to approve":
+    "Продолжаем как задачу на несколько сервисов: research и спека уже есть, дальше — разбиение на одобрение",
+  "Fix a bug runs in one service: pick it in Where — or Implement across services":
+    "«Исправить баг» работает в одном сервисе: выберите его в «Где» — или «Реализовать во всех сервисах»",
+  "A task across services runs in All services: pick it in Where":
+    "Задача на несколько сервисов запускается во «Все сервисы»: выберите это в «Где»",
+  "The subtask starts in its service's repository — it shows up here in a moment":
+    "Подзадача стартует в репозитории своего сервиса — скоро появится здесь",
+  "publish-local runs again in the library's checkout — the services waiting for it start when it passes":
+    "publish-local снова запускается в checkout библиотеки — ждущие сервисы стартуют, когда он пройдёт",
+  "Dropped from the task; once the others are done the master goes on without it":
+    "Убрано из задачи; когда остальные закончат, master продолжит без неё",
+  "No such subtask, or its service has no repository on this machine":
+    "Такой подзадачи нет, или репозитория её сервиса нет на этой машине",
+  "Not applied:": "Не применено:",
+  "see jarvis logs": "смотрите jarvis logs",
+  "The branch is back — apply it, or remove it again": "Ветка восстановлена — примените её или удалите снова",
+  "The branch could not be restored (a branch of that name exists?)":
+    "Ветку восстановить не удалось (ветка с таким именем уже есть?)",
+  "Checkout and branch removed — the files go in the background":
+    "Checkout и ветка удалены — файлы удаляются в фоне",
+  "Checkout removed; the branch could not be deleted (checked out somewhere?) — {cmd} it by hand":
+    "Checkout удалён, а ветку удалить не удалось (она где-то checkout'нута?) — удалите вручную: {cmd}",
+  "The run has not ended: cancel it first, then clean up":
+    "Прогон ещё не закончился: сначала отмените его, потом чистите",
+  "It is being resumed already": "Его уже продолжают",
+  "This page cannot start runs: resume it with {cmd}":
+    "Эта страница не умеет запускать прогоны: продолжите через {cmd}",
+  "Started — it prepares its checkout and shows up under Running; where it needs you, it waits here":
+    "Запущено — готовит checkout и появится в «Идут сейчас»; где понадобитесь вы, будет ждать здесь",
+  "Say what to do and pick a workflow": "Напишите, что сделать, и выберите workflow",
+  "The note goes to the agent with its next model call — binding, and for every step after it":
+    "Заметка уйдёт агенту со следующим вызовом модели — обязательно к исполнению и для всех следующих шагов",
+  "Write the note first": "Сначала напишите заметку",
+  "The eval case is written: review its case.yaml, then record it once":
+    "Eval-кейс записан: проверьте его case.yaml и запишите один раз",
+  "{n} knowledge file(s) changed after the run began are not in its overlay":
+    "файлов знаний, изменённых после старта прогона, не попало в overlay: {n}",
+  "No eval case written — see the log of {cmd} (a run that ended, a repository git can archive)":
+    "Eval-кейс не записан — смотрите лог {cmd} (нужен завершённый прогон и репозиторий, который git может заархивировать)",
+  "A suite is a short name: lowercase letters, digits and dashes":
+    "Suite — короткое имя: строчные буквы, цифры и дефисы",
+  "Write the answer first": "Сначала напишите ответ",
+  "The rule is recorded — the step goes on with it in the background":
+    "Правило записано — шаг продолжается с ним в фоне",
+  "Nothing to accept yet: Jarvis has not proposed a rule — answer, or write the rule yourself":
+    "Принимать пока нечего: Jarvis не предложил правило — ответьте или напишите правило сами",
+  "A hint needs your words: what to look at, what to do":
+    "В подсказке нужны ваши слова: куда смотреть, что делать",
+  "This run cannot go on: it has not finished, has nowhere to go or went on already":
+    "Этот прогон нельзя продолжить: он не закончен, ему некуда идти или его уже продолжили",
+  "Not a repository this page knows: start {cmd} in it":
+    "Этот репозиторий странице незнаком: запустите в нём {cmd}",
 };
 
 /**
@@ -941,4 +1226,7 @@ export const RU_PLURALS: Readonly<Record<string, readonly [string, string, strin
   unit: ["фрагмент", "фрагмента", "фрагментов"],
   symbol: ["символ", "символа", "символов"],
   "knowledge file": ["файл знаний", "файла знаний", "файлов знаний"],
+  "open question": ["открытый вопрос", "открытых вопроса", "открытых вопросов"],
+  retry: ["повтор", "повтора", "повторов"],
+  request: ["запрос", "запроса", "запросов"],
 };
