@@ -1,7 +1,9 @@
 # ADR-0020: Skills, Standards и инженерное знание как типизированные сущности
 
-- Статус: принято
+- Статус: принято; §6 реализован (кандидаты из review, вручную и из повторяющихся findings)
 - Дата: 2026-10-03
+- Не сделано: в `jarvis ui` решение по кандидатам не из карт модулей (ручным, из review, из повторов) —
+  только в терминале, `jarvis candidates promote|reject`; страница их предлагает и считает
 - Основание: [ADR-0001](0001-target-architecture.md) §7 (контекст агентов), §9 (знания проекта);
   концепция «Jarvis Skills, Standards & Engineering Knowledge» (2026-10-03). Опирается на
   [ADR-0005](0005-artifact-versions-provenance.md) (provenance), [ADR-0012](0012-evals-and-record-replay.md)
@@ -10,7 +12,9 @@
   (кандидаты из review), [ADR-0021](0021-stack-agnostic-core.md) (теги стека для `appliesTo`)
 - Код (план): `src/knowledge/{standards,skills,package,resolver,candidates}.ts`,
   `src/agents/context.ts` (слой L4 → EngineeringContextPackage), проверка стандартов в composite `verify`,
-  CLI `jarvis standards list|check`, `jarvis skills list`, `jarvis candidates list|promote|reject`
+  CLI `jarvis standards list|check`, `jarvis skills list`, `jarvis candidates add|list|show|promote|reject`;
+  кандидаты вне шагов — `src/app/candidates.ts` (`addCandidate`, `candidatesRunOf`),
+  `src/app/repeatedFindings.ts`
 
 ## Контекст
 
@@ -137,8 +141,36 @@ L5 история инструментов
 Единый артефакт `candidate` с `kind ∈ {knowledge, standard, skill-improvement}` создаётся:
 
 - ReviewAnalysisAgent'ом (ADR-0019 §5) из комментариев `KNOWLEDGE_CANDIDATE`;
-- ReviewAgent'ом при повторяющемся finding (одинаковый `issue` в ≥ 2 Run);
-- человеком вручную: `jarvis candidates add`.
+- детерминированно, без модели, из повторяющегося finding review: одинаковый `issue` в ≥ 2 Run;
+- человеком вручную: `jarvis candidates add` или форма «Предложить кандидата» на обзоре Knowledge в
+  `jarvis ui`.
+
+**Где живёт кандидат не из шага.** Артефакт принадлежит Run, поэтому для кандидатов, которые не сделал
+ни один шаг (ручные и из повторяющихся findings), у репозитория есть один служебный Run с workflow
+`candidates`: создаётся при первом таком кандидате и сразу завершается (`COMPLETED` — исполнять нечего).
+Так `list|show|promote|reject`, решения (approvals) и provenance работают без изменений; отдельное
+хранилище кандидатов или «висящие» артефакты без Run потребовали бы второго пути для всего этого.
+Отвергнутые варианты: класть ручного кандидата в последний Run (чужой прогон получает чужой артефакт,
+а `jarvis forget` того прогона удалит и кандидата) и Run на каждого кандидата (шум в списке прогонов).
+
+**Ручной кандидат** — `jarvis candidates add <kind> <title> [text…]`: `kind ∈ {standard, knowledge,
+skill-improvement}`; текст — аргументом, `--file` или из stdin; `--path` (повторяемый), `--evidence`
+(повторяемый), `--why`. Для `skill-improvement` обязателен `--skill <id>`: навык должен существовать и
+быть редактируемым проектом (проектный или встроенный — как при promote, который дописывает шаг в его
+`instructions.md` и поднимает версию); иначе кандидат не создаётся. Provenance — `human` с актором.
+
+**Кандидат из повторяющегося finding.** После каждого шага, выдавшего артефакт `review`, движок берёт
+findings всех версий review этого Run и ищет тот же `issue` в review других Run того же репозитория.
+Сравнение — по стабильному ключу: текст в нижнем регистре без цитат (`code`, "…", «…»), путей и имён
+файлов, `line N`/`:N`, чисел, пунктуации и служебных слов; оставшиеся слова — по разу, отсортированные
+(порядок слов не важен); ключ — sha256 от этого. Меньше трёх слов — не сравнивается (слишком мало,
+чтобы отличить одно замечание от другого). Ключ в ≥ 2 разных Run (раунды одного review — один Run)
+даёт **одного** кандидата `standard` (`finding-<key>.json` в Run кандидатов): заголовок — формулировка
+issue, текст — `suggestion` и сам issue, `evidence` — места (`file:line`) и ссылки на версии review,
+`finding.runs` — прогоны. При promote пишется `severity: recommended`, `verification: semantic`. Новый
+Run с тем же ключом добавляет свои места и прогон к открытому кандидату (новая версия артефакта);
+решённого (принят или отвергнут) повтор не трогает. Ошибка здесь не останавливает Run — пишется в лог
+`candidates.repeated`.
 
 Кандидат содержит `evidence[]` (ссылки на Run, артефакты, комментарии). Продвижение — только человеком:
 `jarvis candidates promote <id>` создаёт/обновляет файл стандарта или skill в worktree (новая версия,

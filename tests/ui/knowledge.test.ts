@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { request } from "node:http";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { candidatesOf } from "../../src/app/candidates.ts";
 import { createEngine } from "../../src/app/engine.ts";
 import { createRuntime, type Runtime } from "../../src/app/runtime.ts";
 import { loadConfig } from "../../src/core/config/load.ts";
@@ -249,5 +250,43 @@ describe("Knowledge pages", () => {
     expect((await post("/knowledge/open", [["file", ".jarvis/../../etc/passwd"]])).location).toContain(
       "notice=no-file",
     );
+  });
+
+  it("proposes a candidate from the overview, as `jarvis candidates add` does", async () => {
+    const overview = await page("/knowledge");
+    expect(overview).toContain("Propose a candidate");
+    expect(overview).toContain('<option value="unit-testing">unit-testing</option>');
+
+    const added = await post("/knowledge/candidates/add", [
+      ["kind", "standard"],
+      ["title", "Money in minor units"],
+      ["text", "Amounts are integers in minor units."],
+      ["paths", "src/payments/**, src/orders/**"],
+      ["evidence", "src/orders/order.ts:1"],
+    ]);
+    expect(added.location).toBe("/knowledge?notice=candidate-added&file=money-in-minor-units");
+    expect(await page(added.location as string)).toContain("jarvis candidates promote money-in-minor-units");
+    const [c] = candidatesOf(rt);
+    expect(c?.doc).toMatchObject({ kind: "standard", paths: ["src/payments/**", "src/orders/**"] });
+    expect(c?.artifact.provenance).toMatchObject({ kind: "human", actor: { id: "dev@example.com" } });
+    expect(await page("/knowledge")).toContain("1 open besides module maps");
+
+    const noSkill = await post("/knowledge/candidates/add", [
+      ["kind", "skill-improvement"],
+      ["title", "Fixtures"],
+      ["text", "5. Name the fixture after the case."],
+    ]);
+    expect(noSkill.location).toContain("notice=candidate-invalid");
+    expect(await page(noSkill.location as string)).toContain(
+      "Not proposed: a skill improvement needs --skill",
+    );
+    const skill = await post("/knowledge/candidates/add", [
+      ["kind", "skill-improvement"],
+      ["skill", "unit-testing"],
+      ["title", "Fixtures"],
+      ["text", "5. Name the fixture after the case."],
+    ]);
+    expect(skill.location).toContain("notice=candidate-added");
+    expect(candidatesOf(rt).map((x) => x.doc.skill ?? x.doc.kind)).toEqual(["standard", "unit-testing"]);
   });
 });

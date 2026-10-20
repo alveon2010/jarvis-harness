@@ -1254,6 +1254,31 @@ export const RU: Readonly<Record<string, string>> = {
   "Agent Skills format, shared with other agents": "Формат Agent Skills, общий с другими агентами",
   "Says nothing about where it applies, so it is never picked by itself: every agent sees it in the list of other skills and reads it when it fits; a workflow step can name it.":
     "Не сказано, где он применим, поэтому сам он не подбирается: каждый агент видит его в списке остальных навыков и читает, когда тот подходит к работе; шаг workflow может назвать его явно.",
+  // ---- ADR-0020 §6
+  "standard — a rule to follow": "стандарт — правило, которому следуют",
+  "knowledge — what is true about the project": "знание — что верно о проекте",
+  "skill improvement — a step to add to a skill": "улучшение навыка — шаг, который добавить в навык",
+  "Propose a candidate": "Предложить кандидата",
+  "waits with the ones review proposed: {cmd}": "ждёт вместе с теми, что предложил review: {cmd}",
+  Kind: "Вид",
+  Skill: "Навык",
+  Title: "Название",
+  Text: "Текст",
+  Paths: "Пути",
+  Evidence: "Где видно",
+  "for a skill improvement": "для улучшения навыка",
+  "the rule, the knowledge, or the step — as it should be written":
+    "правило, знание или шаг — так, как это должно быть записано",
+  "optional, comma-separated globs it applies to":
+    "необязательно; glob-маски через запятую, к чему относится",
+  "optional, comma-separated: path:line, a run, a link":
+    "необязательно, через запятую: путь:строка, прогон, ссылка",
+  Propose: "Предложить",
+  "{n} open besides module maps": "открытых, кроме карт модулей: {n}",
+  "Proposed {name} — it waits with the other candidates: {cmd}":
+    "Предложен {name} — ждёт вместе с другими кандидатами: {cmd}",
+  "Not proposed: {why}": "Не предложено: {why}",
+  "pick a kind": "выберите вид",
 };
 
 /**

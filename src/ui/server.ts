@@ -7,7 +7,9 @@ import { isAbsolute, join as joinPath, relative, resolve as resolvePath, sep } f
 import { applyRun } from "../app/applyRun.ts";
 import { budgetGranted, budgetStopOf, grantBudget } from "../app/budgetStop.ts";
 import {
+  addCandidate,
   type Candidate,
+  CandidateInvalid,
   CandidateTargetTaken,
   candidatesOf,
   contentOf,
@@ -815,6 +817,8 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       "commit-failed": html`<div class="banner bad">git commit failed — see <code>jarvis logs --event ui.commit</code></div>`,
       opened: html`<div class="banner ok">↗ opened in ${r.url.searchParams.get("editor") ?? "your editor"}</div>`,
       "no-editor": html`<div class="banner bad">No editor found — set JARVIS_EDITOR (code, idea, webstorm…) where you start <code>jarvis ui</code></div>`,
+      "candidate-added": html`<div class="banner ok">${th("Proposed {name} — it waits with the other candidates: {cmd}", { name: html`<code>${file}</code>`, cmd: html`<code>jarvis candidates promote ${file}</code>` })}</div>`,
+      "candidate-invalid": html`<div class="banner bad">${t("Not proposed: {why}", { why: file || t("pick a kind") })}</div>`,
       actor: html`<div class="banner bad">Cannot determine who decides: set JARVIS_ACTOR, actor.id or git config user.email (ADR-0006)</div>`,
     };
     return n ? notices[n] : undefined;
@@ -873,6 +877,7 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
     };
     if (at === "/knowledge/glossary") return glossaryPost(r, form);
     if (at === "/knowledge/ask") return askPost(r, form);
+    if (at === "/knowledge/candidates/add") return proposePost(r, form);
     if (at === "/knowledge/services/onboard") {
       // the quick scan of each service, in the knowledge repository: what `jarvis onboard` does there
       const meta = runtime.loaded.meta;
@@ -1070,6 +1075,9 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
         (c) => !c.decision && c.doc.module,
       ).length;
       const glossary = await glossaryView();
+      const proposed = candidatesOf(runtime, (run) => run.workflow !== "onboard-module").filter(
+        (c) => !c.decision,
+      ).length;
       const content = overviewContent(
         {
           counts,
@@ -1077,11 +1085,14 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
           glossaryProblems: glossary.rows.filter((x) => x.problems.length > 0).length,
           toResearch,
           candidates,
+          proposed,
+          skills: skillsOf(roots()).map((x) => x.skill.id),
           ...(query ? { query } : {}),
           ...(result ? { result } : {}),
           ...(searchError ? { searchError } : {}),
         },
         notice,
+        actions,
       );
       return knowledgePage(r, query ? `Knowledge · ${query}` : "Knowledge", content, "/knowledge");
     }
@@ -1252,6 +1263,38 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       );
     }
     return notFound(r, `Nothing at ${r.url.pathname}.`);
+  };
+  /** «Propose a candidate» on the Overview: `jarvis candidates add` from the page (ADR-0020 §6). */
+  const proposePost = async (r: Request, form: URLSearchParams): Promise<void> => {
+    const who = options.actor ? await options.actor() : undefined;
+    if (!who) return redirect(r, "/knowledge?notice=actor");
+    const list = (name: string) =>
+      (form.get(name) ?? "")
+        .split(",")
+        .map((x) => x.trim())
+        .filter(Boolean)
+        .slice(0, 30);
+    const kind = form.get("kind") ?? "";
+    if (kind !== "standard" && kind !== "knowledge" && kind !== "skill-improvement")
+      return redirect(r, "/knowledge?notice=candidate-invalid");
+    try {
+      const c = addCandidate(runtime, {
+        root: root as string,
+        actor: who,
+        kind,
+        title: (form.get("title") ?? "").slice(0, 120),
+        text: (form.get("text") ?? "").slice(0, 8000),
+        paths: list("paths"),
+        evidence: list("evidence"),
+        ...(kind === "skill-improvement" ? { skill: form.get("skill") ?? "" } : {}),
+        skills: skillsOf(roots()).map((x) => x.skill.id),
+        channel: "ui",
+      });
+      return redirect(r, `/knowledge?notice=candidate-added&file=${encodeURIComponent(c.name)}`);
+    } catch (error) {
+      if (!(error instanceof CandidateInvalid)) throw error;
+      return redirect(r, `/knowledge?notice=candidate-invalid&file=${encodeURIComponent(error.message)}`);
+    }
   };
   /** Add a term: check its symbols first; one that is not in the code asks for «Add anyway». */
   const glossaryPost = async (r: Request, form: URLSearchParams): Promise<void> => {

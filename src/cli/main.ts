@@ -13,6 +13,7 @@ import { cliLogger } from "./cliLog.ts";
 import { runAsk } from "./commands/ask.ts";
 import { runAuthRemove, runAuthSet, runAuthStatus } from "./commands/auth.ts";
 import {
+  runCandidatesAdd,
   runCandidatesList,
   runCandidatesPromote,
   runCandidatesReject,
@@ -967,7 +968,37 @@ export function buildProgram(options: RunOptions = {}): Command {
 
   const candidates = program
     .command("candidates")
-    .description("knowledge candidates from reviews (ADR-0020 §6)");
+    .description("knowledge candidates from reviews, repeated findings and people (ADR-0020 §6)");
+  candidates
+    .command("add <kind> <title> [text...]")
+    .description(
+      "propose a candidate by hand: standard | knowledge | skill-improvement; the text from the argument, --file or stdin",
+    )
+    .option("--file <path>", "read the text from a file")
+    .option("--skill <id>", "skill-improvement: the skill it improves (required there)")
+    .option(
+      "--path <glob>",
+      "code it applies to (repeatable)",
+      (v: string, prev: string[]) => [...prev, v],
+      [],
+    )
+    .option(
+      "--evidence <ref>",
+      "where it shows: path:line, a run, a link (repeatable)",
+      (v: string, prev: string[]) => [...prev, v],
+      [],
+    )
+    .option("--why <text>", "why it should be written down")
+    .action(
+      async (
+        kind: string,
+        title: string,
+        text: string[],
+        opts: { file?: string; skill?: string; path: string[]; evidence: string[]; why?: string },
+      ) => {
+        await runCandidatesAdd(ctxFor(), kind, title, text, opts);
+      },
+    );
   candidates
     .command("list")
     .description("open candidates by name, with where to look and what to check")

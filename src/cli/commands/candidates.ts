@@ -1,6 +1,10 @@
-import { relative } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { relative, resolve } from "node:path";
 import {
+  addCandidate,
   type Candidate,
+  type CandidateDoc,
+  CandidateInvalid,
   CandidateNotPromotable,
   CandidateTargetTaken,
   candidatesOf,
@@ -12,6 +16,8 @@ import {
 } from "../../app/candidates.ts";
 import { createRuntime } from "../../app/runtime.ts";
 import { resolveActor } from "../../core/actor/resolve.ts";
+import { loadSkills } from "../../knowledge/skills.ts";
+import { knowledgeRootsOf } from "../../knowledge/sources.ts";
 import { shortRunId } from "../../storage/runStore.ts";
 import type { CliContext } from "../context.ts";
 import { CliExit, EXIT } from "../output.ts";
@@ -19,7 +25,7 @@ import { renderMarkdown } from "../render.ts";
 import { loadForCli } from "./config.ts";
 
 /**
- * `jarvis candidates list|show|promote|reject` (ADR-0020 §6): the terminal over src/app/candidates.ts,
+ * `jarvis candidates add|list|show|promote|reject` (ADR-0020 §6): the terminal over src/app/candidates.ts,
  * which the Modules page of `jarvis ui` uses too. Every command accepts a candidate's name (or any
  * unique part of it, or the artifact id).
  */
@@ -299,6 +305,95 @@ export async function runCandidatesReject(
     rejectCandidate(runtime, found, resolved.actor, options.comment);
     ctx.out.result({ rejected: found.artifact.artifactId, name: found.name }, () =>
       ctx.out.line(`${ctx.out.style.bad("✗")} rejected ${ctx.out.style.name(found.name)}`),
+    );
+  } finally {
+    await runtime.close();
+  }
+}
+
+const KINDS: readonly CandidateDoc["kind"][] = ["standard", "knowledge", "skill-improvement"];
+
+/** Says what is wrong and exits (a CliExit's message is not printed). */
+function fail(ctx: CliContext, message: string): never {
+  ctx.out.error(message);
+  throw new CliExit(EXIT.error);
+}
+
+async function readAll(stream: NodeJS.ReadableStream): Promise<string> {
+  let text = "";
+  for await (const chunk of stream) text += String(chunk);
+  return text;
+}
+
+/** The candidate's text: the argument, `--file`, or what is piped in (never a terminal's input). */
+async function textOf(ctx: CliContext, words: readonly string[], file: string | undefined): Promise<string> {
+  if (words.length > 0 && file) fail(ctx, "give the text as an argument or --file, not both");
+  if (words.length > 0) return words.join(" ");
+  if (file) {
+    const path = resolve(ctx.cwd, file);
+    if (!existsSync(path)) fail(ctx, `no file ${file}`);
+    return readFileSync(path, "utf8");
+  }
+  const stdin = ctx.stdin as (NodeJS.ReadableStream & { isTTY?: boolean }) | undefined;
+  if (!stdin || stdin.isTTY) fail(ctx, "the text: an argument, --file <path>, or piped on stdin");
+  return readAll(stdin);
+}
+
+/**
+ * `jarvis candidates add <kind> <title> [text…] [--file] [--skill] [--path…] [--evidence…] [--why]` — a
+ * person proposes a candidate by hand; it waits for promote or reject like one review proposed.
+ */
+export async function runCandidatesAdd(
+  ctx: CliContext,
+  kind: string,
+  title: string,
+  words: readonly string[],
+  options: { file?: string; skill?: string; path?: string[]; evidence?: string[]; why?: string },
+): Promise<void> {
+  if (!KINDS.includes(kind as CandidateDoc["kind"])) fail(ctx, `kind is one of ${KINDS.join(", ")}`);
+  if (kind === "skill-improvement" && !options.skill)
+    fail(ctx, "a skill improvement needs --skill <id>: the skill it improves");
+  if (kind !== "skill-improvement" && options.skill) fail(ctx, "--skill is for a skill-improvement");
+  const text = await textOf(ctx, words, options.file);
+  const loaded = await loadForCli(ctx);
+  const runtime = createRuntime(loaded, { env: ctx.env });
+  try {
+    const resolved = await resolveActor(loaded.config, ctx.env, loaded.project?.root);
+    if (!resolved.actor) fail(ctx, "cannot determine the actor (ADR-0006)");
+    const root = loaded.project?.root ?? ctx.cwd;
+    let added: Candidate;
+    try {
+      added = addCandidate(runtime, {
+        root,
+        actor: resolved.actor,
+        kind: kind as CandidateDoc["kind"],
+        title,
+        text,
+        rationale: options.why,
+        paths: options.path,
+        evidence: options.evidence,
+        skill: options.skill,
+        skills: loadSkills(knowledgeRootsOf(loaded, root)).map((s) => s.id),
+        channel: "cli",
+      });
+    } catch (error) {
+      if (error instanceof CandidateInvalid) fail(ctx, error.message);
+      throw error;
+    }
+    ctx.out.result(
+      {
+        added: added.artifact.artifactId,
+        name: added.name,
+        kind: added.doc.kind,
+        run: added.artifact.runId,
+        ...(added.doc.skill ? { skill: added.doc.skill } : {}),
+      },
+      () => {
+        const st = ctx.out.style;
+        ctx.out.line(`${st.ok("+")} candidate ${st.name(added.name)} ${st.muted(`· ${added.doc.kind}`)}`);
+        ctx.out.line(`${st.muted("read   ")} ${st.cmd(`jarvis candidates show ${added.name}`)}`);
+        ctx.out.line(`${st.muted("accept ")} ${st.cmd(`jarvis candidates promote ${added.name}`)}`);
+      },
     );
   } finally {
     await runtime.close();

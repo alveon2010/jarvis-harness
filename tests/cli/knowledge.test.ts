@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { Writable } from "node:stream";
+import { Readable, Writable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createRuntime } from "../../src/app/runtime.ts";
 import { run } from "../../src/cli/main.ts";
@@ -57,7 +57,7 @@ afterEach(() => {
   sb.cleanup();
 });
 
-async function jarvis(args: string[]) {
+async function jarvis(args: string[], stdin?: string) {
   let out = "";
   let err = "";
   const code = await run(["node", "jarvis", ...args], {
@@ -75,6 +75,7 @@ async function jarvis(args: string[]) {
         },
       }),
     },
+    ...(stdin !== undefined ? { stdin: Readable.from([stdin]) } : {}),
     context: { cwd: sb.project, homeDir: sb.home, env: ENV },
   });
   return { code, out, err };
@@ -265,5 +266,81 @@ describe("jarvis candidates: names", () => {
       "- Every request is logged by this plugin. **[check: a generalisation; the excerpt shows one place]**",
     );
     expect(doc).toContain("- Does things.\n");
+  });
+});
+
+describe("jarvis candidates add", () => {
+  it("proposes a standard by hand, with the text from the argument, a file or stdin", async () => {
+    const added = await jarvis([
+      "candidates",
+      "add",
+      "standard",
+      "Money in minor units",
+      "Amounts",
+      "are",
+      "integers.",
+      "--path",
+      "src/payments/**",
+      "--evidence",
+      "src/a.ts:1",
+    ]);
+    expect(added.code).toBe(0);
+    expect(added.out).toContain("+ candidate money-in-minor-units · standard");
+    expect(added.out).toContain("jarvis candidates promote money-in-minor-units");
+
+    writeFileSync(join(sb.project, "note.md"), "Every refund is a ledger entry.\n");
+    expect((await jarvis(["candidates", "add", "knowledge", "Refunds", "--file", "note.md"])).code).toBe(0);
+    expect(
+      (
+        await jarvis(
+          ["candidates", "add", "knowledge", "Orders", "--why", "asked twice"],
+          "Orders are immutable.",
+        )
+      ).code,
+    ).toBe(0);
+
+    const list = JSON.parse((await jarvis(["--json", "candidates", "list"])).out) as {
+      candidates: Array<{ name: string; kind: string; paths: string[]; rationale: string }>;
+    };
+    expect(list.candidates.map((c) => [c.name, c.kind])).toEqual([
+      ["money-in-minor-units", "standard"],
+      ["refunds", "knowledge"],
+      ["orders", "knowledge"],
+    ]);
+    expect(list.candidates[0]?.paths).toEqual(["src/payments/**"]);
+    expect(list.candidates[2]?.rationale).toBe("asked twice");
+
+    const show = await jarvis(["candidates", "show", "refunds"]);
+    expect(show.out).toContain("Every refund is a ledger entry.");
+    const promoted = await jarvis(["candidates", "promote", "money"]);
+    expect(promoted.code).toBe(0);
+    expect(readFileSync(join(sb.project, ".jarvis/standards/money-in-minor-units.md"), "utf8")).toContain(
+      "Amounts are integers.",
+    );
+  });
+
+  it("a skill improvement needs a skill there is", async () => {
+    const none = await jarvis(["candidates", "add", "skill-improvement", "Hooks", "x"]);
+    expect(none.code).toBe(1);
+    expect(none.err).toContain("needs --skill <id>");
+    const unknown = await jarvis(["candidates", "add", "skill-improvement", "Hooks", "x", "--skill", "nope"]);
+    expect(unknown.code).toBe(1);
+    expect(unknown.err).toContain('no skill "nope"');
+    const bad = await jarvis(["candidates", "add", "rule", "Hooks", "x"]);
+    expect(bad.err).toContain("kind is one of standard, knowledge, skill-improvement");
+    const ok = await jarvis([
+      "--json",
+      "candidates",
+      "add",
+      "skill-improvement",
+      "Hooks order",
+      "2. Keep hooks at the top.",
+      "--skill",
+      "react-component-change",
+    ]);
+    expect(ok.code).toBe(0);
+    expect(JSON.parse(ok.out)).toMatchObject({ kind: "skill-improvement", skill: "react-component-change" });
+    const show = await jarvis(["candidates", "show", "hooks-order"]);
+    expect(show.out).toContain("skill react-component-change v1 → v2");
   });
 });

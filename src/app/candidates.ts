@@ -8,7 +8,7 @@ import { layoutOf } from "../core/paths.ts";
 import { BUILTIN_SKILLS, type Skill } from "../knowledge/skills.ts";
 import { MODULE_MARKER, markSweeping, ONBOARD_MARKER } from "../onboarding/render.ts";
 import type { Dropped } from "../onboarding/verify.ts";
-import { shortRunId } from "../storage/runStore.ts";
+import { newRunId, shortRunId } from "../storage/runStore.ts";
 import type { Runtime } from "./runtime.ts";
 
 /**
@@ -38,6 +38,8 @@ export interface CandidateDoc {
   note?: string;
   /** skill-improvement: the id of the skill it improves. */
   skill?: string;
+  /** A finding review repeated in runs (src/app/repeatedFindings.ts): its key and the runs. */
+  finding?: { key: string; runs: string[] };
 }
 
 export interface Candidate {
@@ -91,6 +93,8 @@ function claimsOf(doc: CandidateDoc): Candidate["claims"] {
 function filesOf(doc: CandidateDoc): string[] {
   const counts = new Map<string, number>();
   for (const e of doc.evidence ?? []) {
+    // an artifact ref (a review a repeated finding came from) is not a file
+    if (/^art_[0-9a-f]+@\d+$/.test(e)) continue;
     const file = e.replace(/:\d+$/, "");
     counts.set(file, (counts.get(file) ?? 0) + 1);
   }
@@ -399,6 +403,125 @@ export function rejectCandidate(runtime: Runtime, c: Candidate, actor: Actor, co
     decision: "reject",
     ...(comment ? { comment } : {}),
   });
+}
+
+/**
+ * The run that holds the candidates no step of a run made: proposed by hand (`jarvis candidates add`),
+ * found by review in several runs (src/app/repeatedFindings.ts). One per repository, made the first
+ * time and ended at once — nothing to execute; a candidate is an artifact of a run like any other, so
+ * list, show, promote and reject need nothing new.
+ */
+export const CANDIDATES_WORKFLOW = "candidates";
+
+export function candidatesRunOf(runtime: Runtime, root: string, owner: Actor): Run {
+  const found = runtime.runs
+    .list({ includeTerminal: true, limit: 100_000 })
+    .find((r) => r.workflow === CANDIDATES_WORKFLOW && r.workspace.repoRoot === root);
+  if (found) return found;
+  const run = runtime.runs.create({
+    id: newRunId(),
+    task: "Knowledge candidates proposed outside a run's steps",
+    workflow: CANDIDATES_WORKFLOW,
+    owner,
+    workspace: { mode: "cwd", repoRoot: root, path: root, baseRef: "HEAD" },
+    dataClass: runtime.loaded.config.dataClass,
+    ...(runtime.loaded.config.profile ? { profile: runtime.loaded.config.profile } : {}),
+  });
+  runtime.events.emit({
+    kind: "run.created",
+    runId: run.id,
+    actor: `${owner.kind}:${owner.id}`,
+    payload: { task: run.task, workflow: CANDIDATES_WORKFLOW, trigger: "candidates" },
+  });
+  runtime.runs.transition(run.id, "RUNNING", { reason: "holds candidates" });
+  return runtime.runs.transition(run.id, "COMPLETED", { reason: "holds candidates; nothing to execute" });
+}
+
+/** A candidate that cannot be proposed as given (no title, no text, a skill there is not). */
+export class CandidateInvalid extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CandidateInvalid";
+  }
+}
+
+export interface AddCandidateInput {
+  readonly root: string;
+  readonly actor: Actor;
+  readonly kind: CandidateDoc["kind"];
+  readonly title: string;
+  /** The rule, the knowledge, or what to add to the skill's instructions. */
+  readonly text: string;
+  /** Why; a person proposing by hand need not say. */
+  readonly rationale?: string | undefined;
+  readonly paths?: readonly string[] | undefined;
+  readonly evidence?: readonly string[] | undefined;
+  /** skill-improvement: the skill it improves. */
+  readonly skill?: string | undefined;
+  /** The ids of the skills there are (a skill improvement must name one of them). */
+  readonly skills?: readonly string[];
+  readonly channel?: "cli" | "ui";
+}
+
+/**
+ * A person proposes a candidate (ADR-0020 §6): the same `candidate` artifact an agent proposes, in the
+ * repository's candidates run, decided the same way. A skill improvement must name a skill this
+ * project can edit, as promote does; one it could not promote is refused now, not later.
+ */
+export function addCandidate(runtime: Runtime, input: AddCandidateInput): Candidate {
+  const title = input.title.trim();
+  const text = input.text.trim();
+  if (!title) throw new CandidateInvalid("a candidate needs a title");
+  if (!text)
+    throw new CandidateInvalid("a candidate needs its text: the rule, the knowledge or the step to add");
+  const doc: CandidateDoc = {
+    kind: input.kind,
+    title,
+    rationale: input.rationale?.trim() || `Proposed by ${input.actor.id}`,
+    proposal: text,
+    ...(input.paths && input.paths.length > 0 ? { paths: [...input.paths] } : {}),
+    ...(input.evidence && input.evidence.length > 0 ? { evidence: [...input.evidence] } : {}),
+    status: "proposed",
+  };
+  if (input.kind === "skill-improvement") {
+    const skill = input.skill?.trim();
+    if (!skill) throw new CandidateInvalid("a skill improvement needs --skill <id>: the skill it improves");
+    if (input.skills && !input.skills.includes(skill))
+      throw new CandidateInvalid(`no skill "${skill}" (see \`jarvis skills list\`)`);
+    doc.skill = skill;
+    try {
+      skillEditOf(input.root, doc);
+    } catch (error) {
+      if (error instanceof CandidateNotPromotable) throw new CandidateInvalid(error.message);
+      throw error;
+    }
+  }
+  const run = candidatesRunOf(runtime, input.root, input.actor);
+  const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "");
+  const artifact = runtime.artifacts.put({
+    runId: run.id,
+    type: "candidate",
+    name: `by-hand-${slug(title) || "candidate"}-${stamp}.json`,
+    content: JSON.stringify(doc, null, 2),
+    mediaType: "application/json",
+    provenance: { kind: "human", actor: input.actor },
+    sourceRefs: [...(input.evidence ?? [])],
+    stepId: "candidates",
+  });
+  runtime.events.emit({
+    kind: "candidate.added",
+    runId: run.id,
+    actor: `${input.actor.kind}:${input.actor.id}`,
+    payload: {
+      artifact: artifact.artifactId,
+      kind: doc.kind,
+      title,
+      ...(doc.skill ? { skill: doc.skill } : {}),
+      ...(input.channel ? { channel: input.channel } : {}),
+    },
+  });
+  // its name is unique among all the candidates, so it comes from the whole list
+  return candidatesOf(runtime).find((c) => c.artifact.artifactId === artifact.artifactId) as Candidate;
 }
 
 /** Open candidates about a module (newest first). */

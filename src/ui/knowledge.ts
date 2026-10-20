@@ -95,6 +95,10 @@ export interface OverviewPage {
   /** Modules and their first folders that have no document of their own. */
   readonly toResearch: readonly TreeNode[];
   readonly candidates: number;
+  /** Open candidates that are not module maps (by hand, from review): decided in a terminal. */
+  readonly proposed?: number;
+  /** The skills a skill improvement may name. */
+  readonly skills?: readonly string[];
   readonly query?: string;
   readonly result?: RetrievalResult;
   readonly searchError?: string;
@@ -142,7 +146,36 @@ ${
 </section>`;
 }
 
-export function overviewContent(page: OverviewPage, notice?: Html): Html {
+/**
+ * «Propose a candidate» (ADR-0020 §6): what `jarvis candidates add` does, from the page. The candidate
+ * waits like one review proposed; promote and reject stay in the terminal.
+ */
+function proposeHtml(page: OverviewPage, actions: Actions): Html {
+  const kinds: Array<[string, string]> = [
+    ["standard", t("standard — a rule to follow")],
+    ["knowledge", t("knowledge — what is true about the project")],
+    ["skill-improvement", t("skill improvement — a step to add to a skill")],
+  ];
+  return html`<details class="panel kadd" id="propose"><summary><b>${t("Propose a candidate")}</b> <span class="hint">— ${th("waits with the ones review proposed: {cmd}", { cmd: html`<code>jarvis candidates list</code>` })}</span></summary>
+${form(
+  actions,
+  "/knowledge/candidates/add",
+  html`<div class="row kfields">
+<label class="field">${t("Kind")}<select name="kind">${kinds.map(([v, label]) => html`<option value="${v}">${label}</option>`)}</select></label>
+<label class="field">${t("Skill")} <span class="hint">${t("for a skill improvement")}</span><select name="skill"><option value="">—</option>${(page.skills ?? []).map((id) => html`<option value="${id}">${id}</option>`)}</select></label>
+<label class="field grow">${t("Title")}<input type="text" name="title" required maxlength="120"></label>
+</div>
+<label class="field">${t("Text")} <span class="hint">${t("the rule, the knowledge, or the step — as it should be written")}</span><textarea name="text" rows="4" required maxlength="8000"></textarea></label>
+<div class="row kfields">
+<label class="field grow">${t("Paths")} <span class="hint">${t("optional, comma-separated globs it applies to")}</span><input type="text" name="paths" maxlength="400" class="mono"></label>
+<label class="field grow">${t("Evidence")} <span class="hint">${t("optional, comma-separated: path:line, a run, a link")}</span><input type="text" name="evidence" maxlength="800" class="mono"></label>
+</div>
+<div class="row"><button type="submit" class="btn strong">${t("Propose")}</button>${page.proposed ? html`<span class="hint">${t("{n} open besides module maps", { n: page.proposed })}</span>` : ""}</div>`,
+)}
+</details>`;
+}
+
+export function overviewContent(page: OverviewPage, notice?: Html, actions?: Actions): Html {
   const stale = page.docs.filter((d) => d.staleCommits);
   const generated = page.docs.filter((d) => d.generated);
   const shown = [...page.docs].sort(
@@ -184,7 +217,8 @@ ${
 }
 </section>
 </div>
-</div>`;
+</div>
+${actions ? proposeHtml(page, actions) : ""}`;
 }
 
 /* ---- documents ---- */

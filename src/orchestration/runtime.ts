@@ -2,6 +2,7 @@ import { reasonOf } from "../app/activity.ts";
 import { goOnRequested, rerunBackTo } from "../app/decide.ts";
 import { pausedText, pauseRequested } from "../app/pause.ts";
 import { pendingRedo } from "../app/redo.ts";
+import { proposeRepeatedFindings } from "../app/repeatedFindings.ts";
 import { roundStop } from "../app/rounds.ts";
 import type { Runtime } from "../app/runtime.ts";
 import { checksAskOf, pauseAfterRequested } from "../app/steer.ts";
@@ -695,6 +696,19 @@ export class LocalWorkflowEngine {
       }
     }
     if (step.agent === "implementation") afterImplementation(this.rt, run);
+    // ADR-0020 §6: an issue review found in another run too becomes a standard candidate
+    const reviewed = (outcome.outputs ?? []).some((ref) => {
+      const [id, version] = ref.split("@");
+      return id ? this.rt.artifacts.get(id, Number(version))?.type === "review" : false;
+    });
+    if (reviewed) {
+      try {
+        proposeRepeatedFindings(this.rt, run);
+      } catch (error) {
+        // a candidate is a suggestion: failing to make one never stops the run
+        this.rt.log.error("candidates.repeated", { runId: run.id, stepId: step.id, ...errorFields(error) });
+      }
+    }
   }
 
   private async park(
