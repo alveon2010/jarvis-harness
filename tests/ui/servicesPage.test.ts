@@ -116,6 +116,11 @@ describe("Services in jarvis ui", () => {
     expect(overview.text).toContain('href="/knowledge/services">Services <span class="muted">2</span>');
     const map = await page("/knowledge/services");
     expect(map.status).toBe(200);
+    // the top bar: Services of the map, current here; Knowledge not
+    expect(map.text).toContain(
+      '<a href="/knowledge/services" aria-current="page">Services<span class="n">2</span></a>',
+    );
+    expect(map.text).toContain('<a href="/knowledge">Knowledge</a>');
     expect(map.text).toContain("from <code>project.yaml</code>");
     expect(map.text).toContain("Takes and tracks orders.");
     expect(map.text).toContain('href="/knowledge/services?name=notifications-worker"');

@@ -101,6 +101,20 @@ export interface Chrome {
   readonly egress?: readonly EgressNotice[];
   /** Cloud models allowed by the project's exception (ADR-0016 §6): said on every page. */
   readonly modelEgress?: readonly ModelEgressNotice[];
+  /** Runs that wait for a person: the count next to Runs in the top bar. */
+  readonly waits?: number;
+  /** The services of a knowledge repository's map: Services in the top bar. */
+  readonly services?: number;
+  /** The page's path: which section of the top bar is current. */
+  readonly path?: string;
+}
+
+/** The top bar's sections: Runs with what waits, Knowledge, Services of a knowledge repository. */
+function sectionsHtml(chrome: Chrome): Html {
+  const path = chrome.path ?? "";
+  const services = path.startsWith("/knowledge/services");
+  const at = (on: boolean) => (on ? html` aria-current="page"` : "");
+  return html`<nav class="sections" aria-label="Pages"><a href="/"${at(chrome.page === "runs" || chrome.page === "run" || chrome.page === "artifact")}>Runs${chrome.waits ? html`<span class="n w">${String(chrome.waits)} waits</span>` : ""}</a><a href="/knowledge"${at(chrome.page === "knowledge" && !services)}>Knowledge</a>${chrome.services !== undefined ? html`<a href="/knowledge/services"${at(services)}>Services<span class="n">${String(chrome.services)}</span></a>` : ""}</nav>`;
 }
 
 export function layout(chrome: Chrome, content: Html): string {
@@ -120,20 +134,19 @@ ${chrome.refresh ? html`<noscript><meta http-equiv="refresh" content="${String(c
 </head>
 <body data-page="${chrome.page}"${chrome.runId ? html` data-run="${chrome.runId}"` : ""}${chrome.tick ? html` data-tick="${chrome.tick}"` : ""}>
 <a class="skip-link" href="#main">Skip to content</a>
-<header class="top"><div class="wrap">
-<a class="brand" href="/">jarvis</a>
-${chrome.back ? html`<a class="back" href="${chrome.back.href}">← ${chrome.back.label}</a>` : ""}
+<header class="top"><div class="bar">
+<a class="brand" href="/"><span class="mark" aria-hidden="true"></span>jarvis</a>
+${sectionsHtml(chrome)}
 ${chrome.repos ?? ""}
-<nav aria-label="Pages"><a href="/"${chrome.page === "runs" ? html` aria-current="page"` : ""}>Runs</a><a href="/knowledge"${chrome.page === "knowledge" ? html` aria-current="page"` : ""}>Knowledge</a></nav>
-${chrome.canStart ? html`<a class="btn primary small" href="/#new">New task</a>` : ""}
 <div class="status">
 <div class="models-wrap" data-pop-wrap><button type="button" class="models" data-mcp aria-expanded="false" aria-controls="mcp-pop" title="MCP: checking the servers…"><span class="dot" data-state="pending" aria-hidden="true"></span><span>mcp</span></button>
 <div id="mcp-pop" class="pop" role="dialog" aria-label="MCP servers" hidden><div data-mcp-body>${mcpPending()}</div></div></div>
 <div class="models-wrap" data-pop-wrap><button type="button" class="models" data-models aria-expanded="false" aria-controls="models-pop" title="Models: collecting the stats…"><span class="dot" data-state="pending" aria-hidden="true"></span><span>models</span><span class="free" data-badge hidden></span></button>
 <div id="models-pop" class="pop" role="dialog" aria-label="Models" hidden><div data-models-body>${modelsPending()}</div></div></div>
-<span class="live" data-state="connecting" role="status"><span class="dot" aria-hidden="true"></span><span class="label">connecting…</span><span aria-hidden="true">·</span><span>${chrome.address}</span></span>
+<span class="live" data-state="connecting" role="status" title="${chrome.address}"><span class="dot" aria-hidden="true"></span><span class="label">connecting…</span></span>
 <button type="button" class="theme notify" data-notify aria-pressed="false" aria-label="System notifications when a run waits for you" title="System notifications when a run waits for you"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.75a4 4 0 0 0-4 4v2.6L2.75 11h10.5L12 8.35v-2.6a4 4 0 0 0-4-4zM6.5 13a1.5 1.5 0 0 0 3 0" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"></path></svg></button>
 <button type="button" class="theme" data-theme-switch aria-label="Switch the theme" title="Switch the theme"><svg class="moon" viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 9.6A5.75 5.75 0 0 1 6.4 2.5a5.75 5.75 0 1 0 7.1 7.1z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"></path></svg><svg class="sun" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.5"></circle><path d="M8 1v1.75M8 13.25V15M1 8h1.75M13.25 8H15M3.05 3.05l1.24 1.24M11.71 11.71l1.24 1.24M3.05 12.95l1.24-1.24M11.71 4.29l1.24-1.24" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path></svg></button>
+${chrome.canStart ? html`<a class="btn primary small newtask-btn" href="/#new" data-new-task title="New task (N)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"></path></svg>New task<kbd aria-hidden="true">N</kbd></a>` : ""}
 </div>
 </div></header>
 ${
@@ -148,6 +161,7 @@ ${
     : ""
 }
 <main id="main" class="wrap">
+${chrome.back ? html`<nav class="crumb" aria-label="Back"><a href="${chrome.back.href}">← ${chrome.back.label}</a></nav>` : ""}
 ${content}
 </main>
 </body>

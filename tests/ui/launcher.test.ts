@@ -217,7 +217,10 @@ describe("New task on the page", () => {
       launcher,
     });
     const runs = await page("/");
-    expect(runs).toContain('<a class="btn primary small" href="/#new">New task</a>');
+    // in the top bar, with its key
+    expect(runs).toContain(
+      '<a class="btn primary small newtask-btn" href="/#new" data-new-task title="New task (N)">',
+    );
     expect(runs).toContain('action="/runs/new"');
     // research first and chosen: find out before changing anything; the button names it and the place
     expect(runs).toContain('<input type="radio" name="workflow" value="research" data-label="Research"');

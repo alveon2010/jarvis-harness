@@ -51,14 +51,23 @@ a{color:var(--accent)}a:hover{color:var(--accent-dark)}
 .muted{color:var(--muted)}
 .ok{color:var(--ok)}.warn{color:var(--wait)}.bad{color:var(--bad)}
 .skip-link{position:absolute;left:-9999px}.skip-link:focus{left:16px;top:8px;background:var(--panel);padding:8px;z-index:9}
-.top{background:var(--panel);border-bottom:1px solid var(--line)}
+.top{background:color-mix(in srgb,var(--ground) 86%,transparent);-webkit-backdrop-filter:saturate(1.4) blur(10px);backdrop-filter:saturate(1.4) blur(10px);border-bottom:1px solid var(--line)}
 /* the header stays while the page scrolls: the models' and MCP popovers are looked at often (pilot);
    on a narrow screen it wraps into rows and would eat the page, so it scrolls away there */
-@media (min-width:720px){.top{position:sticky;top:0;z-index:40}html{scroll-padding-top:84px}}
+@media (min-width:720px){.top{position:sticky;top:0;z-index:40}html{scroll-padding-top:72px}}
 .wrap{max-width:1240px;margin:0 auto;padding:0 24px}
-.top .wrap{padding-top:12px;padding-bottom:12px;display:flex;flex-wrap:wrap;align-items:center;gap:12px 24px}
-.brand{font-family:var(--mono);font-weight:600;font-size:17px;color:var(--ink);text-decoration:none}
-.top nav a{display:inline-block;padding:10px 12px;border-radius:6px;color:var(--ink-2);text-decoration:none;font-size:14px}
+.top .bar{min-height:56px;padding:10px 24px;display:flex;flex-wrap:wrap;align-items:center;gap:8px 6px}
+.brand{display:inline-flex;align-items:center;gap:8px;margin-right:14px;font-family:var(--mono);font-weight:600;font-size:15px;color:var(--ink);text-decoration:none}
+.brand .mark{width:16px;height:16px;border-radius:5px;background:var(--ink)}
+.top nav a{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 10px;border-radius:var(--r);color:var(--muted);text-decoration:none;font-size:14px}
+.top nav .n{font-size:12px;color:var(--faint);font-weight:400}
+.top nav .n.w{color:var(--wait);font-weight:600}
+.newtask-btn{margin-left:6px}
+.newtask-btn svg{width:14px;height:14px}
+.newtask-btn kbd{font-family:var(--mono);font-size:11px;line-height:14px;padding:0 5px;border-radius:4px;background:rgba(127,127,127,.25);color:inherit}
+.crumb{font-size:13px;margin-bottom:-16px}
+.crumb a{color:var(--muted);text-decoration:none}
+.crumb a:hover{color:var(--ink)}
 .top nav a:hover{background:var(--hover);color:var(--ink)}
 .top nav a[aria-current=page]{background:var(--panel);color:var(--ink);font-weight:500;box-shadow:0 0 0 1px var(--line)}
 .back{font-size:14px;padding:10px 0}
@@ -74,12 +83,13 @@ input[type=search]:focus{border-color:var(--accent)}
 input[type=search]:focus-visible{outline:none;box-shadow:0 0 0 3px var(--accent-soft)}
 select{height:36px;padding:0 8px;max-width:60vw}
 input.amount{height:36px;width:11em;padding:0 10px;font-family:inherit;font-size:14px;color:var(--ink);border:1px solid var(--field-line);border-radius:var(--r);background:var(--panel)}
-.status{margin-left:auto;display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px}
+.status{margin-left:auto;display:flex;flex-wrap:wrap;align-items:center;gap:4px}
+.status .live{padding:0 8px}
 .live{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted)}
 .dot{width:7px;height:7px;border-radius:50%;background:var(--faint);flex:none}
 .live[data-state=live] .dot{background:var(--ok)}
 .live[data-state=lost] .dot{background:var(--bad)}
-.theme{display:inline-flex;align-items:center;justify-content:center;min-height:32px;min-width:32px;padding:0 8px;border:1px solid transparent;border-radius:var(--r);background:var(--panel);color:var(--ink-2);font-family:inherit;font-size:13px;cursor:pointer}
+.theme{display:inline-flex;align-items:center;justify-content:center;min-height:32px;min-width:32px;padding:0 8px;border:1px solid transparent;border-radius:var(--r);background:transparent;color:var(--ink-2);font-family:inherit;font-size:13px;cursor:pointer}
 .theme:hover{background:var(--hover);color:var(--ink)}
 .notify[aria-pressed=true]{color:var(--accent);border-color:var(--accent)}
 .notify[data-state=blocked],.notify[data-state=unsupported]{opacity:.55}
@@ -977,6 +987,22 @@ export const SCRIPT = `
     const open = folds.some((d) => !d.open);
     for (const d of folds) d.open = open;
     b.textContent = open ? 'Fold the rest' : 'Show every line';
+  });
+
+  // N anywhere but in a field: New task, its box in focus
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'n' && e.key !== 'N') return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const t = e.target;
+    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+    const link = document.querySelector('[data-new-task]');
+    if (!link) return;
+    e.preventDefault();
+    const box = document.querySelector('form[data-newtask] textarea[name="task"]');
+    if (box) {
+      box.scrollIntoView({ block: 'center' });
+      box.focus();
+    } else location.href = link.getAttribute('href');
   });
 
   // failed checks: the button says what the chosen way does
