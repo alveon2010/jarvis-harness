@@ -302,6 +302,8 @@ export class McpToolProvider implements ToolProvider {
       description: cap.description,
       network: planned.network,
       server: serverId,
+      // what an internet server's reads answer — a design file, a page — is untrusted input (ADR-0016 §4)
+      untrusted: planned.network === "internet" && !cap.effect,
       access: cap.access,
       effect: cap.effect,
       parameters: planned.parameters,

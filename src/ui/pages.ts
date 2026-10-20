@@ -36,6 +36,7 @@ import type {
   StepRow,
   StepSkills,
   TestsStop,
+  UntrustedView,
   WaitCard,
   WaitingCandidate,
   WaitingRun,
@@ -1436,6 +1437,7 @@ ${page.subtaskOf ? html`<p class="muted">${t("subtask {key} of {of}", { key: pag
 ${notice ?? ""}
 ${page.pausing && !cancelling(r) ? html`<div class="banner info" data-live="pausing" role="status"><span class="spin" aria-hidden="true"></span> ${t("Pausing")}${page.pausing.by ? ` (${t("asked by {who}", { who: page.pausing.by })})` : ""} — ${t("the run stops after its current model or tool call and keeps its place; then Resume goes on from there")}</div>` : html`<div data-live="pausing" hidden></div>`}
 ${cancelling(r) ? html`<div class="banner bad" data-live="cancelling" role="status"><span class="spin" aria-hidden="true"></span> ${t("Cancelling — the run stops after its current model or tool call (a model call can take a minute or two); then it is CANCELLED, its checkout and artifacts stay")}</div>` : html`<div data-live="cancelling" hidden></div>`}
+${page.untrusted ? untrustedHtml(page.untrusted) : html`<div data-live="untrusted" hidden></div>`}
 <div class="cols">
 <section class="panel side steps" aria-labelledby="steps" data-live="steps">
 <h2 id="steps">${t("Steps")}</h2>
@@ -1592,6 +1594,25 @@ function contractCheckHtml(check: NonNullable<RunPage["contractCheck"]>): Html {
       html`<li class="row" style="flex-wrap:wrap;gap:6px 12px"><span class="pill plain">${i.kind}</span><code>${i.id}</code><span class="muted" style="flex:1 1 220px">${i.change}</span>${side(i.producerSide)}${i.consumerSides.map(side)}</li>`,
   )}</ul>
 </section>`;
+}
+
+/**
+ * ADR-0016 §4: untrusted content from the internet is in the run and nobody approved anything since —
+ * its effects (a PR, a comment, a push) are held until a person approves the run's artifact.
+ */
+function untrustedHtml(u: UntrustedView): Html {
+  const s = u.source;
+  const held =
+    u.held.length > 0
+      ? html` ${th("Held so far: {list}.", {
+          list: join(
+            u.held.map((c) => html`<code>${c}</code>`),
+            ", ",
+          ),
+        })}`
+      : "";
+  const where = html`<code>${s.capability}</code>${s.server ? ` (${t("server {name}", { name: s.server })})` : ""}${s.stepId ? ` ${t("in {step}", { step: s.stepId })}` : ""}`;
+  return html`<div class="banner warn" data-live="untrusted" role="note">⚠ ${th("Untrusted content from the internet came in: {where}. Its text went to the agents as data, not instructions; effects — a PR, a comment, a push — wait for a person to approve the run's artifact.", { where })}${held}</div>`;
 }
 
 /** The new run's line: where it came from and what it brought. */

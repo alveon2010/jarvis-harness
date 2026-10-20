@@ -52,6 +52,12 @@ import { notesOf, type RunNote } from "../interaction/notes.ts";
 import type { Interaction, InteractionMessage } from "../interaction/store.ts";
 import type { NamedService } from "../knowledge/catalog.ts";
 import type { LocalWorkflowEngine } from "../orchestration/runtime.ts";
+import {
+  EFFECT_HELD,
+  UNTRUSTED_CONTENT,
+  type UntrustedSource,
+  untrustedSince,
+} from "../security/policy/untrusted.ts";
 import { shortRunId } from "../storage/runStore.ts";
 import type { StoredEvent } from "../telemetry/events.ts";
 
@@ -784,6 +790,8 @@ export interface RunPage {
   /** A master: its subtasks, and the contract checked in their checkouts. */
   readonly subtasks?: readonly SubtaskView[];
   readonly contractCheck?: ContractCheckView;
+  /** Untrusted content from the internet with no approval since (ADR-0016 §4): effects are held. */
+  readonly untrusted?: UntrustedView;
 }
 
 /** The master's contract check (src/orchestration/tools/cross.ts), as the page shows it. */
@@ -830,6 +838,22 @@ function crossOf(runtime: Runtime, run: Run): Pick<RunPage, "subtaskOf" | "subta
     contractCheck = undefined;
   }
   return { ...(subtasks.length > 0 ? { subtasks } : {}), ...(contractCheck ? { contractCheck } : {}) };
+}
+
+export interface UntrustedView {
+  readonly source: UntrustedSource;
+  /** Effects refused since it came in, by capability, in order. */
+  readonly held: readonly string[];
+}
+
+/** The run page's line on untrusted content (ADR-0016 §4); undefined once a person approved after it. */
+export function untrustedOf(events: readonly StoredEvent[]): UntrustedView | undefined {
+  const source = untrustedSince(events);
+  if (!source) return undefined;
+  const held = events
+    .filter((e) => e.kind === EFFECT_HELD && e.seq > source.seq)
+    .map((e) => str(e.payload?.capability) ?? "?");
+  return { source, held: [...new Set(held)] };
 }
 
 export interface RunLink {
@@ -959,7 +983,9 @@ export function feedItem(e: StoredEvent): FeedItem | undefined {
     case "context.compaction_failed":
     case "model.retry":
     case "model.failover":
-    case "model.error": {
+    case "model.error":
+    case UNTRUSTED_CONTENT:
+    case EFFECT_HELD: {
       const notice = noticeOf(e);
       // the notice carries a wall clock of its own: the feed has one
       return notice
@@ -1200,6 +1226,9 @@ export async function runPage(
                 .at(-1)?.comment,
           )
         : undefined,
+    ),
+    ...((u) => (u ? { untrusted: u } : {}))(
+      events.some((e) => e.kind === UNTRUSTED_CONTENT) ? untrustedOf(events) : undefined,
     ),
     ...((p) => (p ? { planProgress: p } : {}))(
       run.state === "RUNNING" && implementing(activity) ? planProgressOf(runtime, run, events) : undefined,

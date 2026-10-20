@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Writable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { exportWarning, readBundle } from "../../src/app/bundle.ts";
 import { run } from "../../src/cli/main.ts";
 import {
   type CapturedRequest,
@@ -192,9 +193,20 @@ describe("export / import / committed approvals", () => {
 
     const bundle = join(sb.root, "dev.jarvis.json.gz");
     const exported = await jarvis(["--json", "export", runId, "--out", bundle]);
-    expect(exported.err).toBe("");
+    // ADR-0016 §3: the run's data class in the bundle's header, and a warning for a confidential one
+    expect(exported.err).toBe(
+      "⚠ dataClass confidential: the bundle holds the run's task, artifacts, journal and code changes as they are — keep it inside the organization's contour; moving it out is on you (ADR-0016 §3)\n",
+    );
     expect(exported.code).toBe(0);
-    const stats = JSON.parse(exported.out) as { artifacts: number; blobs: number };
+    expect(readBundle(bundle).dataClass).toBe("confidential");
+    expect(Object.keys(readBundle(bundle)).slice(0, 4)).toEqual([
+      "schemaVersion",
+      "exportedAt",
+      "runId",
+      "dataClass",
+    ]);
+    const stats = JSON.parse(exported.out) as { artifacts: number; blobs: number; dataClass: string };
+    expect(stats.dataClass).toBe("confidential");
     expect(stats.artifacts).toBeGreaterThanOrEqual(3);
     expect(stats.blobs).toBe(stats.artifacts);
 
@@ -256,5 +268,14 @@ describe("export / import / committed approvals", () => {
     };
     expect(parked.run.waitingFor?.detail).toBe("implementation");
     expect(parked.steps.find((s) => s.stepId === "approve-spec")?.status).toBe("success");
+  });
+});
+
+describe("exportWarning (ADR-0016 §3)", () => {
+  it("warns for a run that is not public; old bundles without a data class say nothing", () => {
+    expect(exportWarning("confidential")).toContain("dataClass confidential: the bundle holds");
+    expect(exportWarning("internal")).toContain("dataClass internal:");
+    expect(exportWarning("public")).toBeUndefined();
+    expect(exportWarning(undefined)).toBeUndefined();
   });
 });

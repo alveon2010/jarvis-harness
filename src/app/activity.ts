@@ -1,3 +1,4 @@
+import { EFFECT_HELD, UNTRUSTED_CONTENT } from "../security/policy/untrusted.ts";
 import type { StoredEvent } from "../telemetry/events.ts";
 
 /**
@@ -656,6 +657,16 @@ export function noticeOf(event: StoredEvent): string | undefined {
   if (event.kind === "model.error") {
     const attempts = num(p.retries) + 1;
     return `✗ ${wallClock(event.ts)} ${model}: ${reason}${took} — gave up after ${attempts} attempt${attempts === 1 ? "" : "s"}${traceText}`;
+  }
+  // ADR-0016 §4: what came in from the internet, and an effect that waits for a person because of it
+  if (event.kind === UNTRUSTED_CONTENT) {
+    const server = str(p.server) ? ` (server ${str(p.server)})` : "";
+    const step = event.stepId ? ` in ${event.stepId}` : "";
+    return `⚠ ${wallClock(event.ts)} untrusted content from the internet: ${str(p.capability) ?? "a tool"}${server}${step} — from now on effects wait for a person's approval (ADR-0016 §4)`;
+  }
+  if (event.kind === EFFECT_HELD) {
+    const from = `${str(p.source) ?? "an internet tool"}${str(p.sourceStep) ? ` in ${str(p.sourceStep)}` : ""}`;
+    return `⚠ ${wallClock(event.ts)} effect ${str(p.capability) ?? "?"} held: the run read untrusted content (${from}) and no person has approved anything since (ADR-0016 §4)`;
   }
   if (event.kind === "run.state") {
     const state = str(p.state);

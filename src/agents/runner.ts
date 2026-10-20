@@ -25,6 +25,7 @@ import type { Message, ToolDefinition } from "../models/types.ts";
 import type { AgentRunner } from "../orchestration/executors.ts";
 import { InterruptedError, interruption } from "../orchestration/interrupt.ts";
 import { type StepContext, type StepOutcome, SuspendRun } from "../orchestration/types.ts";
+import { wrapUntrusted } from "../security/policy/untrusted.ts";
 import type { ToolResult } from "../tools/types.ts";
 import { buildBaseMessages, outlinesFor } from "./context.ts";
 import type { AgentRegistry } from "./definition.ts";
@@ -814,7 +815,9 @@ function formatToolResult(
   if (!result) return `[${name}] error: no result`;
   if (result.denied) return `[${name}] denied: ${result.denied}`;
   const head = `[${name}] ${result.ok ? "ok" : `error: ${result.error ?? "failed"}`}`;
-  return result.text ? `${head}\n${result.text}` : head;
+  // from the internet: data between marks, never instructions (ADR-0016 §4)
+  const text = result.text && result.untrusted ? wrapUntrusted(name, result.text) : result.text;
+  return text ? `${head}\n${text}` : head;
 }
 
 /** How many contradictions a result lists (research, requirements): shown with the step, not buried. */

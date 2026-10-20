@@ -349,7 +349,7 @@ steps:
 - знание и контекст: `knowledge.promoted`, `standards.checked`, `retrieval.knowledge`,
   `graph.update|update_failed`, `context.pressure|trimmed|compacting|compacted|reset|tightened|compaction_failed|overflow|prefixChanged`
   (`compacting` — началась сводка старой части разговора: отдельный вызов модели);
-- прочее: `security.redaction|pathDenied`, `prepush.checked`, `mcp.discovered|unavailable`, `daemon.tick`.
+- прочее: `security.redaction|pathDenied|untrustedContent|effectHeld` (последние два — ADR-0016 §4), `prepush.checked`, `mcp.discovered|unavailable`, `daemon.tick`.
 
 `jarvis status <run> --events n` показывает последние.
 Внешнего экспорта событий пока нет: схема `telemetry.export` и проверка egress есть, экспортёра — нет.

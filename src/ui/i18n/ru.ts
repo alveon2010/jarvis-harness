@@ -1205,6 +1205,12 @@ export const RU: Readonly<Record<string, string>> = {
   "It is there — go on": "Есть — продолжить",
   "It is not there — do it again": "Нет — сделать ещё раз",
   "In the terminal: {cmd}": "В терминале: {cmd}",
+  // ---- untrusted content (ADR-0016)
+  "Held so far: {list}.": "Уже задержано: {list}.",
+  "server {name}": "сервер {name}",
+  "in {step}": "в {step}",
+  "Untrusted content from the internet came in: {where}. Its text went to the agents as data, not instructions; effects — a PR, a comment, a push — wait for a person to approve the run's artifact.":
+    "Пришли недоверенные данные из интернета: {where}. Агенты получили этот текст как данные, а не как инструкции; эффекты — PR, комментарий, push — ждут, пока человек одобрит артефакт прогона.",
   // ---- a step's skills
   "named by the workflow step": "заданы в шаге workflow",
   "picked by {what}": "подобраны по {what}",

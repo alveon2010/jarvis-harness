@@ -474,6 +474,74 @@ describe("an egress exception (ADR-0016 §6)", () => {
   });
 });
 
+describe("untrusted content from the internet (ADR-0016 §4)", () => {
+  it("an internet read is marked and journaled; an effect after it is held until a person approves", async () => {
+    const { run, bind } = await setup(
+      serverYaml("jira", "      profile: atlassian\n      network: internet"),
+    );
+    const runtime = rt as Runtime;
+    expect(runtime.registry.get("jira.get")?.untrusted).toBe(true);
+    const tools = bind(["jira.*"]);
+    // before anything came in, an effect goes out as before
+    expect((await tools.invoke("jira.comment", { key: "ABC-42", body: "first" })).ok).toBe(true);
+    const read = await tools.invoke("jira.get", { key: "ABC-42" });
+    expect(read.ok).toBe(true);
+    expect(read.untrusted).toBe(true);
+    await tools.invoke("jira.get", { key: "ABC-43" });
+    const marked = runtime.events.list({ runId: run.id, kind: "security.untrustedContent" });
+    expect(marked).toHaveLength(1); // once per capability and step, not per call
+    expect(marked[0]).toMatchObject({
+      stepId: "research",
+      payload: { capability: "jira.get", network: "internet", server: "jira" },
+    });
+    expect(runtime.events.list({ runId: run.id, kind: "tool.call" }).at(-1)?.payload).toMatchObject({
+      untrusted: true,
+    });
+
+    const held = await tools.invoke("jira.comment", { key: "ABC-42", body: "second" });
+    expect(held.ok).toBe(false);
+    expect(held.denied).toContain("held by the human gate (ADR-0016 §4)");
+    expect(held.denied).toContain("jira.get (server jira) in step research");
+    expect(runtime.events.list({ runId: run.id, kind: "security.effectHeld" })[0]?.payload).toEqual({
+      capability: "jira.comment",
+      source: "jira.get",
+      sourceStep: "research",
+    });
+    expect(runtime.events.list({ runId: run.id, kind: "effect.done" })).toHaveLength(1);
+    // another step of the same run: what was read reaches it through the artifacts
+    const next = runtime.tools.bind({
+      run: runtime.runs.require(run.id),
+      stepId: "implement",
+      iteration: 1,
+      lease: lease as HeldLease,
+      workspacePath: sb.project,
+      agentCapabilities: ["jira.*"],
+      env: ENV,
+    });
+    expect((await next.invoke("jira.comment", { key: "ABC-42", body: "third" })).denied).toContain(
+      "held by the human gate",
+    );
+
+    // a person approved the run's artifact after it: the gate is passed
+    runtime.events.emit({
+      kind: "approval.recorded",
+      runId: run.id,
+      actor: "user:me@corp",
+      payload: { artifactId: "a1", version: 1, type: "spec", decision: "approve" },
+    });
+    expect((await next.invoke("jira.comment", { key: "ABC-42", body: "fourth" })).ok).toBe(true);
+  });
+
+  it("intranet results are not untrusted and hold nothing", async () => {
+    const { run, bind } = await setup(serverYaml("jira", "      profile: atlassian"));
+    const tools = bind(["jira.*"]);
+    const read = await tools.invoke("jira.get", { key: "ABC-42" });
+    expect(read.untrusted).toBeUndefined();
+    expect((await tools.invoke("jira.comment", { key: "ABC-42", body: "ok" })).ok).toBe(true);
+    expect((rt as Runtime).events.list({ runId: run.id, kind: "security.untrustedContent" })).toEqual([]);
+  });
+});
+
 describe("embeddedLinks", () => {
   it("finds the addresses macros keep in attributes and parameters, plain or JSON-escaped", () => {
     const storage = [

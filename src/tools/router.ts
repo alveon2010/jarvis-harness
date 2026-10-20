@@ -6,6 +6,14 @@ import { globMatches } from "../knowledge/frontmatter.ts";
 import { runEffect } from "../orchestration/effects.ts";
 import type { HeldLease } from "../orchestration/lease.ts";
 import { egressExceptionFor, networkAllowed } from "../security/policy/egress.ts";
+import {
+  EFFECT_HELD,
+  heldReason,
+  needsHumanGate,
+  UNTRUSTED_CONTENT,
+  untrustedResults,
+  untrustedSourceOf,
+} from "../security/policy/untrusted.ts";
 import { recordRedaction } from "../security/redactionStats.ts";
 import type { PathPolicy, Redactor } from "../security/redactor.ts";
 import { effectMarker } from "../storage/effects.ts";
@@ -125,6 +133,8 @@ export class BoundTools {
   private readonly agentCapabilities: readonly string[];
   private readonly writePaths: readonly string[] | undefined;
   private seq = 0;
+  /** Untrusted capabilities already on the record for this step: one event each, not one per call. */
+  private readonly untrustedSeen = new Set<string>();
 
   constructor(
     router: ToolRouter,
@@ -194,12 +204,29 @@ export class BoundTools {
       policy.allowed && this.writePaths && capability.access === "write" && typeof args.path === "string"
         ? !globMatches(args.path.replace(/^\.\//, ""), this.writePaths)
         : false;
+    // ADR-0016 §4: untrusted content in the run and no person's approval since → no effect
+    const untrusted =
+      policy.allowed && !outside && needsHumanGate(capability)
+        ? untrustedSourceOf(this.rt.events, this.ctx.run.id)
+        : undefined;
     const decision = outside
       ? {
           allowed: false,
           reason: `this agent writes only ${this.writePaths?.join(", ")} — ${String(args.path)} is not one: report the defect in your result instead of changing the code`,
         }
-      : policy;
+      : untrusted
+        ? { allowed: false, reason: heldReason(name, untrusted) }
+        : policy;
+    if (untrusted)
+      this.rt.events.emit({
+        kind: EFFECT_HELD,
+        ...base,
+        payload: {
+          capability: name,
+          source: untrusted.capability,
+          ...(untrusted.stepId ? { sourceStep: untrusted.stepId } : {}),
+        },
+      });
     if (!decision.allowed) {
       const result: ToolResult = {
         capability: name,
@@ -258,6 +285,18 @@ export class BoundTools {
       output = { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
     const result = this.finish(capability, output, started, source);
+    if (result.untrusted && !this.untrustedSeen.has(name)) {
+      this.untrustedSeen.add(name);
+      this.rt.events.emit({
+        kind: UNTRUSTED_CONTENT,
+        ...base,
+        payload: {
+          capability: name,
+          network: capability.network,
+          ...(capability.server ? { server: capability.server } : {}),
+        },
+      });
+    }
     this.rt.events.emit({
       kind: "tool.call",
       ...base,
@@ -270,6 +309,7 @@ export class BoundTools {
         source,
         error: result.error,
         access: capability.access,
+        ...(result.untrusted ? { untrusted: true } : {}),
         // out of the data class's network by the project's exception: on the record of every call
         ...(decision.exception ? { network: capability.network, egressException: decision.exception } : {}),
         // what the agent asked for, redacted and cut (`jarvis explain` and `jarvis logs` name the call)
@@ -327,6 +367,7 @@ export class BoundTools {
       durationMs: Date.now() - started,
       ...(redactedError ? { error: redactedError } : {}),
       ...(source ? { source } : {}),
+      ...(untrustedResults(capability) ? { untrusted: true as const } : {}),
     };
   }
 }

@@ -375,6 +375,7 @@ h2.ask-sec{font-size:15px;margin:4px 0 -4px}
 .banner.ok{background:var(--ok-bg);color:var(--ok-ink)}
 .banner.info{background:var(--accent-soft);color:var(--accent-dark)}
 .banner.bad{background:var(--bad-bg);color:var(--bad)}
+.banner.warn{background:var(--wait-bg);color:var(--wait)}
 .banner code{background:var(--code-on-banner);padding:1px 4px;border-radius:4px}
 .doc{padding:24px;font-size:15px;line-height:1.6;overflow-wrap:anywhere}
 .doc h2{font-size:20px;margin:22px 0 8px}.doc h2:first-child{margin-top:0}

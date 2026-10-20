@@ -46,6 +46,11 @@ export interface Capability {
   readonly parameters: Record<string, unknown>;
   /** The MCP server behind it, if any (an egress exception names a server, ADR-0016 §6). */
   readonly server?: string;
+  /**
+   * Its results are untrusted input (ADR-0016 §4). Unset: those of every `network: internet` read
+   * (src/security/policy/untrusted.ts).
+   */
+  readonly untrusted?: boolean;
   handler(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolOutput>;
   /** For effects: look for the marker on the provider side (ADR-0002 §3). */
   verify?(
@@ -74,6 +79,8 @@ export interface ToolResult {
   /** Set when policy refused the call before it ran. */
   readonly denied?: string;
   readonly source?: "executed" | "journal" | "verified";
+  /** Came from outside (ADR-0016 §4): a model gets it wrapped as data, effects after it wait for a person. */
+  readonly untrusted?: true;
 }
 
 /** Shape handed to the model as a tool definition. */

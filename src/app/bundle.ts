@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
+import type { DataClass } from "../core/config/schema.ts";
 import { WorktreeWorkspace } from "../orchestration/worktree.ts";
 import { git } from "../tools/local/exec.ts";
 import type { Runtime } from "./runtime.ts";
@@ -18,6 +19,11 @@ export interface RunBundle {
   readonly schemaVersion: number;
   readonly exportedAt: string;
   readonly runId: string;
+  /**
+   * The run's data class, in the header (ADR-0016 §3): the file leaves Jarvis's control, and whoever
+   * receives it sees what it holds. Absent in bundles written before it.
+   */
+  readonly dataClass?: DataClass;
   readonly tables: Record<string, Row[]>;
   /** contentRef → base64 */
   readonly blobs: Record<string, string>;
@@ -79,10 +85,20 @@ export async function exportRun(runtime: Runtime, runId: string): Promise<RunBun
     schemaVersion: BUNDLE_SCHEMA_VERSION,
     exportedAt: new Date().toISOString(),
     runId,
+    dataClass: run.dataClass,
     tables,
     blobs,
     ...(patch ? { patch } : {}),
   };
+}
+
+/**
+ * What `jarvis export` says about a run that is not public (ADR-0016 §3): moving the file outside the
+ * organization's contour is a person's call, and Jarvis does not track it.
+ */
+export function exportWarning(dataClass: DataClass | undefined): string | undefined {
+  if (dataClass === undefined || dataClass === "public") return undefined;
+  return `dataClass ${dataClass}: the bundle holds the run's task, artifacts, journal and code changes as they are — keep it inside the organization's contour; moving it out is on you (ADR-0016 §3)`;
 }
 
 export function writeBundle(bundle: RunBundle, file: string): void {

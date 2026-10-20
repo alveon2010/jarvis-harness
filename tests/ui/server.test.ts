@@ -302,6 +302,46 @@ describe("jarvis ui: pages", () => {
     expect(js).toContain("inPhase(fresh)");
   });
 
+  it("untrusted content from the internet: a line on the run page and in its activity, until a person approves (ADR-0016 §4)", async () => {
+    const { run } = seedWaiting("Order form: phone number mask", JSON.stringify({ title: "Mask" }));
+    const path = `/runs/${run.id.replace(/^run_/, "").slice(0, 8)}`;
+    expect((await get(path, authed())).body).toContain('<div data-live="untrusted" hidden></div>');
+    rt.events.emit({
+      kind: "security.untrustedContent",
+      runId: run.id,
+      stepId: "design",
+      payload: { capability: "figma.get", network: "internet", server: "design" },
+    });
+    rt.events.emit({
+      kind: "security.effectHeld",
+      runId: run.id,
+      stepId: "implement",
+      payload: { capability: "bitbucket.pr.create", source: "figma.get", sourceStep: "design" },
+    });
+    const page = (await get(path, authed())).body;
+    const banner = page.slice(
+      page.indexOf('data-live="untrusted"'),
+      page.indexOf("</div>", page.indexOf('data-live="untrusted"')),
+    );
+    expect(banner).toContain(
+      "Untrusted content from the internet came in: <code>figma.get</code> (server design) in design.",
+    );
+    expect(banner).toContain(
+      "effects — a PR, a comment, a push — wait for a person to approve the run&#39;s artifact.",
+    );
+    expect(banner).toContain("Held so far: <code>bitbucket.pr.create</code>.");
+    const feed = page.slice(page.indexOf('data-live="feed"'));
+    expect(feed).toContain(
+      "effect bitbucket.pr.create held: the run read untrusted content (figma.get in design)",
+    );
+    rt.events.emit({
+      kind: "approval.recorded",
+      runId: run.id,
+      payload: { artifactId: "a", version: 1, type: "spec", decision: "approve" },
+    });
+    expect((await get(path, authed())).body).toContain('<div data-live="untrusted" hidden></div>');
+  });
+
   it("activity: the newest 5 lines open, everything earlier folded above them, kept open across refreshes", async () => {
     const run = rt.runs.create({
       task: "Order form: phone number mask",

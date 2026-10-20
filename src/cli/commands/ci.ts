@@ -1,6 +1,13 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { BundleImportError, exportRun, importRun, readBundle, writeBundle } from "../../app/bundle.ts";
+import {
+  BundleImportError,
+  exportRun,
+  exportWarning,
+  importRun,
+  readBundle,
+  writeBundle,
+} from "../../app/bundle.ts";
 import { createRuntime } from "../../app/runtime.ts";
 import { type RunDetail, runDetail } from "../../app/status.ts";
 import type { Run } from "../../core/domain/run.ts";
@@ -110,8 +117,11 @@ export async function runCi(ctx: CliContext, task: string, options: CiOptions): 
       writeFileSync(join(requestDir, "summary.md"), `${summary}\n`);
     }
     if (options.bundle) {
-      writeBundle(await exportRun(runtime, run.id), options.bundle);
-      ctx.out.note(`bundle written to ${options.bundle}`);
+      const bundle = await exportRun(runtime, run.id);
+      writeBundle(bundle, options.bundle);
+      ctx.out.note(`bundle written to ${options.bundle} (dataClass ${run.dataClass})`);
+      const warning = exportWarning(bundle.dataClass);
+      if (warning) ctx.out.note(`⚠ ${warning}`);
     }
   } finally {
     await runtime.close();
@@ -132,8 +142,11 @@ export async function runExport(ctx: CliContext, ref: string, options: { out?: s
     const file = options.out ?? join(ctx.cwd, `${shortRunId(run.id)}.jarvis.json.gz`);
     const bundle = await exportRun(runtime, run.id);
     writeBundle(bundle, file);
+    const warning = exportWarning(bundle.dataClass);
+    if (warning) ctx.out.note(`⚠ ${warning}`);
     const stats = {
       run: run.id,
+      dataClass: run.dataClass,
       file,
       artifacts: bundle.tables.artifacts?.length ?? 0,
       blobs: Object.keys(bundle.blobs).length,
@@ -141,7 +154,7 @@ export async function runExport(ctx: CliContext, ref: string, options: { out?: s
     };
     ctx.out.result(stats, () =>
       ctx.out.line(
-        `exported ${shortRunId(run.id)} → ${file} (${stats.artifacts} artifact version(s), ${stats.blobs} blob(s), patch ${stats.patch} bytes)`,
+        `exported ${shortRunId(run.id)} (dataClass ${run.dataClass}) → ${file} (${stats.artifacts} artifact version(s), ${stats.blobs} blob(s), patch ${stats.patch} bytes)`,
       ),
     );
   } finally {
