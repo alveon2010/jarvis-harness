@@ -1229,6 +1229,15 @@ resolved, классом (CODE, SPEC_CORRECTION, …) и историей.
 получает fixture ссылкой (`fixture: { commit }` + `overlay/` с `.jarvis/` прогона), без копии репозитория; набор вне
 его — копию (`git archive`). Id по умолчанию — ключ задачи или первые слова и короткий id прогона.
 
+### `jarvis evals candidates [--dismiss <run>]`
+
+Завершённые прогоны с принятой реализацией, на которых человек поправил Jarvis (вернул документ на гейте, правил
+spec/research/impact) или сработало обратное ребро, — с причинами. `--dismiss` убирает прогон из списка.
+
+### `jarvis evals schedule`
+
+Наборы, которые daemon прогоняет по расписанию (`evals.schedule`): пул, последний прогон с итогом, следующий.
+
 ### `jarvis evals baseline [suite] [--from <file>]` / `jarvis evals diff [suite] [--tolerance r] [--from <file>]`
 
 Зафиксировать последний результат как базовый; сравнить последний с базовым, ненулевой код при регрессии

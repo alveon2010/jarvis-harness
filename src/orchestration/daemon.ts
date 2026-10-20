@@ -1,5 +1,11 @@
 import type { Runtime } from "../app/runtime.ts";
 import type { Run } from "../core/domain/run.ts";
+import {
+  runDueEvals,
+  type ScheduledEvalOutcome,
+  type ScheduledEvalsOptions,
+  schedulesOf,
+} from "../evals/schedule.ts";
 import { conflictResolved } from "../interaction/conflict.ts";
 import { leaseOwner } from "./lease.ts";
 import type { LocalWorkflowEngine } from "./runtime.ts";
@@ -8,18 +14,23 @@ import { LeaseHeldError } from "./types.ts";
 /**
  * Daemon tick (ADR-0001 §3, ADR-0002 §5): resumes parked runs nobody holds —
  * WAITING_BUDGET once `resumeAfter` has passed, WAITING_HUMAN once the awaited approval exists.
- * FAILED and SUSPENDED runs are left to people.
+ * FAILED and SUSPENDED runs are left to people. Then the eval suites scheduled in `evals.schedule`
+ * that are due run (ADR-0012 §5, src/evals/schedule.ts).
  */
 export interface TickReport {
   readonly at: string;
   readonly considered: number;
   readonly resumed: Array<{ runId: string; state: string; exitCode: number }>;
   readonly skipped: Array<{ runId: string; reason: string }>;
+  /** The scheduled eval suites this tick ran. */
+  readonly evals?: ScheduledEvalOutcome[];
 }
 
 export interface DaemonOptions {
   readonly owner?: string;
   readonly clock?: () => Date;
+  /** Run the scheduled eval suites that are due (the `jarvis daemon` passes where they live). */
+  readonly evals?: ScheduledEvalsOptions;
 }
 
 export function resumeDecision(
@@ -87,11 +98,25 @@ export async function daemonTick(
       skipped.push({ runId: run.id, reason: error instanceof Error ? error.message : String(error) });
     }
   }
-  const report: TickReport = { at: now.toISOString(), considered: candidates.length, resumed, skipped };
+  // after the runs: a live suite takes long, a parked run that can go on goes first
+  const evals =
+    options.evals && schedulesOf(runtime).length > 0 ? await runDueEvals(runtime, options.evals, now) : [];
+  const report: TickReport = {
+    at: now.toISOString(),
+    considered: candidates.length,
+    resumed,
+    skipped,
+    ...(evals.length > 0 ? { evals } : {}),
+  };
   runtime.events.emit({
     kind: "daemon.tick",
     actor: owner,
-    payload: { considered: report.considered, resumed: resumed.length, skipped: skipped.length },
+    payload: {
+      considered: report.considered,
+      resumed: resumed.length,
+      skipped: skipped.length,
+      ...(evals.length > 0 ? { evals: evals.length } : {}),
+    },
   });
   return report;
 }

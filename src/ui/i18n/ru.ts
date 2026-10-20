@@ -1279,6 +1279,33 @@ export const RU: Readonly<Record<string, string>> = {
     "Предложен {name} — ждёт вместе с другими кандидатами: {cmd}",
   "Not proposed: {why}": "Не предложено: {why}",
   "pick a kind": "выберите вид",
+  // ---- ADR-0012
+  "Eval case": "Eval-кейс",
+  "eval case": "eval-кейс",
+  "Review its {file}, then record the model's answers once; after that the case replays without a model, and {baseline} / {diff} catch a regression.":
+    "Проверьте его {file} и один раз запишите ответы модели: дальше кейс проигрывается без модели, а {baseline} / {diff} ловят регресс.",
+  "Done and accepted": "Готово и принято",
+  "Keep it as an eval case": "Оставить как eval-кейс",
+  "Worth keeping: Jarvis learned something on this run.":
+    "Стоит оставить: на этом прогоне Jarvis чему-то научился.",
+  "Not a case? {cmd}": "Не кейс? {cmd}",
+  "It went straight through: nobody sent a document back, no back edge went round, nobody edited the spec. A case from it checks less.":
+    "Прогон прошёл напрямую: документы не возвращали, обратные рёбра не срабатывали, спеку никто не правил. Кейс из него проверит меньше.",
+  "The task, the repository at the run's base as the fixture, and the gold from what you accepted: the files the implementation changed, the spec's acceptance criteria, your answers to its open questions, the project's test command. Jarvis is then checked against this run whenever its prompts, models or tools change.":
+    "Задача, репозиторий на базовом коммите прогона как фикстура и «золото» из того, что вы приняли: файлы, которые изменила реализация, критерии приёмки спеки, ваши ответы на её открытые вопросы, тестовая команда проекта. Потом Jarvis проверяется на этом прогоне при каждом изменении промптов, моделей или инструментов.",
+  Suite: "Набор",
+  "Make an eval case": "Сделать eval-кейс",
+  "same as {cmd}; it lands in {dir} of the repository": "то же, что {cmd}; кейс ляжет в {dir} репозитория",
+  "Scheduled evals: suite {suite} did not run — {error}":
+    "Evals по расписанию: набор {suite} не прогнался — {error}",
+  "Scheduled evals: suite {suite} regressed against its baseline — {what}":
+    "Evals по расписанию: набор {suite} просел относительно baseline — {what}",
+  "pool {pool}": "пул {pool}",
+  "{type} sent back {times}": "{type} возвращали на доработку {times}",
+  "back edge {edge} went round {times}": "обратное ребро {edge} сработало {times}",
+  "{type} edited by a person (versions {versions})": "{type} правил человек (версии {versions})",
+  "Worth keeping as eval cases": "Стоит оставить как eval-кейсы",
+  "{n} more: {cmd}": "ещё {n}: {cmd}",
 };
 
 /**

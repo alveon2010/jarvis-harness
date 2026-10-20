@@ -36,7 +36,15 @@ import { changedFilesOf, type DocFacts, docFacts, reasonsOf } from "../cli/gate.
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import { isTerminal, type Run } from "../core/domain/run.ts";
 import type { WorkflowDefinition } from "../core/domain/workflow.ts";
+import {
+  type CandidateReason,
+  candidateReasons,
+  type EvalCandidate,
+  evalCandidates,
+  isDismissed,
+} from "../evals/candidates.ts";
 import { caseOfRun, casesRootOf } from "../evals/runToCase.ts";
+import { type ScheduledEvalOutcome, scheduledEvalNotices } from "../evals/schedule.ts";
 import {
   type GivenAnswer,
   givenFor,
@@ -418,6 +426,10 @@ export interface RunsPage {
   readonly running: readonly RunningRun[];
   readonly recent: RecentList;
   readonly today: { readonly runs: number; readonly modelCalls: number };
+  /** Finished runs worth keeping as eval cases (src/evals/candidates.ts), of the repository shown. */
+  readonly evalCandidates: readonly EvalCandidate[];
+  /** Scheduled eval suites whose last run regressed or failed (src/evals/schedule.ts). */
+  readonly evalNotices: readonly ScheduledEvalOutcome[];
 }
 
 const live = (r: Run, now: number) => r.lease !== undefined && Date.parse(r.lease.until) >= now;
@@ -631,6 +643,8 @@ export async function runsPage(
       })),
     running,
     recent,
+    evalCandidates: evalCandidates(runtime).filter((c) => ids.has(c.runId)),
+    evalNotices: scheduledEvalNotices(runtime),
     today: {
       runs: runs.filter((r) => r.createdAt >= since).length,
       modelCalls: runtime.events
@@ -807,6 +821,11 @@ export interface RunPage {
   readonly pausing?: { readonly by?: string };
   /** A finished run whose implementation was accepted: «Make an eval case» (src/evals/runToCase.ts). */
   readonly evalReady?: boolean;
+  /**
+   * Why it is worth a case (src/evals/candidates.ts): sent back, a back edge, a person's edit; none — it
+   * went straight through. Not said once a person dismissed it.
+   */
+  readonly evalWhy?: readonly CandidateReason[];
   /** The eval case it became. */
   readonly evalCase?: { readonly dir: string; readonly suite: string };
   /** A finished research/spec that can go on (src/app/continuation.ts): "Continue to sdd". */
@@ -1550,12 +1569,14 @@ export function fixOf(
 }
 
 /** A run that ended with an accepted implementation can become an eval case; or it did already. */
-function evalOf(runtime: Runtime, run: Run): Pick<RunPage, "evalReady" | "evalCase"> {
+function evalOf(runtime: Runtime, run: Run): Pick<RunPage, "evalReady" | "evalCase" | "evalWhy"> {
   if (run.state !== "COMPLETED") return {};
   const made = caseOfRun(casesRootOf(run.workspace.repoRoot), run.id);
   if (made) return { evalCase: made };
   const impl = runtime.artifacts.listLatest(run.id, "implementation")[0];
-  return impl && runtime.artifacts.isApproved(impl.artifactId).approved ? { evalReady: true } : {};
+  if (!impl || !runtime.artifacts.isApproved(impl.artifactId).approved) return {};
+  const why = isDismissed(runtime, run.id) ? undefined : candidateReasons(runtime, run);
+  return { evalReady: true, ...(why ? { evalWhy: why } : {}) };
 }
 
 /** The step running now is an implementation (it works through a plan). */

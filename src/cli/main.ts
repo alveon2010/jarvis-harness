@@ -26,7 +26,14 @@ import { runDbBackup, runDbMigrate, runDbStatus } from "./commands/db.ts";
 import { renderDoctor, runDoctor } from "./commands/doctor.ts";
 import { renderSecurityReport, runSecurityReport } from "./commands/doctorSecurity.ts";
 import { runEffect } from "./commands/effect.ts";
-import { runEvalsBaseline, runEvalsDiff, runEvalsRun, runEvalsRunToCase } from "./commands/evals.ts";
+import {
+  runEvalsBaseline,
+  runEvalsCandidates,
+  runEvalsDiff,
+  runEvalsRun,
+  runEvalsRunToCase,
+  runEvalsSchedule,
+} from "./commands/evals.ts";
 import { runExplain } from "./commands/explain.ts";
 import { runHooksInstall, runHooksStatus, runHooksUninstall, runPrePush } from "./commands/hooks.ts";
 import { runAnswer, runAttach, runReviewStatus, runReviewSubmit, runThreads } from "./commands/human.ts";
@@ -698,6 +705,21 @@ export function buildProgram(options: RunOptions = {}): Command {
         ...(opts.id ? { id: opts.id } : {}),
         fixture: opts.fixture,
       });
+    });
+  evals
+    .command("candidates")
+    .description(
+      "finished runs worth keeping as eval cases (sent back, looped or edited by a person), with why",
+    )
+    .option("--dismiss <run>", "take a run off the list: it is no case")
+    .action(async (opts: { dismiss?: string }) => {
+      await runEvalsCandidates(ctxFor(), opts);
+    });
+  evals
+    .command("schedule")
+    .description("the suites the daemon runs on a schedule (evals.schedule): last run and next")
+    .action(async () => {
+      await runEvalsSchedule(ctxFor());
     });
   evals
     .command("baseline [suite]")

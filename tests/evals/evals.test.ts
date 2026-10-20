@@ -48,6 +48,9 @@ gold:
   files: [src/onboarding.ts]
   tests: "grep -q 'return true' src/onboarding.ts"
   acceptance: ["unit test"]
+  answers:
+    - { question: "How is it checked?", answer: "A unit test" }
+    - { question: "Anything else?", answer: "No" }
 `,
   );
   const base = { summary: "s", sources: ["src/onboarding.ts"], reasons: [] };
@@ -142,9 +145,12 @@ describe("jarvis evals", () => {
       testsPassed: true,
       fileRecall: 1,
       acceptanceCoverage: 1,
+      // «A unit test» is in the spec; «No» says nothing to check and is not counted
+      answersCoverage: 1,
       loops: 0,
       changedFiles: ["src/onboarding.ts"],
     });
+    expect(r.summary.meanAnswersCoverage).toBe(1);
     expect(r.cases[0]?.outputTokens).toBeGreaterThan(0);
     expect(r.summary.successPer10k).toBeGreaterThan(0);
     expect(existsSync(r.file)).toBe(true);
@@ -185,6 +191,24 @@ describe("jarvis evals", () => {
     const regressed = await jarvis(["evals", "diff", "smoke", "--from", "evals/results/worse.json"]);
     expect(regressed.code).toBe(1);
     expect(regressed.out).toContain("REGRESSION");
+  });
+
+  it("evals schedule shows the scheduled suites; evals candidates lists the runs worth a case", async () => {
+    const config = readFileSync(join(sb.home, ".jarvis", "config.yaml"), "utf8");
+    sb.write(
+      "home/.jarvis/config.yaml",
+      `${config}quotaPools:\n  evals: { window: { minutes: 1440, kind: sliding }, limits: { outputTokens: 200000 } }\nevals:\n  schedule: { suite: smoke, cron: "30 3 * * *", pool: evals }\n`,
+    );
+    const schedule = await jarvis(["evals", "schedule"]);
+    expect(schedule.code).toBe(0);
+    expect(schedule.out).toContain('smoke  cron "30 3 * * *"  live  pool evals');
+    expect(schedule.out).toContain("last: never");
+    const json = await jarvis(["--json", "evals", "schedule"]);
+    expect(JSON.parse(json.out).schedules[0]).toMatchObject({ suite: "smoke", pool: "evals", mode: "live" });
+    const candidates = await jarvis(["evals", "candidates"]);
+    expect(candidates.code).toBe(0);
+    expect(candidates.out).toContain("no eval case candidates");
+    expect((await jarvis(["evals", "candidates", "--dismiss", "run_nope"])).code).toBe(1);
   });
 
   it("diffResults tolerates small drops and flags large ones", () => {

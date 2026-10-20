@@ -162,6 +162,17 @@ function crossChecks(
       }
     });
   }
+  // a scheduled eval suite spends its own pool only (ADR-0012 §5): one this machine does not define is a mistake
+  const schedules = config.evals.schedule;
+  (Array.isArray(schedules) ? schedules : schedules ? [schedules] : []).forEach((s, i) => {
+    if (!config.quotaPools[s.pool])
+      issues.push(
+        withSource(
+          Array.isArray(schedules) ? `evals.schedule[${i}].pool` : "evals.schedule.pool",
+          `unknown quota pool "${s.pool}"`,
+        ),
+      );
+  });
   for (const [id, model] of Object.entries(config.models)) {
     if (model.quotaPool !== undefined && !config.quotaPools[model.quotaPool]) {
       issues.push(withSource(`models.${id}.quotaPool`, `unknown quota pool "${model.quotaPool}"`));

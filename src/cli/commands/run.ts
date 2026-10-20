@@ -1035,12 +1035,18 @@ export async function runDaemon(
     const engine = createEngine(runtime);
     const interval = Math.max(1, options.interval ?? 30);
     for (;;) {
-      const report = await daemonTick(runtime, engine);
+      const report = await daemonTick(runtime, engine, {
+        evals: { cwd: ctx.cwd, homeDir: ctx.homeDir, env: ctx.env },
+      });
       ctx.out.result(report, () => {
         const line = `${report.at} considered ${report.considered}, resumed ${report.resumed.length}, skipped ${report.skipped.length}`;
         ctx.out.line(line);
         for (const r of report.resumed) ctx.out.line(`  resumed ${shortRunId(r.runId)} → ${r.state}`);
         for (const s of report.skipped) ctx.out.line(`  skipped ${shortRunId(s.runId)}: ${s.reason}`);
+        for (const e of report.evals ?? [])
+          ctx.out.line(
+            `  evals ${e.suite} (${e.mode}, pool ${e.pool}): ${e.error ? `failed: ${e.error}` : e.regressed ? `REGRESSION: ${e.regressions.join("; ")}` : `${e.summary?.successes}/${e.summary?.cases} succeeded`}${e.file ? ` → ${e.file}` : ""}`,
+          );
       });
       if (options.once) return;
       await new Promise((resolve) => setTimeout(resolve, interval * 1000));

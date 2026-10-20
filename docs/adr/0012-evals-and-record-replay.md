@@ -1,6 +1,14 @@
 # ADR-0012: Evals — ярусы кейсов, скоринг и record/replay модельных вызовов
 
-- Статус: принято
+- Статус: принято. Реализовано: workflow-ярус с кассетами и `evals run|baseline|diff` (§4, §5), `run-to-case` (§3);
+  кандидаты в кейсы — прогон с принятой реализацией, на котором человек вернул документ, правил spec/research/impact
+  или сработало обратное ребро, отмечается событием `evals.candidate` (`jarvis evals candidates`, `--dismiss`,
+  карточка на странице прогона и группа на Runs; файлы кейса не пишутся сами); ответы человека из `gold.answers`
+  скорятся как `answersCoverage` — детерминированная проверка текста спеки, правило в
+  [docs/evals.md](../evals.md) (§2); live-прогоны по расписанию daemon'ом (`evals.schedule`, только модели пула
+  `pool`, результат против baseline, регресс — строка на Runs, `jarvis evals schedule`) (§5).
+- Не сделано: LLM-as-judge (§2); компонентный ярус с fact cards (§1); кассеты в бандле Run (§4); decision gate
+  (§6) — по-прежнему ручной прогон «до/после».
 - Дата: 2026-10-03
 - Основание: [ADR-0001](0001-target-architecture.md) принцип «Measure first», §14 (evals сравнивают
   thresholds, routing, topology, retrieval), §17 (Vitest + fixture-репозитории), §21 («новые агенты, RAG и

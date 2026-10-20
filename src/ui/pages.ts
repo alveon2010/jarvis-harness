@@ -16,6 +16,8 @@ import { toolMix } from "../cli/progress.ts";
 import { documentToMarkdown } from "../cli/render.ts";
 import { incompleteOf } from "../cli/style.ts";
 import { isTerminal, type Run } from "../core/domain/run.ts";
+import type { CandidateReason } from "../evals/candidates.ts";
+import type { ScheduledEvalOutcome } from "../evals/schedule.ts";
 import type { EgressNotice, ModelEgressNotice } from "../security/policy/egress.ts";
 import { shortRunId } from "../storage/runStore.ts";
 import { checkLogHtml, checksHtml, checksOf } from "./checks.ts";
@@ -572,6 +574,7 @@ export function runsContent(page: RunsPage, now: number, actions?: Actions, star
   const launches = start?.launches ?? [];
   return html`<div class="lede" data-live="lede"><h1>${t("Runs")}</h1><span class="muted">${sum}</span></div>
 ${start?.notice ?? ""}
+${page.evalNotices.map(evalNoticeHtml)}
 ${start && actions ? newTaskHtml(start, actions) : ""}
 <section class="group" aria-labelledby="waits" data-live="waiting">
 <h2 id="waits">${t("Waits for you")}</h2>
@@ -607,6 +610,7 @@ ${
     : html`<div class="panel empty">${t("Nothing runs now.")}</div>`
 }
 </section>
+${evalsGroupHtml(page)}
 <section class="group" aria-labelledby="recent">
 <div class="group-head"><h2 id="recent">${t("Recent")}</h2>
 <form class="search" role="search" method="get" action="/">
@@ -614,6 +618,51 @@ ${
 <input type="hidden" name="repo" value="${page.repo ?? ""}"><button type="submit" class="btn sr">${t("Search")}</button>
 </form></div>
 ${recentHtml(page)}
+</section>`;
+}
+
+/** A scheduled eval suite whose last run regressed against its baseline or did not run (src/evals/schedule.ts). */
+function evalNoticeHtml(o: ScheduledEvalOutcome): Html {
+  const cmd = `jarvis evals diff ${o.suite}`;
+  return html`<div class="banner bad" role="status">${
+    o.error
+      ? th("Scheduled evals: suite {suite} did not run — {error}", {
+          suite: html`<b>${o.suite}</b>`,
+          error: o.error.slice(0, 200),
+        })
+      : th("Scheduled evals: suite {suite} regressed against its baseline — {what}", {
+          suite: html`<b>${o.suite}</b>`,
+          what: o.regressions.join("; "),
+        })
+  } <span class="meta">${o.at.slice(0, 16).replace("T", " ")} · ${t("pool {pool}", { pool: o.pool })}</span> <code>${o.error ? "jarvis evals schedule" : cmd}</code></div>`;
+}
+
+/** Why a run is worth an eval case, in a line (src/evals/candidates.ts). */
+export function evalReasonText(r: CandidateReason): string {
+  if (r.kind === "sent-back")
+    return t("{type} sent back {times}", { type: r.type, times: plural(r.times, "time") });
+  if (r.kind === "loop")
+    return t("back edge {edge} went round {times}", { edge: r.edge, times: plural(r.times, "time") });
+  return t("{type} edited by a person (versions {versions})", {
+    type: r.type,
+    versions: r.versions.join(", "),
+  });
+}
+
+/** Finished runs worth keeping as eval cases: each with why, the page that makes the case. */
+function evalsGroupHtml(page: RunsPage): Html | string {
+  const list = page.evalCandidates;
+  if (list.length === 0) return "";
+  const shown = list.slice(0, 5);
+  return html`<section class="group" aria-labelledby="eval-candidates">
+<h2 id="eval-candidates">${t("Worth keeping as eval cases")}</h2>
+${shown.map(
+  (c) => html`<div class="panel running">
+<div class="what"><a href="/runs/${shortRunId(c.runId)}">${firstLine(c.task)}</a><span class="meta">${c.workflow} · ${shortRunId(c.runId)} · ${c.reasons.map(evalReasonText).join("; ")}</span></div>
+<a href="/runs/${shortRunId(c.runId)}#decision">${t("Open")}</a>
+</div>`,
+)}
+${list.length > shown.length ? html`<p class="hint">${th("{n} more: {cmd}", { n: list.length - shown.length, cmd: html`<code>jarvis evals candidates</code>` })}</p>` : ""}
 </section>`;
 }
 
@@ -1826,25 +1875,31 @@ function evalHtml(page: RunPage, actions?: Actions): Html {
   const made = page.evalCase;
   if (made) {
     const cmd = `jarvis evals run --suite ${made.suite} --mode record`;
-    return html`<section class="panel card" aria-label="Eval case" data-live="card">
-<div class="row"><span class="pill ok">✓ eval case</span><span class="meta"><code>${made.dir}</code></span></div>
-<p>Review its <code>case.yaml</code>, then record the model's answers once; after that the case replays without a model, and <code>jarvis evals baseline</code> / <code>diff</code> catch a regression.</p>
-<div class="actions"><span class="hint"><code>${cmd}</code></span><button type="button" class="btn" data-copy="${cmd}">Copy command</button></div>
+    return html`<section class="panel card" aria-label="${t("Eval case")}" data-live="card">
+<div class="row"><span class="pill ok">✓ ${t("eval case")}</span><span class="meta"><code>${made.dir}</code></span></div>
+<p>${th("Review its {file}, then record the model's answers once; after that the case replays without a model, and {baseline} / {diff} catch a regression.", { file: html`<code>case.yaml</code>`, baseline: html`<code>jarvis evals baseline</code>`, diff: html`<code>diff</code>` })}</p>
+<div class="actions"><span class="hint"><code>${cmd}</code></span><button type="button" class="btn" data-copy="${cmd}">${t("Copy command")}</button></div>
 </section>`;
   }
   const cmd = `jarvis evals run-to-case ${short}`;
+  const why = page.evalWhy;
   return html`<section class="panel decision" aria-labelledby="decision" data-live="card">
-<span class="ok" style="font-size:13px;font-weight:500">Done and accepted</span>
-<h2 id="decision">Keep it as an eval case</h2>
-<p>The task, the repository at the run's base as the fixture, and the gold from what you accepted: the files the implementation changed, the spec's acceptance criteria, your answers to its open questions, the project's test command. Jarvis is then checked against this run whenever its prompts, models or tools change.</p>
+<span class="ok" style="font-size:13px;font-weight:500">${t("Done and accepted")}</span>
+<h2 id="decision">${t("Keep it as an eval case")}</h2>
+${
+  why
+    ? html`<p><b>${t("Worth keeping: Jarvis learned something on this run.")}</b></p><ul class="why">${why.map((r) => html`<li>${evalReasonText(r)}</li>`)}</ul><p class="hint">${th("Not a case? {cmd}", { cmd: html`<code>jarvis evals candidates --dismiss ${short}</code>` })}</p>`
+    : html`<p class="hint">${t("It went straight through: nobody sent a document back, no back edge went round, nobody edited the spec. A case from it checks less.")}</p>`
+}
+<p>${t("The task, the repository at the run's base as the fixture, and the gold from what you accepted: the files the implementation changed, the spec's acceptance criteria, your answers to its open questions, the project's test command. Jarvis is then checked against this run whenever its prompts, models or tools change.")}</p>
 ${
   actions
     ? form(
         actions,
         `/runs/${encodeURIComponent(short)}/eval`,
-        html`<div class="actions"><label class="field" style="max-width:220px">Suite<input type="text" name="suite" value="default" pattern="[a-z0-9][a-z0-9-]{0,40}" required></label><button type="submit" class="btn primary big">Make an eval case</button><span class="hint">same as <code>${cmd}</code>; it lands in <code>evals/&lt;suite&gt;/</code> of the repository</span></div>`,
+        html`<div class="actions"><label class="field" style="max-width:220px">${t("Suite")}<input type="text" name="suite" value="default" pattern="[a-z0-9][a-z0-9-]{0,40}" required></label><button type="submit" class="btn primary big">${t("Make an eval case")}</button><span class="hint">${th("same as {cmd}; it lands in {dir} of the repository", { cmd: html`<code>${cmd}</code>`, dir: html`<code>evals/&lt;suite&gt;/</code>` })}</span></div>`,
       )
-    : html`<div class="actions"><span class="hint"><code>${cmd}</code></span><button type="button" class="btn" data-copy="${cmd}">Copy command</button></div>`
+    : html`<div class="actions"><span class="hint"><code>${cmd}</code></span><button type="button" class="btn" data-copy="${cmd}">${t("Copy command")}</button></div>`
 }
 </section>`;
 }

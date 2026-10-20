@@ -1,9 +1,12 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { createRuntime } from "../../app/runtime.ts";
+import { dismissEvalCandidate, evalCandidates, isDismissed, reasonLine } from "../../evals/candidates.ts";
 import { diffResults, runSuite, type SuiteResult } from "../../evals/runner.ts";
 import { casesRootOf, runToCase } from "../../evals/runToCase.ts";
+import { scheduleState, schedulesOf } from "../../evals/schedule.ts";
 import type { CassetteMode } from "../../models/cassette.ts";
+import { shortRunId } from "../../storage/runStore.ts";
 import type { CliContext } from "../context.ts";
 import { CliExit, EXIT, padEnd } from "../output.ts";
 import { loadForCli } from "./config.ts";
@@ -42,19 +45,19 @@ function renderSuite(ctx: CliContext, r: SuiteResult): void {
   );
   const w = Math.max(...r.cases.map((c) => c.id.length), 4);
   ctx.out.line(
-    `${padEnd("case", w)}  ${padEnd("state", 14)}  ok   tests  files  accept  loops  out-tokens  /10k`,
+    `${padEnd("case", w)}  ${padEnd("state", 14)}  ok   tests  files  accept  answers  loops  out-tokens  /10k`,
   );
   for (const c of r.cases) {
     const pct = (x: number | undefined) =>
       x === undefined ? "  -  " : `${String(Math.round(x * 100)).padStart(3)}% `;
     ctx.out.line(
-      `${padEnd(c.id, w)}  ${padEnd(c.state, 14)}  ${c.success ? "yes" : "no "}  ${c.testsPassed === undefined ? " -  " : c.testsPassed ? "pass" : "FAIL"}   ${pct(c.fileRecall)}  ${pct(c.acceptanceCoverage)}  ${String(c.loops).padStart(5)}  ${String(c.outputTokens).padStart(10)}  ${c.successPer10k}`,
+      `${padEnd(c.id, w)}  ${padEnd(c.state, 14)}  ${c.success ? "yes" : "no "}  ${c.testsPassed === undefined ? " -  " : c.testsPassed ? "pass" : "FAIL"}   ${pct(c.fileRecall)}  ${pct(c.acceptanceCoverage)}  ${pct(c.answersCoverage)}   ${String(c.loops).padStart(5)}  ${String(c.outputTokens).padStart(10)}  ${c.successPer10k}`,
     );
     if (c.error) ctx.out.line(`${" ".repeat(w)}  ${c.error.slice(0, 160)}`);
   }
   const s = r.summary;
   ctx.out.line(
-    `summary: ${s.successes}/${s.cases} succeeded (${Math.round(s.successRate * 100)}%), file recall ${Math.round(s.meanFileRecall * 100)}%, acceptance ${Math.round(s.meanAcceptanceCoverage * 100)}%, ${s.outputTokens} output tokens → ${s.successPer10k} successes per 10k`,
+    `summary: ${s.successes}/${s.cases} succeeded (${Math.round(s.successRate * 100)}%), file recall ${Math.round(s.meanFileRecall * 100)}%, acceptance ${Math.round(s.meanAcceptanceCoverage * 100)}%${s.meanAnswersCoverage !== undefined ? `, answers ${Math.round(s.meanAnswersCoverage * 100)}%` : ""}, ${s.outputTokens} output tokens → ${s.successPer10k} successes per 10k`,
   );
 }
 
@@ -175,6 +178,90 @@ export async function runEvalsRunToCase(
         );
       ctx.out.line("  next: review case.yaml, then `jarvis evals run --mode record`");
     });
+  } finally {
+    await runtime.close();
+  }
+}
+
+/**
+ * `jarvis evals candidates [--dismiss <run>]` (ADR-0012 §3): the finished runs Jarvis learned something on,
+ * noted at their end (src/evals/candidates.ts), with why; `--dismiss` takes one off the list.
+ */
+export async function runEvalsCandidates(ctx: CliContext, options: { dismiss?: string }): Promise<void> {
+  const loaded = await loadForCli(ctx);
+  const runtime = createRuntime(loaded, { env: ctx.env });
+  try {
+    if (options.dismiss) {
+      const run = runtime.runs.resolve(options.dismiss);
+      if (!run) throw new CliExit(EXIT.error, `run "${options.dismiss}" not found`);
+      if (!isDismissed(runtime, run.id))
+        dismissEvalCandidate(runtime, run.id, loaded.config.actor.id ?? "cli");
+      ctx.out.result({ dismissed: run.id }, () =>
+        ctx.out.line(`${shortRunId(run.id)} is off the list of eval case candidates`),
+      );
+      return;
+    }
+    const list = evalCandidates(runtime);
+    ctx.out.result({ candidates: list }, () => {
+      if (list.length === 0) {
+        ctx.out.line(
+          "no eval case candidates: a run lands here when it ends accepted and a person corrected it on the way",
+        );
+        return;
+      }
+      for (const c of list) {
+        ctx.out.line(`${shortRunId(c.runId)}  ${c.workflow}  ${c.task.split("\n")[0]?.slice(0, 80)}`);
+        ctx.out.line(`  why: ${c.reasons.map(reasonLine).join("; ")}`);
+      }
+      ctx.out.line(
+        "make one: `jarvis evals run-to-case <run>`; not a case: `jarvis evals candidates --dismiss <run>`",
+      );
+    });
+  } finally {
+    await runtime.close();
+  }
+}
+
+/** `jarvis evals schedule` (ADR-0012 §5): the scheduled suites, their last run and when they run next. */
+export async function runEvalsSchedule(ctx: CliContext): Promise<void> {
+  const loaded = await loadForCli(ctx);
+  const runtime = createRuntime(loaded, { env: ctx.env });
+  try {
+    const now = new Date();
+    const states = schedulesOf(runtime).map((s) => scheduleState(runtime, s, now));
+    ctx.out.result(
+      {
+        schedules: states.map((st) => ({
+          ...st.schedule,
+          ...(st.last ? { last: st.last } : {}),
+          ...(st.running ? { running: st.running } : {}),
+          ...(st.next ? { next: st.next.toISOString() } : {}),
+        })),
+      },
+      () => {
+        if (states.length === 0) {
+          ctx.out.line("no scheduled evals: add evals.schedule to the configuration (docs/evals.md)");
+          return;
+        }
+        for (const st of states) {
+          const s = st.schedule;
+          ctx.out.line(
+            `${s.suite}  ${s.every ? `every ${s.every}` : `cron "${s.cron}"`}  ${s.mode}  pool ${s.pool}`,
+          );
+          const last = st.last;
+          ctx.out.line(
+            `  last: ${
+              last
+                ? `${last.at} ${last.error ? `failed: ${last.error}` : last.regressed ? `REGRESSION: ${last.regressions.join("; ")}` : `${last.summary?.successes}/${last.summary?.cases} succeeded${last.baseline ? ", no regression" : ", no baseline yet"}`}`
+                : "never"
+            }`,
+          );
+          ctx.out.line(
+            `  next: ${st.running ? `running since ${st.running}` : st.next ? (st.next.getTime() <= now.getTime() ? "due now (the daemon runs it on its next tick)" : st.next.toISOString()) : "never (the cron names no minute within a year)"}`,
+          );
+        }
+      },
+    );
   } finally {
     await runtime.close();
   }

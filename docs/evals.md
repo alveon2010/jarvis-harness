@@ -75,13 +75,24 @@ jarvis evals run --suite regressions --out evals/results/manual.json
 | `testsPassed` | `gold.tests` в workspace после run |
 | `fileRecall` | доля `gold.files`, которых коснулась реализация |
 | `acceptanceCoverage` | доля `gold.acceptance`, присутствующих в критериях приёмки spec |
+| `answersCoverage` | доля ответов человека из `gold.answers`, которые отражены в спеке прогона (правило ниже) |
 | `sourceRecall` | доля `gold.requiredSources`, процитированных research/impact |
 | `loops` | число возвратов по обратным рёбрам |
 | `outputTokens`, `promptTokens`, `modelCalls`, `ms` | стоимость |
-| `success` | `COMPLETED` и все заданные recall/coverage = 1 и тесты прошли |
+| `success` | `COMPLETED` и все заданные recall/coverage = 1 и тесты прошли (`answersCoverage` — только если у кейса есть ответы, которые можно проверить) |
 | `successPer10k` | success / (outputTokens / 10 000) — главная цифра |
 
-Сводка по suite: `successRate`, `meanFileRecall`, `meanAcceptanceCoverage`, `successPer10k`.
+Сводка по suite: `successRate`, `meanFileRecall`, `meanAcceptanceCoverage`, `meanAnswersCoverage` (по кейсам
+с ответами; нет таких — поля нет), `successPer10k`.
+
+**Как считается `answersCoverage`** (`src/evals/answers.ts`, без модели). Спека и ответ нормализуются: NFKC,
+нижний регистр, `ё` → `е`, всё, что не буква и не цифра, — один пробел. Ответ отражён, если спека содержит его
+целиком (по границам слов). Иначе считаются ключевые слова ответа: слова от четырёх букв или с цифрой, кроме
+служебных («that», «should», «нужно», «чтобы»…). Слово найдено, если какое-то слово спеки начинается с его основы —
+первых `длина − 2` символов, но не меньше 4 и не больше 6 (`attempts` → `attemp`, `попытки` → `попыт`), так что
+падежи и множественное число совпадают; слово с цифрой ищется как есть («5» — не «3»). Ответ отражён, если найдены
+не меньше трёх четвертей его ключевых слов. Ответ без ключевых слов («да», «ok») проверить не на чем — он не
+считается; если у кейса таких только, метрики нет.
 
 ## Базовая линия и регрессии
 
@@ -90,7 +101,8 @@ jarvis evals baseline                         # зафиксировать по�
 jarvis evals diff --tolerance 0.05            # ненулевой код при падении больше 5 %
 ```
 
-`diff` сравнивает `successRate`, `meanFileRecall`, `meanAcceptanceCoverage` и `successPer10k`; допуск —
+`diff` сравнивает `successRate`, `meanFileRecall`, `meanAcceptanceCoverage`, `meanAnswersCoverage` (если она есть
+в обоих результатах — у baseline до неё её нет) и `successPer10k`; допуск —
 `max(tolerance·|baseline|, tolerance)`. `evals run` выходит с кодом 1, если хоть один кейс не успешен. Удобно в CI
 после изменения промптов или навыков.
 
@@ -109,7 +121,7 @@ Fixture — базовый коммит run: в наборе внутри тог
 только `case.yaml`. Кассету для replay нужно записать отдельным `--mode record`.
 
 Ещё `run-to-case` кладёт в `gold.answers` ответы человека на открытые вопросы документов (со страницы одобрения;
-пока для ревью кейса, в метрики не входят). В `overlay/` он кладёт те файлы `.jarvis/project.yaml` и
+по ним считается `answersCoverage`). В `overlay/` он кладёт те файлы `.jarvis/project.yaml` и
 `.jarvis/knowledge`, которых нет в базовом коммите или которые с ним расходятся. Берутся они такими, какими были на
 старте прогона, а не какими стали в рабочей копии потом. Прогон при старте сохраняет их в объектное хранилище git
 (`git hash-object -w`), а id пишет в событие `run.created`. Модуль, принятый после прогона, или правка `project.yaml`
@@ -137,3 +149,54 @@ fixture:
 **Из `jarvis ui`.** На странице завершённого прогона с принятой реализацией — карточка «Keep it as an eval case»:
 набор (по умолчанию `default`) и **Make an eval case** — то же, что `jarvis evals run-to-case <run> --suite <набор>`,
 кейс ложится в `evals/<набор>/` репозитория. После — «✓ eval case» с путём и командой записи кассеты.
+
+## Кандидаты в кейсы
+
+Не каждый принятый прогон стоит кейса: прошедший напрямую проверяет мало. Когда прогон с принятой реализацией
+заканчивается `COMPLETED`, Jarvis смотрит, научился ли он на нём чему-то, и если да — пишет событие
+`evals.candidate` с причинами (`src/evals/candidates.ts`). Причины:
+
+- человек вернул документ на гейте (`request_changes`) — «spec sent back 2×»;
+- сработало обратное ребро, не то, по которому шёл возврат, — «back edge review->implementation#changes 1×»;
+- человек правил spec, research или impact (версии с provenance `human`) — «spec edited by a person (v3)».
+
+Файлы кейса сами не пишутся: кейс содержит контекст проекта и требует взгляда человека. Прогоны самих evals
+(`evals@jarvis`) кандидатами не бывают.
+
+```sh
+jarvis evals candidates                  # открытые кандидаты, у каждого — почему
+jarvis evals run-to-case <run>           # сделать кейс (кандидат уходит из списка)
+jarvis evals candidates --dismiss <run>  # не кейс: убрать из списка
+```
+
+В `jarvis ui` кандидаты — группа «Worth keeping as eval cases» на странице Runs, а карточка «Keep it as an eval case»
+на странице прогона говорит, почему его стоит оставить (или что он прошёл напрямую).
+
+## Evals по расписанию
+
+Живые evals прогоняет daemon (`jarvis daemon`) по расписанию из конфигурации — личной (`~/.jarvis/config.yaml`) или
+проекта — и только на моделях своего пула квот, чтобы не съедать интерактивную квоту команды:
+
+```yaml
+quotaPools:
+  evals: { window: { minutes: 1440, kind: sliding }, limits: { outputTokens: 200000 } }
+models:
+  flash-evals: { …, quotaPool: evals }     # отдельный ключ/деплой под evals
+evals:
+  schedule:                                 # одно расписание или список
+    suite: regressions                      # имя набора или путь
+    every: 24h                              # или cron: "30 3 * * *" (местное время машины)
+    mode: live                              # по умолчанию live
+    pool: evals                             # обязателен; неизвестный пул — ошибка конфигурации
+    tolerance: 0.05                         # допуск diff
+```
+
+Когда расписание подошло (`every` — период после прошлого запуска, никогда не запускалось — сразу; `cron` — первая
+названная минута после прошлого запуска), daemon после возобновления прогонов запускает набор: у ролей остаются
+только модели пула `pool`, прочие модели убираются (роль без модели пула — ошибка кейса, а не трата чужого пула).
+Результат — `evals/results/<date>-<suite>.json`, сравнение — с `evals/baseline/<suite>.json`, итог — событие
+`evals.scheduled`. Регресс или незапуск — строка на странице Runs с командой `jarvis evals diff <suite>`.
+
+```sh
+jarvis evals schedule      # расписания: последний прогон (итог), следующий
+```

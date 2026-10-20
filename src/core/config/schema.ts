@@ -570,6 +570,35 @@ export const CrossReposSchema = z.strictObject({
   maxParallel: z.int().positive().default(2),
 });
 
+/** `24h`, `90m`, `7d`: how often a scheduled eval suite runs. */
+export const EVERY = /^(\d+)(m|h|d)$/;
+
+/**
+ * A suite the daemon runs on a schedule (ADR-0012 §5): live, on its own quota pool only, so it never
+ * spends the team's interactive quota; the result is compared with the suite's baseline.
+ */
+export const EvalScheduleSchema = z
+  .strictObject({
+    suite: z.string().min(1).default("default"),
+    /** How often: `24h`, `90m`, `7d`. Or `cron`. */
+    every: z.string().regex(EVERY, "a period like 24h, 90m or 7d").optional(),
+    /** Five fields, the machine's local time: `30 3 * * *` (03:30 every day), `0 4 * * 1-5`. */
+    cron: z.string().min(1).optional(),
+    mode: z.enum(["live", "record", "replay"]).default("live"),
+    /** The quota pool (`quotaPools`) its models must be in; models of other pools are not used. */
+    pool: z.string().min(1),
+    /** Allowed drop against the baseline, as `jarvis evals diff --tolerance`. */
+    tolerance: z.number().min(0).max(1).default(0.05),
+  })
+  .refine((s) => (s.every === undefined) !== (s.cron === undefined), {
+    message: "a schedule needs either every or cron",
+  });
+export type EvalSchedule = z.infer<typeof EvalScheduleSchema>;
+
+export const EvalsConfigSchema = z.strictObject({
+  schedule: z.union([EvalScheduleSchema, z.array(EvalScheduleSchema)]).optional(),
+});
+
 /** A service's name in a knowledge repository: its folder by default (ADR-0025 §2). */
 export const ServiceNameSchema = z
   .string()
@@ -592,6 +621,8 @@ export const UserConfigSchema = z.strictObject({
   knowledgeRepo: z.string().min(1).optional(),
   /** This machine's repositories laid out differently: service → path (over the knowledge repository's map). */
   repos: z.record(ServiceNameSchema, z.string().min(1)).optional(),
+  /** Scheduled eval suites this machine's daemon runs (ADR-0012 §5). */
+  evals: EvalsConfigSchema.optional(),
 });
 export type UserConfig = z.infer<typeof UserConfigSchema>;
 
@@ -633,13 +664,15 @@ const ProjectFieldsSchema = z.strictObject({
   /** Contract maps the task's API methods are checked against before the agents (design step). */
   contracts: z.array(ContractMapSchema).optional(),
   crossRepos: CrossReposSchema.optional(),
+  /** Scheduled eval suites (ADR-0012 §5); the pool named must be in the machine's `quotaPools`. */
+  evals: EvalsConfigSchema.optional(),
 });
 
 /**
  * `services.<name>` of a knowledge repository's project.yaml: the same keys as the project's, over
  * the shared ones, and where its repository is when the folder is named differently.
  */
-export const ServiceConfigSchema = ProjectFieldsSchema.omit({ version: true }).extend({
+export const ServiceConfigSchema = ProjectFieldsSchema.omit({ version: true, evals: true }).extend({
   /** Its repository: a folder under `repos`, or a path (relative to `repos`); default — the name. */
   repo: z.string().min(1).optional(),
   /** The path segment the balancer routes to it (`http://${SERVICE_HOST}/<path>`), when not its name. */
@@ -695,6 +728,7 @@ export const ResolvedConfigSchema = z.strictObject({
   language: LanguageSchema.optional(),
   contracts: z.array(ContractMapSchema).default([]),
   crossRepos: CrossReposSchema.prefault({}),
+  evals: EvalsConfigSchema.prefault({}),
   /** Capability patterns denied by the active profile (ADR-0009 §1); applied by the Tool Router. */
   deniedCapabilities: z.array(z.string().min(1)).default([]),
   /** Name of the applied profile, if any. */

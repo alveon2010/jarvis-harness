@@ -14,13 +14,15 @@ import { parse } from "yaml";
 import { z } from "zod";
 import { createEngine } from "../app/engine.ts";
 import { createRuntime, type Runtime } from "../app/runtime.ts";
-import { loadConfig } from "../core/config/load.ts";
+import { type LoadedConfig, loadConfig } from "../core/config/load.ts";
 import { serviceRepos } from "../core/config/meta.ts";
 import type { Actor } from "../core/domain/actor.ts";
 import { metaConfigFile } from "../core/paths.ts";
 import type { CassetteMode } from "../models/cassette.ts";
 import { leaseOwner } from "../orchestration/lease.ts";
 import { git, runShell } from "../tools/local/exec.ts";
+import { answersCoverage } from "./answers.ts";
+import { EVAL_ACTOR } from "./candidates.ts";
 
 /**
  * Evals runner (ADR-0012): workflow-tier cases on fixture repositories, scored deterministically
@@ -67,7 +69,7 @@ export const CaseSchema = z.strictObject({
         .default([])
         .describe("phrases the spec's acceptance criteria must contain"),
       requiredSources: z.array(z.string()).default([]).describe("sources the research/impact must cite"),
-      /** What a person answered at the gates (`run-to-case`): kept for review, not scored yet. */
+      /** What a person answered at the gates (`run-to-case`): scored as `answersCoverage` (src/evals/answers.ts). */
       answers: z.array(z.strictObject({ question: z.string(), answer: z.string() })).default([]),
     })
     .prefault({}),
@@ -87,6 +89,8 @@ export interface CaseScore {
   readonly fileRecall?: number;
   readonly acceptanceCoverage?: number;
   readonly sourceRecall?: number;
+  /** Share of `gold.answers` the run's spec reflects (src/evals/answers.ts); none without answers. */
+  readonly answersCoverage?: number;
   readonly loops: number;
   readonly outputTokens: number;
   readonly promptTokens: number;
@@ -110,6 +114,8 @@ export interface SuiteResult {
     readonly successRate: number;
     readonly meanFileRecall: number;
     readonly meanAcceptanceCoverage: number;
+    /** Over the cases with answers; absent when none has them (and in results from before it). */
+    readonly meanAnswersCoverage?: number;
     readonly outputTokens: number;
     readonly successPer10k: number;
   };
@@ -138,9 +144,26 @@ export interface RunCaseOptions {
   readonly mode: CassetteMode;
   readonly variant?: Record<string, string>;
   readonly actor?: Actor;
+  /**
+   * The quota pool the models must be in (ADR-0012 §5, scheduled live evals): roles keep only its models,
+   * other models are dropped — a role left without one fails the case rather than spend another pool.
+   */
+  readonly pool?: string;
 }
 
-const EVAL_ACTOR: Actor = { kind: "user", id: "evals@jarvis", verified: false };
+/** The configuration with only the models of `pool`: the team's interactive quota is not reachable. */
+export function restrictToPool(loaded: LoadedConfig, pool: string): LoadedConfig {
+  const config = loaded.config;
+  if (!config.quotaPools[pool]) throw new Error(`no quota pool "${pool}" in quotaPools`);
+  const models = Object.fromEntries(Object.entries(config.models).filter(([, m]) => m.quotaPool === pool));
+  if (Object.keys(models).length === 0) throw new Error(`no model is in the quota pool "${pool}"`);
+  const roles = Object.fromEntries(
+    Object.entries(config.roles)
+      .map(([role, def]) => [role, { ...def, models: def.models.filter((id) => id in models) }] as const)
+      .filter(([, def]) => def.models.length > 0),
+  );
+  return { ...loaded, config: { ...config, models, roles } };
+}
 
 function setDeep(target: Record<string, unknown>, path: string, value: string): void {
   const keys = path.split(".");
@@ -308,12 +331,13 @@ export async function runCase(c: EvalCase, options: RunCaseOptions): Promise<Cas
   const loadEnv = service ? { ...env, JARVIS_KNOWLEDGE: service.knowledgeRepo } : env;
   let runtime: Runtime | undefined;
   try {
-    const loaded = await loadConfig({
+    const configured = await loadConfig({
       cwd: root,
       homeDir: options.homeDir,
       env: loadEnv,
       ...(service ? { ignoreUserRepos: true } : {}),
     });
+    const loaded = options.pool ? restrictToPool(configured, options.pool) : configured;
     if (service && loaded.meta?.service !== (c.fixture as { service: string }).service)
       throw new Error(`case ${c.id}: the sandbox's knowledge repository does not map ${root} to its service`);
     runtime = createRuntime(loaded, { env, cassette: { mode: options.mode, dir: join(c.dir, c.cassette) } });
@@ -381,10 +405,12 @@ export async function runCase(c: EvalCase, options: RunCaseOptions): Promise<Cas
       c.gold.files.length > 0
         ? c.gold.files.filter((f) => changed.includes(f)).length / c.gold.files.length
         : undefined;
-    const specText = (() => {
+    const specRaw = (() => {
       const spec = runtime?.artifacts.listLatest(run.id, "spec")[0];
-      return spec && runtime ? runtime.artifacts.text(spec).toLowerCase() : "";
+      return spec && runtime ? runtime.artifacts.text(spec) : "";
     })();
+    const specText = specRaw.toLowerCase();
+    const answers = answersCoverage(c.gold.answers, specRaw);
     const acceptanceCoverage =
       c.gold.acceptance.length > 0
         ? c.gold.acceptance.filter((a) => specText.includes(a.toLowerCase())).length /
@@ -402,7 +428,8 @@ export async function runCase(c: EvalCase, options: RunCaseOptions): Promise<Cas
       (testsPassed ?? true) &&
       (fileRecall === undefined || fileRecall === 1) &&
       (acceptanceCoverage === undefined || acceptanceCoverage === 1) &&
-      (sourceRecall === undefined || sourceRecall === 1);
+      (sourceRecall === undefined || sourceRecall === 1) &&
+      (answers === undefined || answers === 1);
     const successPer10k =
       tokens.out > 0 ? (success ? 1 : 0) / (tokens.out / 10_000) : success ? Number.POSITIVE_INFINITY : 0;
     return {
@@ -413,6 +440,7 @@ export async function runCase(c: EvalCase, options: RunCaseOptions): Promise<Cas
       ...(fileRecall !== undefined ? { fileRecall } : {}),
       ...(acceptanceCoverage !== undefined ? { acceptanceCoverage } : {}),
       ...(sourceRecall !== undefined ? { sourceRecall } : {}),
+      ...(answers !== undefined ? { answersCoverage: Number(answers.toFixed(4)) } : {}),
       loops,
       outputTokens: tokens.out,
       promptTokens: tokens.prompt,
@@ -449,6 +477,7 @@ export async function runSuite(suiteDir: string, options: RunCaseOptions): Promi
   const mean = (xs: number[]) => (xs.length > 0 ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
   const successes = scores.filter((s) => s.success).length;
   const outputTokens = scores.reduce((a, s) => a + s.outputTokens, 0);
+  const answered = scores.map((s) => s.answersCoverage).filter((x): x is number => x !== undefined);
   return {
     suite: basename(suiteDir),
     mode: options.mode,
@@ -463,6 +492,7 @@ export async function runSuite(suiteDir: string, options: RunCaseOptions): Promi
       meanAcceptanceCoverage: mean(
         scores.map((s) => s.acceptanceCoverage).filter((x): x is number => x !== undefined),
       ),
+      ...(answered.length > 0 ? { meanAnswersCoverage: Number(mean(answered).toFixed(4)) } : {}),
       outputTokens,
       successPer10k: outputTokens > 0 ? Number((successes / (outputTokens / 10_000)).toFixed(3)) : 0,
     },
@@ -479,6 +509,7 @@ export function diffResults(
     "successRate",
     "meanFileRecall",
     "meanAcceptanceCoverage",
+    "meanAnswersCoverage",
     "successPer10k",
   ];
   const regressions: string[] = [];
@@ -486,6 +517,8 @@ export function diffResults(
   for (const m of metrics) {
     const before = baseline.summary[m];
     const after = current.summary[m];
+    // a metric one side has not got (no case with answers, a result from before it): nothing to compare
+    if (before === undefined || after === undefined) continue;
     const delta = after - before;
     deltas[m] = Number(delta.toFixed(4));
     const allowed = Math.max(tolerance * Math.abs(before), tolerance);

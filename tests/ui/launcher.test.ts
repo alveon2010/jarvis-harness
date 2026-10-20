@@ -764,7 +764,21 @@ describe("New task on the page", () => {
     rt.runs.transition(run.id, "RUNNING");
     rt.runs.transition(run.id, "COMPLETED");
     const short = run.id.replace(/^run_/, "").slice(0, 8);
-    expect(await page(`/runs/${short}`)).toContain("Make an eval case");
+    expect(await page(`/runs/${short}`)).toContain("It went straight through");
+    // the person sent the spec back once: the card says why the run is worth a case, the Runs page lists it
+    rt.artifacts.approve({
+      runId: run.id,
+      stepId: "approve-spec",
+      artifactId: spec.artifactId,
+      version: 1,
+      actor: DEV,
+      decision: "request_changes",
+      comment: "drop the checkbox",
+    });
+    const card = await page(`/runs/${short}`);
+    expect(card).toContain("Make an eval case");
+    expect(card).toContain("Worth keeping: Jarvis learned something on this run.");
+    expect(card).toContain("spec sent back 1 time");
     expect((await post(`/runs/${short}/eval`, { t: token, suite: "Bad Suite" })).location).toContain(
       "notice=eval-suite",
     );

@@ -19,6 +19,7 @@ import {
   selectTransition,
   type WorkflowDefinition,
 } from "../core/domain/workflow.ts";
+import { noteEvalCandidate } from "../evals/candidates.ts";
 import {
   type HandEditConflict,
   handEditConflict,
@@ -516,6 +517,7 @@ export class LocalWorkflowEngine {
       });
       const done = this.rt.runs.transition(run.id, "COMPLETED", { reason: "workflow done" });
       this.emit(done, "run.state", { state: done.state });
+      noteEvalCandidate(this.rt, done);
       return { run: done, stop: true };
     }
     if (transition.to === STEP_FAIL) {
@@ -645,6 +647,7 @@ export class LocalWorkflowEngine {
           reason: "went on without the failed checks",
         });
         this.emit(done, "run.state", { state: done.state });
+        noteEvalCandidate(this.rt, done);
         return done;
       }
       const to =
