@@ -379,6 +379,15 @@ export function resumeMaster(runtime: Runtime, master: Run): void {
   runtime.events.emit({ kind: "run.resumedBy", runId: master.id, payload: { by: "subtasks" } });
 }
 
+/** A parked subtask goes on: `jarvis resume <run>` in the background, in its service's repository. */
+export function resumeSubtask(runtime: Runtime, run: Run): void {
+  launcher({
+    args: ["resume", run.id],
+    cwd: run.workspace.repoRoot,
+    log: launchLog(runtime, `subtask-run-${shortRunId(run.id)}`),
+  });
+}
+
 /**
  * After a run stopped (any process): a subtask that ended frees its slot for the next one; when every
  * subtask is done, the waiting master goes on. Never throws: the run's own report comes first.

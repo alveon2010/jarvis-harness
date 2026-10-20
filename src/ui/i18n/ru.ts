@@ -1306,6 +1306,61 @@ export const RU: Readonly<Record<string, string>> = {
   "{type} edited by a person (versions {versions})": "{type} правил человек (версии {versions})",
   "Worth keeping as eval cases": "Стоит оставить как eval-кейсы",
   "{n} more: {cmd}": "ещё {n}: {cmd}",
+  // ---- ADR-0025
+  "contract change": "смена контракта",
+  "The subtask asks its master to change the contract; decide on the master's page":
+    "Сабтаск просит мастер поменять контракт — решение на странице мастера",
+  "Open the master": "Открыть мастер",
+  "{used} {unit}": "{used} {unit}",
+  "{used} of {cap} {unit}": "{used} из {cap} {unit}",
+  "Budget, the sum of the subtasks':": "Бюджет — сумма бюджетов сабтасков:",
+  "nothing spent yet": "пока ничего не потрачено",
+  "no cap: budget.perRun is not set": "без лимита: budget.perRun не задан",
+  "the master's own steps: {n} output tokens": "свои шаги мастера: {n} output tokens",
+  "The master's budget is spent ({used} of {cap} {unit}): a subtask makes no more model calls — it stops on a budget stop, where more for it grows the sum":
+    "Бюджет мастера исчерпан ({used} из {cap} {unit}): сабтаски больше не вызывают модель — каждый встаёт на остановке по бюджету, и добавка ему увеличивает общую сумму",
+  "The contract as it will be": "Контракт, каким он станет",
+  "Accept: a new version of the split": "Принять — новая версия разбиения",
+  "Why it stays (for the subtask)": "Почему остаётся как есть (для сабтаска)",
+  "Reject: keep it as agreed": "Отклонить — оставить как договорились",
+  "A subtask asks to change the contract": "Сабтаск просит поменять контракт",
+  "Only the master changes the contract. Accepted: the split gets a new version, the other subtasks it touches get it as a note, the asking one analyses its impact again. Rejected: it goes on with the contract as agreed.":
+    "Контракт меняет только мастер. Если принять, у разбиения появится новая версия, остальные затронутые сабтаски получат её заметкой, а попросивший заново сделает impact. Если отклонить, он продолжит по контракту, о котором договорились.",
+  "Agreed: {change}": "Договорились: {change}",
+  "Not in the contract yet: accepting adds it": "В контракте этого пока нет — если принять, пункт добавится",
+  "Asks for: {change}": "Просит: {change}",
+  "Why: {why}": "Почему: {why}",
+  "Waits for the master": "Ждёт мастер",
+  "This subtask asks to change the contract": "Этот сабтаск просит поменять контракт",
+  "Only the master changes the contract: a person accepts or rejects it on the master's page, then this run goes on.":
+    "Контракт меняет только мастер: человек принимает или отклоняет просьбу на его странице, после этого прогон идёт дальше.",
+  payload: "payload",
+  "request body": "тело запроса",
+  response: "ответ",
+  DTO: "DTO",
+  "fields not checked: the type is not seen on both sides": "поля не проверены: тип виден не с обеих сторон",
+  same: "без изменений",
+  added: "добавлено",
+  removed: "удалено",
+  renamed: "переименовано",
+  "type changed": "другой тип",
+  Field: "Поле",
+  Change: "Изменение",
+  "Writes: {service}": "Пишет: {service}",
+  "Reads: {service}": "Читает: {service}",
+  Holds: "Сходится",
+  mismatch: "расхождение",
+  Contract: "Контракт",
+  "every side holds": "все стороны сходятся",
+  "a side does not hold": "одна из сторон не сходится",
+  "Checked in each subtask's checkout without a model: the producer sends or serves it, the consumers read or call it, with the same fields where the type is declared.":
+    "Проверено в копии каждого сабтаска, без модели: поставщик отдаёт или шлёт, потребители вызывают или читают, и поля те же — там, где тип объявлен явно.",
+  "Contract changed: a new version of the split; the subtasks it touches are told, the asking one goes on":
+    "Контракт изменён: новая версия разбиения, затронутым сабтаскам ушла заметка, попросивший продолжает",
+  "The contract stays as agreed; the asking subtask goes on with it":
+    "Контракт остаётся как договорились, попросивший сабтаск продолжает по нему",
+  "No such contract change request, or it is decided already":
+    "Такой просьбы о смене контракта нет, или по ней уже решили",
 };
 
 /**

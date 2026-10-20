@@ -386,3 +386,291 @@ describe("a library in a task across services", () => {
     expect(launches.map((l) => l.args[3])).toEqual(["2"]);
   });
 });
+
+/** Opens the runtime of the knowledge repository for a look at the master and its subtasks. */
+async function knowledgeRuntime() {
+  return createRuntime(await loadConfig({ cwd: meta, homeDir: sb.home, env: {} }), { env: {} });
+}
+
+describe("the fields of the contract's DTOs", () => {
+  const DTO_SPLIT = JSON.stringify({
+    summary: "the slot in the event",
+    subtasks: [
+      { key: "1", service: "orders-api", task: "Send the slot", requirements: ["R1"] },
+      { key: "2", service: "notify-api", task: "Read the slot", requirements: ["R2"], deliverAfter: ["1"] },
+    ],
+    contract: [
+      {
+        kind: "dto",
+        id: "OrderCreatedEvent",
+        change: "+ deliverySlotId",
+        producer: "orders-api",
+        consumers: ["notify-api"],
+      },
+    ],
+  });
+
+  it("compares the producer's and the consumer's DTO field by field, in their checkouts", async () => {
+    sb.write(
+      "repos/jarvis-knowledge/.jarvis/workflows/sdd-cross.yaml",
+      MASTER.replace(`'${SPLIT}'`, `'${DTO_SPLIT}'`),
+    );
+    sb.write(
+      "repos/orders-api/src/main/java/com/example/orders/OrderCreatedEvent.java",
+      "package com.example.orders;\n\n@Data\npublic class OrderCreatedEvent {\n  private String orderId;\n  private Long deliverySlotId;\n  private BigDecimal total;\n}\n",
+    );
+    sb.write(
+      "repos/notify-api/src/main/kotlin/com/example/notify/OrderCreatedEvent.kt",
+      'package com.example.notify\n\ndata class OrderCreatedEvent(\n  val orderId: String,\n  @JsonProperty("slot_id") val deliverySlotId: Long?,\n  val total: String,\n  val channel: String,\n)\n',
+    );
+    await jarvis(meta, ["work", "ABC-60 slot in the event", "--workflow", "sdd-cross"]);
+    await next();
+    await next();
+    const resumed = await next();
+    expect(resumed.result.code).toBe(10);
+    const rt = await knowledgeRuntime();
+    try {
+      const m = rt.runs.list({ includeTerminal: true }).find((r) => r.workflow === "sdd-cross");
+      const check = JSON.parse(
+        rt.artifacts.text(rt.artifacts.listLatest(m?.id as string, "contract-check")[0] as never),
+      ) as {
+        ok: boolean;
+        items: Array<{
+          producerSide: { status: string; at?: string };
+          consumerSides: Array<{
+            status: string;
+            fields?: Array<{
+              role: string;
+              writer: string;
+              reader: string;
+              fields?: Array<Record<string, string>>;
+            }>;
+          }>;
+        }>;
+      };
+      const item = check.items[0];
+      expect(item?.producerSide).toMatchObject({
+        status: "ok",
+        at: "src/main/java/com/example/orders/OrderCreatedEvent.java:4",
+      });
+      const consumer = item?.consumerSides[0];
+      expect(consumer?.status).toBe("mismatch");
+      expect(check.ok).toBe(false);
+      expect(consumer?.fields?.[0]).toMatchObject({
+        role: "dto",
+        writer: "orders-api",
+        reader: "notify-api",
+      });
+      expect(consumer?.fields?.[0]?.fields?.map((f) => [f.field, f.change, f.status])).toEqual([
+        ["channel", "removed", "mismatch"],
+        ["orderId", "same", "ok"],
+        ["slot_id → deliverySlotId", "renamed", "mismatch"],
+        ["total", "type changed", "mismatch"],
+      ]);
+      // the master's card: the fields, with what changed and whether it holds
+      const body = runContent(
+        await runPage(rt, createEngine(rt), m as never, { homeDir: sb.home }),
+        Date.now(),
+      ).value;
+      expect(body).toContain("≠ notify-api");
+      expect(body).toContain("<code>slot_id → deliverySlotId</code></td><td>renamed</td>");
+      expect(body).toContain("<td>type changed</td>");
+    } finally {
+      rt.close();
+    }
+  });
+});
+
+describe("a subtask asks to change the contract", () => {
+  const ASKS = `name: sdd
+entry: impact
+steps:
+  - id: impact
+    kind: deterministic
+    tool: artifact.write
+    args: { type: impact, name: impact.json, content: '{"affected":[],"contractChange":{"item":"orders.created","change":"+ deliverySlotId, required","why":"every order has a slot here"}}' }
+    outputs: [impact]
+    transitions: { onSuccess: DONE }
+`;
+
+  it("parks; the master's page asks; accepted — a new split, the impact again; rejected — on as agreed", async () => {
+    sb.write("repos/jarvis-knowledge/.jarvis/workflows/sdd.yaml", ASKS);
+    await jarvis(meta, ["work", "ABC-61 delivery slot", "--workflow", "sdd-cross"]);
+    const masterId = launches[0]?.args[2] as string;
+    const short = masterId.slice(4, 12);
+    const first = await next();
+    expect(first.result.out).toContain("WAITING_HUMAN");
+    // waiting for a person does not hold a slot: the next subtask starts
+    expect(launches.map((l) => l.args[3])).toEqual(["2"]);
+    launches.length = 0;
+
+    let rt = await knowledgeRuntime();
+    let subId: string;
+    try {
+      const sub = subtasksOf(rt, rt.runs.get(masterId) as never)[0]?.run;
+      subId = sub?.id as string;
+      expect(sub?.waitingFor).toMatchObject({ kind: "contract", detail: "orders.created" });
+      const body = runContent(
+        await runPage(rt, createEngine(rt), rt.runs.get(masterId) as never, { homeDir: sb.home }),
+        Date.now(),
+      ).value;
+      expect(body).toContain("A subtask asks to change the contract");
+      expect(body).toContain("Agreed: + deliverySlotId, optional");
+      expect(body).toContain("Asks for: + deliverySlotId, required");
+      // the subtask's own page sends to the master
+      const subBody = runContent(
+        await runPage(rt, createEngine(rt), sub as never, { homeDir: sb.home }),
+        Date.now(),
+      ).value;
+      expect(subBody).toContain("This subtask asks to change the contract");
+      expect(subBody).toContain(`jarvis subtask contract ${short} 1 --accept | --reject`);
+    } finally {
+      rt.close();
+    }
+    const listed = await jarvis(meta, ["subtask", "contract", short]);
+    expect(listed.out).toContain("subtask 1 (orders-api) asks to change topic orders.created");
+    expect(listed.out).toContain("agreed:   + deliverySlotId, optional");
+
+    const accepted = await jarvis(meta, [
+      "subtask",
+      "contract",
+      short,
+      "orders-api",
+      "--accept",
+      "--change",
+      "+ deliverySlotId, required, a string",
+    ]);
+    expect(accepted.code).toBe(0);
+    expect(accepted.out).toContain("contract changed: split v2");
+    // the asking subtask goes on in its repository
+    expect(launches.map((l) => [l.args.join(" "), l.cwd])).toEqual([
+      [`resume ${subId}`, join(repos, "orders-api")],
+    ]);
+    rt = await knowledgeRuntime();
+    try {
+      const split = JSON.parse(rt.artifacts.text(rt.artifacts.listLatest(masterId, "split")[0] as never)) as {
+        contract: Array<{ change: string }>;
+      };
+      expect(split.contract[0]?.change).toBe("+ deliverySlotId, required, a string");
+      expect(rt.artifacts.listLatest(masterId, "split")[0]?.provenance.kind).toBe("human");
+    } finally {
+      rt.close();
+    }
+    // its impact runs again with the new contract — and asks once more: a new request
+    const again = await next();
+    expect(again.result.out).toContain("WAITING_HUMAN");
+    const rejected = await jarvis(meta, [
+      "subtask",
+      "contract",
+      short,
+      "1",
+      "--reject",
+      "--why",
+      "keep it optional",
+    ]);
+    expect(rejected.code).toBe(0);
+    const done = await next();
+    expect(done.result.code).toBe(0);
+    rt = await knowledgeRuntime();
+    try {
+      const run = rt.runs.get(subId);
+      expect(run?.state).toBe("COMPLETED");
+      const { notesOf } = await import("../../src/interaction/notes.ts");
+      const notes = notesOf(rt, subId).map((n) => n.text);
+      expect(notes[0]).toContain(
+        "The master accepted the contract change: topic orders.created: + deliverySlotId, required, a string",
+      );
+      expect(notes[1]).toContain("The master keeps the contract as agreed");
+      expect(notes[1]).toContain("keep it optional");
+      expect(rt.events.list({ runId: masterId, kind: "contract.changeDecided" }).length).toBe(2);
+    } finally {
+      rt.close();
+    }
+  });
+});
+
+describe("the master's budget", () => {
+  it("is the sum of its subtasks'; spent, a subtask's model call is refused with a budget stop", async () => {
+    sb.write(
+      "repos/jarvis-knowledge/.jarvis/project.yaml",
+      "version: 1\nworkspace: { mode: cwd }\ncrossRepos: { maxParallel: 1 }\nbudget: { perRun: { outputTokens: 100 } }\nservices:\n  orders-api: {}\n  notify-api: {}\n",
+    );
+    await jarvis(meta, ["work", "ABC-62 delivery slot", "--workflow", "sdd-cross"]);
+    const masterId = launches[0]?.args[2] as string;
+    await next();
+    const rt = await knowledgeRuntime();
+    try {
+      const { checkMasterBudget, masterBudgetOf } = await import("../../src/app/masterBudget.ts");
+      const { BudgetedGateway } = await import("../../src/budget/runBudget.ts");
+      const master = rt.runs.get(masterId) as never;
+      const sub = subtasksOf(rt, master)[0]?.run;
+      if (!sub) throw new Error("no subtask run");
+      // two subtasks of 100 output tokens each: 200 for the master
+      expect(masterBudgetOf(rt, master)).toMatchObject({
+        limit: { outputTokens: 200 },
+        spent: { outputTokens: 0 },
+      });
+      const spend = (n: number) =>
+        rt.events.emit({
+          kind: "model.call",
+          runId: sub.id,
+          stepId: "impact",
+          iteration: 1,
+          payload: { modelId: "m", outputTokens: n, promptTokens: 0 },
+        });
+      spend(150);
+      expect(() => checkMasterBudget(rt, sub)).not.toThrow();
+      spend(60);
+      expect(masterBudgetOf(rt, master)?.exhausted).toEqual({
+        dimension: "outputTokens",
+        used: 210,
+        cap: 200,
+      });
+      // a subtask's call: refused before it is made, as a stop on the master's budget
+      const calls: unknown[] = [];
+      const gateway = new BudgetedGateway(
+        {
+          call: async (r: unknown) => {
+            calls.push(r);
+            return {} as never;
+          },
+        } as never,
+        rt.db.db,
+        { ...rt.loaded.config, budget: { perRun: {}, perStep: {} } },
+        { runId: sub.id, stepId: "plan", iteration: 1 },
+        () => 1,
+        undefined,
+        () => checkMasterBudget(rt, sub),
+      );
+      await expect(gateway.call({ modelId: "m", messages: [] } as never)).rejects.toMatchObject({
+        scope: "master",
+        dimension: "outputTokens",
+        used: 210,
+        cap: 200,
+      });
+      expect(calls).toEqual([]);
+      // the page: spent of the sum, and why the subtasks stop
+      const body = runContent(
+        await runPage(rt, createEngine(rt), master, { homeDir: sb.home }),
+        Date.now(),
+      ).value;
+      expect(body).toContain("Budget, the sum of the subtasks&#39;: 210 of 200 output tokens");
+      expect(body).toContain("The master&#39;s budget is spent");
+      // more on the subtask's budget stop grows its share, and the sum
+      rt.events.emit({
+        kind: "budget.grant",
+        runId: sub.id,
+        stepId: "plan",
+        iteration: 1,
+        payload: { scope: "master", dimension: "outputTokens", outputTokens: 50 },
+      });
+      expect(masterBudgetOf(rt, master)).toMatchObject({ limit: { outputTokens: 250 } });
+      expect(masterBudgetOf(rt, master)?.exhausted).toBeUndefined();
+      await expect(gateway.call({ modelId: "m", messages: [] } as never)).resolves.toBeDefined();
+    } finally {
+      rt.close();
+    }
+    const list = await jarvis(meta, ["subtask", "list", masterId.slice(4, 12)]);
+    expect(list.out).toContain("budget (sum of the subtasks'): 210 of 250 output tokens");
+  });
+});

@@ -58,7 +58,11 @@ export function withScope(wf: WorkflowDefinition): WorkflowDefinition {
     kind: "deterministic",
     tool: "scope.check",
     outputs: ["scope"],
-    transitions: { onSuccess: impact.transitions.onSuccess },
+    // a subtask's contract change accepted on its master: the impact again, with the new contract
+    transitions: {
+      onSuccess: impact.transitions.onSuccess,
+      onOutcome: { contract_changed: { to: "impact", maxIterations: 3 } },
+    },
   });
   const steps = [...wf.steps];
   steps[at] = { ...impact, transitions: { ...impact.transitions, onSuccess: "scope" } };

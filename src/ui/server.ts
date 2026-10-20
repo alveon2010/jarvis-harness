@@ -19,6 +19,11 @@ import {
   targetOf,
 } from "../app/candidates.ts";
 import { continuationOf, sameTask, startPointOf } from "../app/continuation.ts";
+import {
+  acceptContractChange,
+  pendingContractRequests,
+  rejectContractChange,
+} from "../app/contractChange.ts";
 import { crossContinuationOf, crossStartOf, goCross, goSingle } from "../app/crossScope.ts";
 import {
   awaitedArtifact,
@@ -501,6 +506,9 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       "subtask-publishing": html`<div class="banner ok">${t("publish-local runs again in the library's checkout — the services waiting for it start when it passes")}</div>`,
       "subtask-dropped": html`<div class="banner ok">${t("Dropped from the task; once the others are done the master goes on without it")}</div>`,
       "no-subtask": html`<div class="banner bad">${t("No such subtask, or its service has no repository on this machine")}</div>`,
+      "contract-accepted": html`<div class="banner ok">${t("Contract changed: a new version of the split; the subtasks it touches are told, the asking one goes on")}</div>`,
+      "contract-rejected": html`<div class="banner ok">${t("The contract stays as agreed; the asking subtask goes on with it")}</div>`,
+      "no-request": html`<div class="banner bad">${t("No such contract change request, or it is decided already")}</div>`,
       "apply-failed": html`<div class="banner bad">${t("Not applied:")} ${r.url.searchParams.get("why") ?? t("see jarvis logs")}</div>`,
       restored: html`<div class="banner ok">${t("The branch is back — apply it, or remove it again")}</div>`,
       "restore-failed": html`<div class="banner bad">${t("The branch could not be restored (a branch of that name exists?)")}</div>`,
@@ -1586,7 +1594,7 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       });
     }
     const m =
-      /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|restart|redo|clarify|eval|note|pause|cleanup|apply|restore-branch|subtask|scope|tests|steer|effect|conflict)$/.exec(
+      /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|restart|redo|clarify|eval|note|pause|cleanup|apply|restore-branch|subtask|contract|scope|tests|steer|effect|conflict)$/.exec(
         r.url.pathname,
       );
     const run = m ? resolveRun(m[1] as string) : undefined;
@@ -1614,6 +1622,19 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       goSingle(runtime, run, who, "ui");
       goOn(runtime.runs.get(run.id) ?? run);
       return redirect(r, `/runs/${short}?notice=resumed`);
+    }
+    if (m[2] === "contract") {
+      // a subtask asks to change the contract (ADR-0025 §6): accept into a new split, or keep it
+      const request = pendingContractRequests(runtime, run).find((q) => q.id === form.get("request"));
+      if (!request) return redirect(r, `/runs/${short}?notice=no-request`);
+      const who = await actor();
+      if (!who) return redirect(r, `/runs/${short}?notice=actor`);
+      if (form.get("choice") === "accept") {
+        acceptContractChange(runtime, run, request, who, "ui", form.get("change") ?? undefined);
+        return redirect(r, `/runs/${short}?notice=contract-accepted`);
+      }
+      rejectContractChange(runtime, run, request, who, "ui", form.get("why") ?? undefined);
+      return redirect(r, `/runs/${short}?notice=contract-rejected`);
     }
     if (m[2] === "subtask") {
       // a master's subtask (ADR-0025 §6): start a queued one now, retry a stopped one, drop one

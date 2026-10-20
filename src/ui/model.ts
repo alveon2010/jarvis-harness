@@ -5,6 +5,8 @@ import { type BudgetGrant, type BudgetStop, budgetGranted, budgetStopOf } from "
 import { type BudgetWait, budgetWaitOf } from "../app/budgetWait.ts";
 import { candidatesOf } from "../app/candidates.ts";
 import { type Continuation, continuationOf, continuedFromOf, contradictionsOf } from "../app/continuation.ts";
+import { type ContractChangeRequest, pendingContractRequests } from "../app/contractChange.ts";
+import type { DtoCheck } from "../app/contractFields.ts";
 import { crossContinuationOf, type ScopeReport, scopeOf } from "../app/crossScope.ts";
 import {
   awaitedArtifact,
@@ -17,6 +19,7 @@ import {
 import { unresolvedEffectOf } from "../app/effects.ts";
 import { continuedBy } from "../app/handoff.ts";
 import { Journey, type LoopReport, type StepReport } from "../app/journey.ts";
+import { type MasterBudget, masterBudgetOf } from "../app/masterBudget.ts";
 import { pauseRequested } from "../app/pause.ts";
 import { type PlanProgress, planProgressOf } from "../app/planProgress.ts";
 import { redoableInPlace, redoTargets } from "../app/redo.ts";
@@ -26,7 +29,14 @@ import { type RoundFailure, roundsOf, type StopWhy } from "../app/rounds.ts";
 import type { Runtime } from "../app/runtime.ts";
 import type { RunTokens } from "../app/status.ts";
 import { checksAskOf, pauseAfterRequested } from "../app/steer.ts";
-import { MASTER_WORKFLOW, masterOf, type SubtaskView, splitOf, subtasksOf } from "../app/subtasks.ts";
+import {
+  type ContractItem,
+  MASTER_WORKFLOW,
+  masterOf,
+  type SubtaskView,
+  splitOf,
+  subtasksOf,
+} from "../app/subtasks.ts";
 import { type KindChoice, kindOfTask } from "../app/taskKind.ts";
 import { type TimeSplit, timeSplitOf } from "../app/timeSplit.ts";
 import { type TryOut, tryOutOf } from "../app/tryOut.ts";
@@ -251,6 +261,13 @@ export interface ScopeCard {
   readonly report: ScopeReport;
 }
 
+/** ADR-0025 §6: a subtask asks its master to change the contract — a person decides on the master. */
+export interface ContractCard {
+  readonly kind: "contract";
+  readonly master: Run;
+  readonly request?: ContractChangeRequest;
+}
+
 /**
  * A clarification thread (ADR-0019 §4) answered on the page: the agent's question, the turns so far,
  * Jarvis's proposed rule. Pilot: the run stood at «Answer in the terminal» and the page's flow broke.
@@ -288,6 +305,7 @@ export type WaitCard =
   | BudgetCard
   | ClarifyCard
   | ScopeCard
+  | ContractCard
   | EffectCard
   | ConflictCard
   | OtherCard;
@@ -508,6 +526,13 @@ export async function waitCardOf(runtime: Runtime, run: Run, homeDir: string): P
   if (kind === "scope") {
     const report = scopeOf(runtime, run);
     if (report) return { kind: "scope", report };
+  }
+  if (kind === "contract") {
+    const master = masterOf(runtime, run)?.master;
+    if (master) {
+      const request = pendingContractRequests(runtime, master).find((r) => r.run === run.id);
+      return { kind: "contract", master, ...(request ? { request } : {}) };
+    }
   }
   if (kind === "effect") {
     const open = unresolvedEffectOf(runtime, run);
@@ -850,8 +875,23 @@ export interface RunPage {
   /** A master: its subtasks, and the contract checked in their checkouts. */
   readonly subtasks?: readonly SubtaskView[];
   readonly contractCheck?: ContractCheckView;
+  /** A master: the contract changes its subtasks ask for, waiting for a person. */
+  readonly contractRequests?: readonly ContractChangeRequest[];
+  /** A master: the contract as its split has it now. */
+  readonly contractItems?: readonly ContractItem[];
+  /** A master: its budget, the sum of its subtasks'. */
+  readonly masterBudget?: MasterBudget;
   /** Untrusted content from the internet with no approval since (ADR-0016 §4): effects are held. */
   readonly untrusted?: UntrustedView;
+}
+
+/** One side of a contract item as the check found it (src/orchestration/tools/cross.ts). */
+export interface ContractSideView {
+  readonly service: string;
+  readonly status: string;
+  readonly at?: string;
+  readonly note?: string;
+  readonly fields?: readonly DtoCheck[];
 }
 
 /** The master's contract check (src/orchestration/tools/cross.ts), as the page shows it. */
@@ -861,23 +901,19 @@ export interface ContractCheckView {
     readonly kind: string;
     readonly id: string;
     readonly change: string;
-    readonly producerSide: {
-      readonly service: string;
-      readonly status: string;
-      readonly at?: string;
-      readonly note?: string;
-    };
-    readonly consumerSides: ReadonlyArray<{
-      readonly service: string;
-      readonly status: string;
-      readonly at?: string;
-      readonly note?: string;
-    }>;
+    readonly producerSide: ContractSideView;
+    readonly consumerSides: readonly ContractSideView[];
   }>;
 }
 
 /** A task across services on its run's page: the subtask's master, or the master's subtasks. */
-function crossOf(runtime: Runtime, run: Run): Pick<RunPage, "subtaskOf" | "subtasks" | "contractCheck"> {
+function crossOf(
+  runtime: Runtime,
+  run: Run,
+): Pick<
+  RunPage,
+  "subtaskOf" | "subtasks" | "contractCheck" | "contractRequests" | "contractItems" | "masterBudget"
+> {
   const of = masterOf(runtime, run);
   if (of)
     return {
@@ -897,7 +933,16 @@ function crossOf(runtime: Runtime, run: Run): Pick<RunPage, "subtaskOf" | "subta
   } catch {
     contractCheck = undefined;
   }
-  return { ...(subtasks.length > 0 ? { subtasks } : {}), ...(contractCheck ? { contractCheck } : {}) };
+  const contractRequests = pendingContractRequests(runtime, run);
+  const masterBudget = masterBudgetOf(runtime, run);
+  return {
+    ...(subtasks.length > 0 ? { subtasks } : {}),
+    ...(contractCheck ? { contractCheck } : {}),
+    ...(contractRequests.length > 0
+      ? { contractRequests, contractItems: splitOf(runtime, run)?.contract ?? [] }
+      : {}),
+    ...(masterBudget ? { masterBudget } : {}),
+  };
 }
 
 export interface UntrustedView {

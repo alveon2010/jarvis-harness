@@ -1,6 +1,7 @@
 import { reasonOf } from "../app/activity.ts";
 import { proposeGlossaryCandidates } from "../app/candidates.ts";
 import { goOnRequested, rerunBackTo } from "../app/decide.ts";
+import { checkMasterBudget } from "../app/masterBudget.ts";
 import { pausedText, pauseRequested } from "../app/pause.ts";
 import { pendingRedo } from "../app/redo.ts";
 import { proposeRepeatedFindings } from "../app/repeatedFindings.ts";
@@ -314,6 +315,8 @@ export class LocalWorkflowEngine {
       { runId: run.id, stepId: step.id, iteration },
       (modelId) => this.rt.budget.scaleNow(models[modelId]?.quotaPool ?? `model:${modelId}`),
       (modelId, at) => this.rt.budget.unlimitedAt(models[modelId]?.quotaPool ?? `model:${modelId}`, at),
+      // a subtask spends its master's budget too: the sum of the subtasks' (ADR-0025 §6)
+      run.options?.parent ? () => checkMasterBudget(this.rt, run) : undefined,
     );
     const tools = this.rt.tools.bind({
       run,

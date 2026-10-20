@@ -14,7 +14,8 @@ export interface StepUsage {
 }
 
 export class BudgetExceededError extends Error {
-  readonly scope: "perRun" | "perStep";
+  /** `master`: the sum of the subtasks' budgets of a task across services (src/app/masterBudget.ts). */
+  readonly scope: "perRun" | "perStep" | "master";
   readonly dimension: "outputTokens" | "inputTokens" | "requests";
   readonly used: number;
   readonly cap: number;
@@ -76,7 +77,8 @@ export function grantsFromEvents(db: DatabaseSync, runId: string, stepId: string
       inputTokens: u.inputTokens + n(p.inputTokens),
       requests: u.requests + n(p.requests),
     });
-    if (p.scope === "perRun") grants = { ...grants, perRun: add(grants.perRun) };
+    // more on the master's sum (ADR-0025 §6) is more for this subtask's run: its share of the sum
+    if (p.scope === "perRun" || p.scope === "master") grants = { ...grants, perRun: add(grants.perRun) };
     else if (here && p.scope === "perStep") grants = { ...grants, perStep: add(grants.perStep) };
     else if (here && p.scope === "agent")
       grants = {
@@ -171,6 +173,8 @@ export class BudgetedGateway implements ModelCaller {
   private readonly scale: (modelId: string) => number;
   /** A call of this model at that time was in its pool's unlimited hours: outside them it does not count. */
   private readonly free: ((modelId: string, at: Date) => boolean) | undefined;
+  /** A budget above the run's, checked before each call: a subtask's master's sum (ADR-0025 §6). */
+  private readonly outer: (() => void) | undefined;
 
   constructor(
     inner: ModelCaller,
@@ -179,6 +183,7 @@ export class BudgetedGateway implements ModelCaller {
     scope: BudgetScope,
     scale: (modelId: string) => number = () => 1,
     free?: (modelId: string, at: Date) => boolean,
+    outer?: () => void,
   ) {
     this.inner = inner;
     this.db = db;
@@ -186,6 +191,7 @@ export class BudgetedGateway implements ModelCaller {
     this.scope = scope;
     this.scale = scale;
     this.free = free;
+    this.outer = outer;
   }
 
   /**
@@ -232,6 +238,7 @@ export class BudgetedGateway implements ModelCaller {
     if (perStep.requests !== undefined && step.requests + 1 > perStep.requests) {
       throw new BudgetExceededError("perStep", "requests", step.requests, perStep.requests);
     }
+    this.outer?.();
   }
 
   async call(request: ModelRequest): Promise<ModelResponse> {

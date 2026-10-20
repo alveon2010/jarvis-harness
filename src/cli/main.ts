@@ -73,6 +73,7 @@ import {
 import { runScope } from "./commands/scope.ts";
 import { runCancel, runStatus } from "./commands/status.ts";
 import {
+  runSubtaskContract,
   runSubtaskDrop,
   runSubtaskList,
   runSubtaskPublish,
@@ -911,6 +912,24 @@ export function buildProgram(options: RunOptions = {}): Command {
     .action(async (master: string, which: string) => {
       await runSubtaskPublish(ctxFor(), master, which);
     });
+  subtask
+    .command("contract <master> [subtask]")
+    .description(
+      "a subtask's request to change the contract: --accept (a new version of the split) or --reject (it goes on as agreed)",
+    )
+    .option("--accept", "change the contract as the subtask asks (or as --change says)")
+    .option("--change <text>", "with --accept: the contract item's change as it will be")
+    .option("--reject", "keep the contract as agreed; the subtask goes on with it")
+    .option("--why <text>", "with --reject: why, for the subtask")
+    .action(
+      async (
+        master: string,
+        which: string | undefined,
+        opts: { accept?: boolean; reject?: boolean; change?: string; why?: string },
+      ) => {
+        await runSubtaskContract(ctxFor(), master, which, opts);
+      },
+    );
   subtask
     .command("run <master> <subtask>")
     .description("(started by the master) the subtask's run in its service's repository")

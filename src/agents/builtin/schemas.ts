@@ -177,6 +177,18 @@ export const ImpactResult = z.object({
     )
     .default([])
     .describe("requirements another service of the knowledge repository must implement, not this one"),
+  /** ADR-0025 §6: a subtask of a task across services finds the agreed contract cannot work. */
+  contractChange: z
+    .object({
+      item: z.string().min(1).describe("the contract item's id as the task names it, or a new one's"),
+      kind: z.enum(["endpoint", "topic", "dto"]).optional().describe("for a new item"),
+      change: z.string().min(1).describe("the contract as it should be: what changes"),
+      why: z.string().min(1).describe("why the agreed contract cannot work here, from the code"),
+    })
+    .optional()
+    .describe(
+      "only in a subtask of a task across services, when the contract it was given cannot hold: the run stops and the master decides",
+    ),
   risks: z.array(z.string()).default([]),
   unknowns: z.array(z.string()).default([]),
   termLinks: TermLinks,

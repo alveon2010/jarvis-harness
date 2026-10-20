@@ -1,5 +1,18 @@
 import { existsSync } from "node:fs";
 import { applyRun } from "../../app/applyRun.ts";
+import {
+  CONTRACT_CHANGED,
+  contractChangeAsked,
+  contractDecisionOf,
+  recordContractRequest,
+} from "../../app/contractChange.ts";
+import {
+  checkoutOf,
+  type DtoCheck,
+  dtoChecksOf,
+  fieldsMismatch,
+  type SideFacts,
+} from "../../app/contractFields.ts";
 import { crossCatalogText } from "../../app/crossCatalog.ts";
 import { SCOPE_TYPE, scopeDecision, scopeOf } from "../../app/crossScope.ts";
 import {
@@ -22,7 +35,7 @@ import {
 import { repoIdOf, updateGraph } from "../../knowledge/graph/update.ts";
 import { trackedFiles } from "../../onboarding/scan.ts";
 import type { DeterministicTool } from "../executors.ts";
-import type { StepContext } from "../types.ts";
+import type { StepContext, StepOutcome } from "../types.ts";
 import { SuspendRun } from "../types.ts";
 
 /**
@@ -81,7 +94,8 @@ const spawnStep: DeterministicTool = async (ctx) => {
     kind: "subtasks.spawned",
     runId: ctx.run.id,
     stepId: ctx.step.id,
-    payload: { subtasks: split.subtasks.length, started },
+    // a subtask's share of the master's budget until its own process records its service's
+    payload: { subtasks: split.subtasks.length, started, budget: ctx.runtime.loaded.config.budget.perRun },
   });
   return { status: "success" };
 };
@@ -100,9 +114,12 @@ const waitStep: DeterministicTool = async (ctx) => {
 
 export interface ContractSide {
   readonly service: string;
-  readonly status: "ok" | "missing" | "not checked" | "no checkout";
+  /** `mismatch`: the method, path or topic holds, a field of its DTO does not. */
+  readonly status: "ok" | "missing" | "mismatch" | "not checked" | "no checkout";
   readonly at?: string;
   readonly note?: string;
+  /** A consumer's side: its DTOs against the producer's, field by field. */
+  readonly fields?: readonly DtoCheck[];
 }
 
 export interface ContractCheckItem extends ContractItem {
@@ -129,6 +146,31 @@ async function factsAt(ctx: StepContext, run: Run, service: string): Promise<Ser
 }
 
 const where = (e: { file: string; line?: number }) => (e.line ? `${e.file}:${e.line}` : e.file);
+
+/** A DTO the contract names, on its producer's side: declared in its checkout, or not seen there. */
+function dtoProducerSide(item: ContractItem, side: SideFacts): ContractSide {
+  const service = side.service;
+  if (!side.checkout) return { service, status: "no checkout" };
+  const decl = side.checkout.findDto(item.id.replace(/^.*\./, ""));
+  return decl
+    ? { service, status: "ok", at: `${decl.file}:${decl.line}` }
+    : {
+        service,
+        status: "not checked",
+        note: `${item.id} is not declared in its checkout (a library's type?): fields not checked`,
+      };
+}
+
+/** A consumer's side with its DTOs compared to the producer's: a field that does not hold is a mismatch. */
+function withFields(side: ContractSide, checks: readonly DtoCheck[]): ContractSide {
+  if (checks.length === 0) return side;
+  if (fieldsMismatch(checks) && (side.status === "ok" || side.status === "not checked"))
+    return { service: side.service, status: "mismatch", ...(side.at ? { at: side.at } : {}), fields: checks };
+  // a DTO's consumer: compared field by field, it holds
+  if (side.status === "not checked" && checks.every((c) => c.fields))
+    return { service: side.service, status: "ok", at: checks[0]?.readerAt ?? "", fields: checks };
+  return { ...side, fields: checks };
+}
 
 /** One side of a contract item in its service's facts. */
 function sideOf(
@@ -163,15 +205,28 @@ const checkStep: DeterministicTool = async (ctx) => {
   const split = splitOf(ctx.runtime, ctx.run);
   if (!split) return { status: "failure", reason: "no approved split" };
   const views = subtasksOf(ctx.runtime, ctx.run);
-  const facts = new Map<string, ServiceContracts | undefined>();
+  const sides = new Map<string, SideFacts>();
   for (const v of views)
-    if (v.run && v.state !== "dropped")
-      facts.set(v.subtask.service, await factsAt(ctx, v.run, v.subtask.service));
+    if (v.run && v.state !== "dropped") {
+      const service = v.subtask.service;
+      const facts = await factsAt(ctx, v.run, service);
+      const checkout = await checkoutOf(v.run);
+      sides.set(service, { service, ...(facts ? { facts } : {}), ...(checkout ? { checkout } : {}) });
+    }
   const inTask = new Set(views.filter((v) => v.state !== "dropped").map((v) => v.subtask.service));
-  const side = (item: ContractItem, service: string, producer: boolean): ContractSide =>
-    inTask.has(service)
-      ? sideOf(item, facts.get(service), service, producer)
-      : { service, status: "not checked", note: "not a subtask of this task: it does not change" };
+  const side = (item: ContractItem, service: string, producer: boolean): ContractSide => {
+    if (!inTask.has(service))
+      return { service, status: "not checked", note: "not a subtask of this task: it does not change" };
+    const facts = sides.get(service) ?? { service };
+    if (item.kind === "dto" && producer) return dtoProducerSide(item, facts);
+    const plain = sideOf(item, facts.facts, service, producer);
+    if (producer || !inTask.has(item.producer)) return plain;
+    // the method, path or topic is the same: then the fields of what goes between them
+    return withFields(
+      plain,
+      dtoChecksOf(item, sides.get(item.producer) ?? { service: item.producer }, facts),
+    );
+  };
   const items: ContractCheckItem[] = split.contract.map((item) => ({
     ...item,
     producerSide: side(item, item.producer, true),
@@ -179,7 +234,7 @@ const checkStep: DeterministicTool = async (ctx) => {
   }));
   const broken = items
     .flatMap((i) => [i.producerSide, ...i.consumerSides])
-    .filter((s) => s.status === "missing");
+    .filter((s) => s.status === "missing" || s.status === "mismatch");
   const doc = { ok: broken.length === 0, items };
   const ref = put(
     ctx,
@@ -223,11 +278,34 @@ const deliverStep: DeterministicTool = async (ctx) => {
 };
 
 /**
+ * `scope.check` of a subtask (ADR-0025 §6): its impact asks to change the contract — it parks until a
+ * person decides on the master. Accepted: back to the impact with the new contract (where the
+ * workflow has that edge); rejected: on with the contract as agreed. Nothing asked: on at once.
+ */
+async function contractStep(ctx: StepContext): Promise<StepOutcome> {
+  const asked = contractChangeAsked(ctx.runtime, ctx.run);
+  const masterId = ctx.run.options?.parent?.runId;
+  const master = masterId ? ctx.runtime.runs.get(masterId) : undefined;
+  if (!asked || !master) return { status: "success" };
+  const decided = contractDecisionOf(ctx.runtime, master.id, asked.id);
+  if (!decided) {
+    recordContractRequest(ctx.runtime, master, ctx.run, asked);
+    throw new SuspendRun("WAITING_HUMAN", `asks the master to change the contract: ${asked.ask.item}`, {
+      waitingFor: { kind: "contract", detail: asked.ask.item },
+    });
+  }
+  return decided.choice === "accept" && ctx.step.transitions.onOutcome[CONTRACT_CHANGED]
+    ? { status: "success", outcome: CONTRACT_CHANGED }
+    : { status: "success" };
+}
+
+/**
  * `scope.check` (an sdd in a service, after impact; ADR-0025 §7): a requirement the analysis ties to
  * another service that the catalog links to this one stops the run at the scope gate; anything else
  * passes on — with the report kept when it says something.
  */
 const scopeStep: DeterministicTool = async (ctx) => {
+  if (ctx.run.options?.parent) return contractStep(ctx);
   const report = scopeOf(ctx.runtime, ctx.run);
   if (!report) return { status: "success" };
   const said = report.spans.length + report.unconfirmed.length + report.consumers.length > 0;

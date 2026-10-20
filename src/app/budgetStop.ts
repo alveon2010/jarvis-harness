@@ -10,7 +10,8 @@ import type { Runtime } from "./runtime.ts";
  * has — its result marked incomplete for the steps after it. Recorded as `budget.grant` with the actor,
  * from the terminal card or the page alike. Pilot: such a stop parked the run with an empty card.
  */
-export type BudgetScope = "perRun" | "perStep" | "agent";
+/** `master`: a subtask stopped on its master's budget, the sum of its subtasks' (ADR-0025 §6). */
+export type BudgetScope = "perRun" | "perStep" | "agent" | "master";
 export type BudgetDimension = "outputTokens" | "inputTokens" | "requests" | "toolCalls" | "modelCalls";
 
 export interface BudgetStop {
@@ -33,7 +34,7 @@ export interface BudgetGrant {
   readonly channel?: DecisionChannel;
 }
 
-const SCOPES: readonly string[] = ["perRun", "perStep", "agent"];
+const SCOPES: readonly string[] = ["perRun", "perStep", "agent", "master"];
 const DIMENSIONS: readonly string[] = ["outputTokens", "inputTokens", "requests", "toolCalls", "modelCalls"];
 /**
  * "Finish" after a cap of the run or the step: enough for the result document and its repairs — a few
@@ -54,6 +55,7 @@ export function unitOf(dimension: BudgetDimension): string {
 
 /** Where the cap comes from, for the card's subtitle. */
 export function sourceOf(stop: Pick<BudgetStop, "scope" | "agent">): string {
+  if (stop.scope === "master") return "the master's budget: the sum of its subtasks' budget.perRun";
   return stop.scope === "agent"
     ? `the ${stop.agent ?? "agent"} agent's limit (agents.${stop.agent ?? "<id>"}.limits)`
     : `budget.${stop.scope}`;

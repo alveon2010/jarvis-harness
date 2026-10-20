@@ -351,6 +351,21 @@ export function nextCommands(d: RunDetail, goOn?: string): Array<{ cmd: string; 
     // ADR-0025 §7: the task reaches other services
     out.push({ cmd: `jarvis scope ${id} --cross`, why: "go on as a task across services" });
     out.push({ cmd: `jarvis scope ${id} --single --resume`, why: "only this service: go on to the plan" });
+  } else if (r.state === "WAITING_HUMAN" && r.waitingFor?.kind === "contract" && d.subtaskOf) {
+    // ADR-0025 §6: a subtask asks to change the contract; the master decides
+    const master = shortRunId(d.subtaskOf.master.id);
+    out.push({
+      cmd: `jarvis subtask contract ${master} ${d.subtaskOf.key}`,
+      why: "what it asks to change in the contract, and why",
+    });
+    out.push({
+      cmd: `jarvis subtask contract ${master} ${d.subtaskOf.key} --accept`,
+      why: "change the contract: a new split, the others told",
+    });
+    out.push({
+      cmd: `jarvis subtask contract ${master} ${d.subtaskOf.key} --reject`,
+      why: "keep it as agreed: the subtask goes on with it",
+    });
   } else if (r.state === "WAITING_HUMAN" && r.waitingFor?.kind === "effect") {
     // ADR-0002 §2: did the external change happen? the person looks and says
     out.push({ cmd: `jarvis effect ${id}`, why: "what was tried and where to look" });

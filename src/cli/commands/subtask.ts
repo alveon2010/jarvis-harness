@@ -1,5 +1,11 @@
+import {
+  acceptContractChange,
+  pendingContractRequests,
+  rejectContractChange,
+} from "../../app/contractChange.ts";
 import { createEngine } from "../../app/engine.ts";
 import { handOff } from "../../app/handoff.ts";
+import { masterBudgetLine, masterBudgetOf } from "../../app/masterBudget.ts";
 import { createRuntime, type Runtime } from "../../app/runtime.ts";
 import {
   type ContractItem,
@@ -84,7 +90,7 @@ export function subtaskTask(
       : []),
     ...(contract.length > 0
       ? [
-          "The contract between the services (the task's: keep it as written; if it cannot hold, say so in the impact's risks — the master changes it, not this run):",
+          "The contract between the services (the task's: keep it as written; if it cannot hold, write the impact's contractChange — the item, the contract as it should be, why — and this run stops for the master to decide; never change it on your own):",
           ...contract.map(line),
         ]
       : []),
@@ -182,7 +188,8 @@ export async function runSubtaskRun(ctx: CliContext, masterRef: string, which: s
     runtime.events.emit({
       kind: "subtask.run",
       runId: master.id,
-      payload: { key: sub.key, service: sub.service, run: run.id },
+      // its service's budget: its share of the master's, the sum of the subtasks' (ADR-0025 §6)
+      payload: { key: sub.key, service: sub.service, run: run.id, budget: loaded.config.budget.perRun },
     });
     await executeAndReport(ctx, runtime, engine, runtime.runs.get(run.id) ?? run, false);
   } finally {
@@ -210,6 +217,8 @@ export async function runSubtaskList(ctx: CliContext, masterRef: string): Promis
         ctx.out.line(
           `${master.task.split("\n")[0]} (${shortRunId(master.id)}) — ${views.filter(isDone).length} of ${views.length} done`,
         );
+        const budget = masterBudgetOf(runtime, master);
+        if (budget) ctx.out.line(`  ${masterBudgetLine(budget)}`);
         for (const v of views)
           ctx.out.line(
             `  ${v.subtask.key.padEnd(3)} ${v.subtask.service.padEnd(24)} ${v.state.padEnd(14)} ${v.run ? `${shortRunId(v.run.id)}${v.run.currentStep ? ` · ${v.run.currentStep}` : ""}` : ""}${v.waitsFor ? `waits for ${v.waitsFor.join(", ")} to be accepted and published` : ""}${v.published ? `${v.published.ok ? "published" : "publish-local failed"}${v.published.version ? ` ${v.published.version}` : ""}` : ""}`,
@@ -350,6 +359,77 @@ export async function runSubtaskPublish(ctx: CliContext, masterRef: string, whic
       if (!p.ok && p.tail) ctx.out.line(p.tail);
     });
     if (!p.ok) throw new CliExit(EXIT.error);
+  } finally {
+    await runtime.close();
+  }
+}
+
+/**
+ * `jarvis subtask contract <master> [<subtask>] [--accept [--change <text>] | --reject [--why <text>]]`
+ * (ADR-0025 §6): a subtask's request to change the contract. Without a choice: the requests waiting,
+ * with the commands to decide them.
+ */
+export async function runSubtaskContract(
+  ctx: CliContext,
+  masterRef: string,
+  which: string | undefined,
+  options: { accept?: boolean; reject?: boolean; change?: string; why?: string },
+): Promise<void> {
+  const loaded = await loadForCli(ctx);
+  const runtime = createRuntime(loaded, { env: ctx.env });
+  try {
+    const { master, split } = masterOrExit(ctx, runtime, masterRef);
+    const id = shortRunId(master.id);
+    const pending = pendingContractRequests(runtime, master);
+    const sub = which ? subtaskOrExit(ctx, split, which) : undefined;
+    const mine = sub ? pending.filter((q) => q.key === sub.key) : pending;
+    if (options.accept === options.reject) {
+      ctx.out.result(mine, () => {
+        if (mine.length === 0) {
+          ctx.out.line(`no contract change waits on ${id}`);
+          return;
+        }
+        for (const q of mine) {
+          const agreed = split.contract.find((c) => c.id === q.item);
+          ctx.out.line(
+            `subtask ${q.key} (${q.service}) asks to change ${q.kind ?? agreed?.kind ?? ""} ${q.item}`,
+          );
+          ctx.out.line(`  agreed:   ${agreed?.change ?? "(not in the contract yet)"}`);
+          ctx.out.line(`  asks for: ${q.change}`);
+          if (q.why) ctx.out.line(`  why:      ${q.why}`);
+          ctx.out.line(`  accept: jarvis subtask contract ${id} ${q.key} --accept [--change "<text>"]`);
+          ctx.out.line(`  reject: jarvis subtask contract ${id} ${q.key} --reject [--why "<text>"]`);
+        }
+      });
+      return;
+    }
+    const [request, more] = mine;
+    if (!request || (more && !sub)) {
+      ctx.out.error(
+        request
+          ? `${mine.length} requests wait: name the subtask — ${mine.map((q) => `${q.key} ${q.service}`).join(", ")}`
+          : `no contract change waits on ${id}${sub ? ` from subtask ${sub.key}` : ""}`,
+      );
+      throw new CliExit(EXIT.error);
+    }
+    const actor = await actorFor(ctx, runtime);
+    if (options.accept) {
+      const done = acceptContractChange(runtime, master, request, actor, "cli", options.change);
+      ctx.out.result({ request: request.id, choice: "accept", ...done }, () => {
+        ctx.out.line(
+          `contract changed: split v${done.version}; subtask ${request.key} (${request.service}) analyses its impact again with it${done.told.length > 0 ? `; told ${done.told.join(", ")}` : ""}`,
+        );
+        if (done.done.length > 0)
+          ctx.out.line(`already completed, without this change: ${done.done.join(", ")}`);
+      });
+      return;
+    }
+    rejectContractChange(runtime, master, request, actor, "cli", options.why);
+    ctx.out.result({ request: request.id, choice: "reject" }, () =>
+      ctx.out.line(
+        `the contract stays as agreed; subtask ${request.key} (${request.service}) goes on with it`,
+      ),
+    );
   } finally {
     await runtime.close();
   }

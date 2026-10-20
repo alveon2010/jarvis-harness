@@ -2,7 +2,10 @@ import { type Activity, clock, compactingText, kilo, QUIET_MS, type ToolBatch } 
 import { type BudgetStop, sourceOf, unitOf } from "../app/budgetStop.ts";
 import { type BudgetWait, whenText as whenTextEn } from "../app/budgetWait.ts";
 import { isStale, issueKeyOf, type StartPoint } from "../app/continuation.ts";
+import type { ContractChangeRequest } from "../app/contractChange.ts";
+import type { DtoCheck } from "../app/contractFields.ts";
 import { duration as durationEn } from "../app/journey.ts";
+import type { MasterBudget } from "../app/masterBudget.ts";
 import type { McpHealth, McpServerHealth } from "../app/mcpHealth.ts";
 import type { HealthState, ModelHealth, ModelPerf, ModelsHealth, Unlimited } from "../app/modelHealth.ts";
 import type { PlanProgress } from "../app/planProgress.ts";
@@ -30,6 +33,8 @@ import type {
   BudgetCard,
   ClarifyCard,
   ConflictCard,
+  ContractCard,
+  ContractSideView,
   EffectCard,
   FeedItem,
   LoopCard,
@@ -364,6 +369,13 @@ ${card.proposal ? html`<p class="ok">${t("Jarvis proposes a rule — accept it o
 <div class="actions">${resume}<a class="${primary}" href="${runHref(run)}#decision">${card.resolved ? t("Open the run") : t("Decide")}</a></div>
 </article>`;
   }
+  if (card.kind === "contract")
+    return html`<article class="panel card">
+<div class="row"><span class="pill wait">⏸ ${t("contract change")}${card.request ? html` · <code>${card.request.item}</code>` : ""}</span>${meta}</div>
+<h3>${firstLine(run.task)}</h3>
+<p>${t("The subtask asks its master to change the contract; decide on the master's page")}</p>
+<div class="actions"><a class="btn primary" href="/runs/${shortRunId(card.master.id)}#contract-requests">${t("Open the master")}</a></div>
+</article>`;
   return html`<article class="panel card">
 <div class="row"><span class="pill wait">⏸ ${card.what}</span>${meta}</div>
 <h3>${firstLine(run.task)}</h3>
@@ -1503,8 +1515,9 @@ ${page.untrusted ? untrustedHtml(page.untrusted) : html`<div data-live="untruste
 </section>
 <div class="mainc">
 ${review ?? ""}
-${card ? (card.kind === "loop" ? loopCardHtml(card, page, actions) : card.kind === "approval" ? approvalCardHtml(card, page, actions) : card.kind === "budget" ? budgetCardHtml(card, page, actions) : card.kind === "clarify" ? clarifyCardHtml(card, page, actions) : card.kind === "scope" ? scopeCardHtml(card, page, actions) : card.kind === "effect" ? effectCardHtml(card, page, actions) : card.kind === "conflict" ? conflictCardHtml(card, page, actions) : otherCardHtml(card.what, page)) : page.wait ? waitHtml(page, page.wait, now, actions) : page.next || page.continuedBy ? continuationHtml(page, actions) : page.restart && page.resumable !== "retry" ? restartHtml(page, page.restart, actions) : page.evalReady || page.evalCase ? evalHtml(page, actions) : nowHtml(page, now, actions)}
+${card ? (card.kind === "loop" ? loopCardHtml(card, page, actions) : card.kind === "approval" ? approvalCardHtml(card, page, actions) : card.kind === "budget" ? budgetCardHtml(card, page, actions) : card.kind === "clarify" ? clarifyCardHtml(card, page, actions) : card.kind === "scope" ? scopeCardHtml(card, page, actions) : card.kind === "effect" ? effectCardHtml(card, page, actions) : card.kind === "conflict" ? conflictCardHtml(card, page, actions) : card.kind === "contract" ? contractWaitHtml(card) : otherCardHtml(card.what, page)) : page.wait ? waitHtml(page, page.wait, now, actions) : page.next || page.continuedBy ? continuationHtml(page, actions) : page.restart && page.resumable !== "retry" ? restartHtml(page, page.restart, actions) : page.evalReady || page.evalCase ? evalHtml(page, actions) : nowHtml(page, now, actions)}
 ${page.redo && actions?.canLaunch ? redoHtml(page, page.redo, actions) : ""}
+${page.contractRequests ? contractRequestsHtml(page, page.contractRequests, actions) : ""}
 ${page.subtasks ? subtasksHtml(page, actions) : ""}
 ${page.contractCheck ? contractCheckHtml(page.contractCheck) : ""}
 ${feedHtml(page.feed)}
@@ -1626,6 +1639,7 @@ function subtasksHtml(page: RunPage, actions?: Actions): Html {
   };
   return html`<section class="panel" aria-labelledby="subtasks" data-live="subtasks">
 <h2 id="subtasks">Subtasks <span class="meta">${done} of ${views.length} done</span></h2>
+${page.masterBudget ? masterBudgetHtml(page.masterBudget) : ""}
 <ul style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:8px">${views.map(
     (
       v,
@@ -1640,16 +1654,119 @@ ${v.state === "blocked" ? html`<p class="hint sub-pub">Starts when ${(v.waitsFor
 </section>`;
 }
 
-/** The contract checked in the subtasks' checkouts: each side's status. */
+/** The master's budget: what its subtasks spent of the sum of their caps, its own steps apart. */
+function masterBudgetHtml(b: MasterBudget): Html {
+  const dims = (["outputTokens", "inputTokens", "requests"] as const).filter(
+    (d) => b.limit[d] !== undefined || b.spent[d] > 0,
+  );
+  const part = (d: (typeof dims)[number]) => {
+    const cap = b.limit[d];
+    const unit = unitOf(d);
+    return cap === undefined
+      ? t("{used} {unit}", { used: amount(b.spent[d]), unit })
+      : t("{used} of {cap} {unit}", { used: amount(b.spent[d]), cap: amount(cap), unit });
+  };
+  const own = b.own.outputTokens + b.own.inputTokens > 0 || b.own.requests > 0;
+  return html`<p class="hint sub-budget">${t("Budget, the sum of the subtasks':")} ${dims.length > 0 ? dims.map(part).join(" · ") : t("nothing spent yet")}${Object.keys(b.limit).length === 0 ? ` — ${t("no cap: budget.perRun is not set")}` : ""}${own ? html` · <span class="meta">${t("the master's own steps: {n} output tokens", { n: amount(b.own.outputTokens) })}</span>` : ""}</p>
+${b.exhausted ? html`<div class="banner bad">${t("The master's budget is spent ({used} of {cap} {unit}): a subtask makes no more model calls — it stops on a budget stop, where more for it grows the sum", { used: amount(b.exhausted.used), cap: amount(b.exhausted.cap), unit: unitOf(b.exhausted.dimension) })}</div>` : ""}`;
+}
+
+/** The contract changes the subtasks ask for (ADR-0025 §6): accept into a new split, or keep it as agreed. */
+function contractRequestsHtml(
+  page: RunPage,
+  requests: readonly ContractChangeRequest[],
+  actions?: Actions,
+): Html {
+  const r = page.run;
+  const agreed = (id: string) => page.contractItems?.find((c) => c.id === id);
+  const decide = (q: ContractChangeRequest) =>
+    actions
+      ? html`<div class="row" style="flex-wrap:wrap;gap:12px;align-items:flex-end">${form(
+          actions,
+          `/runs/${encodeURIComponent(shortRunId(r.id))}/contract`,
+          html`<input type="hidden" name="request" value="${q.id}"><input type="hidden" name="choice" value="accept"><label class="hint" for="cc-${q.key}">${t("The contract as it will be")}</label><textarea id="cc-${q.key}" name="change" rows="2" style="width:100%">${q.change}</textarea><button type="submit" class="btn primary">${t("Accept: a new version of the split")}</button>`,
+          html` style="flex:1 1 320px;display:flex;flex-direction:column;gap:6px"`,
+        )}${form(
+          actions,
+          `/runs/${encodeURIComponent(shortRunId(r.id))}/contract`,
+          html`<input type="hidden" name="request" value="${q.id}"><input type="hidden" name="choice" value="reject"><label class="hint" for="cr-${q.key}">${t("Why it stays (for the subtask)")}</label><input id="cr-${q.key}" name="why" type="text"><button type="submit" class="btn">${t("Reject: keep it as agreed")}</button>`,
+          html` style="flex:1 1 240px;display:flex;flex-direction:column;gap:6px"`,
+        )}</div>`
+      : html`<p class="hint">${t("Decide in the terminal:")} <code>jarvis subtask contract ${shortRunId(r.id)} ${q.key} --accept</code> · <code>--reject</code></p>`;
+  return html`<section class="panel decision" aria-labelledby="contract-requests" data-live="contract-requests">
+<span class="warn" style="font-size:13px;font-weight:500">${t("Waits for you")}</span>
+<h2 id="contract-requests">${t("A subtask asks to change the contract")}</h2>
+<p class="hint">${t("Only the master changes the contract. Accepted: the split gets a new version, the other subtasks it touches get it as a note, the asking one analyses its impact again. Rejected: it goes on with the contract as agreed.")}</p>
+${requests.map((q) => {
+  const was = agreed(q.item);
+  return html`<div class="panel" style="display:flex;flex-direction:column;gap:6px">
+<div class="row" style="flex-wrap:wrap;gap:6px 12px"><span class="meta">${q.key}</span><a href="/runs/${shortRunId(q.run)}" style="font-weight:600">${q.service}</a><span class="pill plain">${q.kind ?? was?.kind ?? "contract"}</span><code>${q.item}</code></div>
+${was ? html`<p class="muted">${t("Agreed: {change}", { change: was.change })}</p>` : html`<p class="muted">${t("Not in the contract yet: accepting adds it")}</p>`}
+<p><b>${t("Asks for: {change}", { change: q.change })}</b></p>
+${q.why ? html`<p class="hint">${t("Why: {why}", { why: q.why })}</p>` : ""}
+${decide(q)}
+</div>`;
+})}
+</section>`;
+}
+
+/** A subtask parked on its contract change request: the decision is the master's. */
+function contractWaitHtml(card: ContractCard): Html {
+  const q = card.request;
+  const master = shortRunId(card.master.id);
+  return html`<section class="panel decision" aria-labelledby="decision" data-live="card">
+<span class="warn" style="font-size:13px;font-weight:500">${t("Waits for the master")}</span>
+<h2 id="decision">${t("This subtask asks to change the contract")}</h2>
+${q ? html`<p><code>${q.item}</code> — ${q.change}</p>${q.why ? html`<p class="hint">${t("Why: {why}", { why: q.why })}</p>` : ""}` : ""}
+<p class="hint">${t("Only the master changes the contract: a person accepts or rejects it on the master's page, then this run goes on.")}</p>
+<div class="actions"><a class="btn primary" href="/runs/${master}#contract-requests">${t("Open the master")}</a>${q ? html`<span class="hint"><code>jarvis subtask contract ${master} ${q.key} --accept | --reject</code></span>` : ""}</div>
+</section>`;
+}
+
+const sideTone = (status: string) =>
+  status === "ok" ? "ok" : status === "missing" || status === "mismatch" ? "bad" : "plain";
+const sideMark = (status: string) =>
+  status === "ok" ? "✓" : status === "missing" ? "✗" : status === "mismatch" ? "≠" : "○";
+
+/** The fields of a DTO between two sides: per field, what changed and whether it holds. */
+function dtoCheckHtml(c: DtoCheck): Html {
+  const role =
+    c.role === "payload"
+      ? t("payload")
+      : c.role === "request"
+        ? t("request body")
+        : c.role === "response"
+          ? t("response")
+          : t("DTO");
+  const head = html`<span class="meta">${role} · <code>${c.dto}</code> · ${c.writer} → ${c.reader}</span>`;
+  if (!c.fields)
+    return html`<div class="dto">${head} <span class="muted">${t("fields not checked: the type is not seen on both sides")}</span>${c.note ? html` <span class="meta" title="${c.note}">ⓘ</span>` : ""}</div>`;
+  const change = (x: string) =>
+    x === "same"
+      ? t("same")
+      : x === "added"
+        ? t("added")
+        : x === "removed"
+          ? t("removed")
+          : x === "renamed"
+            ? t("renamed")
+            : t("type changed");
+  return html`<div class="dto">${head}
+<div class="scroll"><table><thead><tr><th scope="col">${t("Field")}</th><th scope="col">${t("Change")}</th><th scope="col">${t("Writes: {service}", { service: c.writer })}</th><th scope="col">${t("Reads: {service}", { service: c.reader })}</th><th scope="col">${t("Holds")}</th></tr></thead><tbody>
+${c.fields.map((f) => html`<tr><td><code>${f.field}</code></td><td>${change(f.change)}</td><td class="muted">${f.writer ?? "—"}</td><td class="muted">${f.reader ?? "—"}</td><td><span class="pill ${f.status === "ok" ? "ok" : "bad"}">${f.status === "ok" ? `✓ ${t("ok")}` : `≠ ${t("mismatch")}`}</span></td></tr>`)}
+</tbody></table></div></div>`;
+}
+
+/** The contract checked in the subtasks' checkouts: each side's status, the DTOs field by field. */
 function contractCheckHtml(check: NonNullable<RunPage["contractCheck"]>): Html {
-  const side = (x: { service: string; status: string; at?: string; note?: string }) =>
-    html`<span class="pill ${x.status === "ok" ? "ok" : x.status === "missing" ? "bad" : "plain"}" title="${x.note ?? x.at ?? ""}">${x.status === "ok" ? "✓" : x.status === "missing" ? "✗" : "○"} ${x.service}</span>`;
+  const side = (x: ContractSideView) =>
+    html`<span class="pill ${sideTone(x.status)}" title="${x.note ?? x.at ?? ""}">${sideMark(x.status)} ${x.service}</span>`;
   return html`<section class="panel" aria-labelledby="contract" data-live="contract">
-<h2 id="contract">Contract <span class="pill ${check.ok ? "ok" : "bad"}">${check.ok ? "every side holds" : "a side does not hold"}</span></h2>
-<p class="hint">Checked in each subtask's checkout without a model: the producer sends or serves it, the consumers read or call it.</p>
+<h2 id="contract">${t("Contract")} <span class="pill ${check.ok ? "ok" : "bad"}">${check.ok ? t("every side holds") : t("a side does not hold")}</span></h2>
+<p class="hint">${t("Checked in each subtask's checkout without a model: the producer sends or serves it, the consumers read or call it, with the same fields where the type is declared.")}</p>
 <ul style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:8px">${check.items.map(
     (i) =>
-      html`<li class="row" style="flex-wrap:wrap;gap:6px 12px"><span class="pill plain">${i.kind}</span><code>${i.id}</code><span class="muted" style="flex:1 1 220px">${i.change}</span>${side(i.producerSide)}${i.consumerSides.map(side)}</li>`,
+      html`<li style="display:flex;flex-direction:column;gap:6px"><div class="row" style="flex-wrap:wrap;gap:6px 12px"><span class="pill plain">${i.kind}</span><code>${i.id}</code><span class="muted" style="flex:1 1 220px">${i.change}</span>${side(i.producerSide)}${i.consumerSides.map(side)}</div>${[i.producerSide, ...i.consumerSides].flatMap((s) => (s.fields ?? []).map(dtoCheckHtml))}</li>`,
   )}</ul>
 </section>`;
 }

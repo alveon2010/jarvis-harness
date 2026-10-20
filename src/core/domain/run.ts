@@ -110,6 +110,8 @@ export const WaitingForSchema = z.strictObject({
     "children",
     // an sdd whose impact reaches other services: on as a task across services, or only here (§7)
     "scope",
+    // a subtask asks its master to change the contract; a person decides on the master (§6)
+    "contract",
   ]),
   interactionId: z.string().min(1).optional(),
   detail: z.string().optional(),
