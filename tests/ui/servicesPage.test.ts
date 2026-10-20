@@ -164,7 +164,7 @@ describe("New task in a knowledge repository", () => {
     expect(runs).toMatch(
       /title="In one service only — pick it in Where"><input[^>]*value="fix"[^>]* disabled>/,
     );
-    expect(runs).toContain("data-go>Research across services</button>");
+    expect(runs).toContain("data-go>Run</button>");
   });
 
   it("Fix is refused there; Implement there is the task across services", async () => {

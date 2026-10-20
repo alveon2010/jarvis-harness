@@ -53,7 +53,7 @@ describe("New task", () => {
     );
     expect(one).toContain('<summary class="pick" title="Where it runs" aria-label="Where it runs">');
     expect(one).toContain("~/code/orders-api");
-    expect(one).toContain("data-go>Research in orders-api</button>");
+    expect(one).toContain("data-go>Run</button>");
     expect(one).toContain("<b>Research</b> — find out what the task touches");
     expect(one).not.toContain(" disabled>");
     const alone = String(

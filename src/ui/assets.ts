@@ -868,7 +868,6 @@ export const SCRIPT = `
   if (newForm) {
     const startFrom = newForm.querySelector('[data-from]');
     const where = newForm.querySelector('[data-where]');
-    const goBtn = newForm.querySelector('[data-go]');
     const whatLine = newForm.querySelector('[data-said]');
     const taskField = newForm.elements.namedItem('task');
     const LAST = 'jarvis.newtask.repo';
@@ -893,8 +892,7 @@ export const SCRIPT = `
         if (h) h.checked = true;
       }
       if (!h) return;
-      const acrossHere = across && h.dataset.acrossGo;
-      goBtn.textContent = acrossHere ? h.dataset.acrossGo : h.dataset.oneGo.replace('{place}', name || newForm.dataset.here);
+      const acrossHere = across && h.dataset.acrossWhat;
       const b = document.createElement('b');
       b.textContent = h.dataset.label;
       const key = keyOf(taskField.value || '');

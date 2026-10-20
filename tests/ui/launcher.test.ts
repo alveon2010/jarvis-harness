@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { request } from "node:http";
 import { hostname } from "node:os";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { taskKindOf } from "../../src/agents/knowledge.ts";
 import { createEngine } from "../../src/app/engine.ts";
@@ -250,7 +250,7 @@ describe("New task on the page", () => {
     expect(runs).toContain('<input type="radio" name="workflow" value="research" data-label="Research"');
     expect(runs).toMatch(/value="research"[^>]* checked><span>Research<\/span>/);
     expect(runs).toMatch(/value="fix"[^>]* data-one-only><span>Bugfix<\/span>/);
-    expect(runs).toContain(`data-go>Research in ${basename(sb.project)}</button>`);
+    expect(runs).toContain("data-go>Run</button>");
     expect((await post("/runs/new", { task: "x", workflow: "fix" })).status).toBe(403); // no token
     const token = ui.token;
     expect((await post("/runs/new", { t: token, task: " ", workflow: "fix" })).location).toContain(

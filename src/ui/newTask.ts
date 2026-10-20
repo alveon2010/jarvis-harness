@@ -42,9 +42,9 @@ interface HowFarDef {
   readonly id: HowFar;
   readonly label: string;
   /** In one service or repository: the button (`{place}` is the place's name), and what it does. */
-  readonly one: { readonly go: string; readonly what: string };
+  readonly one: { readonly what: string };
   /** Across services; none when it runs in one service only. */
-  readonly across?: { readonly go: string; readonly what: string };
+  readonly across?: { readonly what: string };
 }
 
 /**
@@ -56,43 +56,37 @@ export const HOW_FAR: readonly HowFarDef[] = [
     id: "research",
     label: "Research",
     one: {
-      go: "Research in {place}",
       what: "find out what the task touches and what is unknown; nothing changes",
     },
     across: {
-      go: "Research across services",
       what: "which services the task touches and what each needs; nothing changes",
     },
   },
   {
     id: "spec",
     label: "Specification",
-    one: { go: "Write the spec in {place}", what: "up to an approved spec; implement later" },
-    across: { go: "Spec across services", what: "one spec for all the services, approved; split later" },
+    one: { what: "up to an approved spec; implement later" },
+    across: { what: "one spec for all the services, approved; split later" },
   },
   {
     id: "sdd",
     label: "Implementation",
     one: {
-      go: "Implement in {place}",
       what: "requirements, a spec to approve, impact, plan, code, checks, review",
     },
     across: {
-      go: "Implement across services",
       what: "one spec, a subtask per service, the contract between them, delivery in order",
     },
   },
   {
     id: "fix",
     label: "Bugfix",
-    one: { go: "Fix in {place}", what: "research, a spec to approve, the fix, checks, review" },
+    one: { what: "research, a spec to approve, the fix, checks, review" },
   },
 ];
 
 export const ONE_SERVICE_ONLY = "In one service only — pick it in Where";
 // t("Research") t("Specification") t("Implementation") t("Bugfix") t("All services") t("In one service only — pick it in Where")
-// t("Research in {place}") t("Fix in {place}") t("Implement in {place}") t("Write the spec in {place}")
-// t("Research across services") t("Implement across services") t("Spec across services")
 // t("find out what the task touches and what is unknown; nothing changes") t("which services the task touches and what each needs; nothing changes")
 // t("research, a spec to approve, the fix, checks, review") t("requirements, a spec to approve, impact, plan, code, checks, review")
 // t("one spec, a subtask per service, the contract between them, delivery in order") t("up to an approved spec; implement later")
@@ -150,10 +144,6 @@ export function placesOf(input: {
 const home = (path: string, dir: string) =>
   dir && path.startsWith(`${dir}/`) ? `~${path.slice(dir.length)}` : path;
 
-const goOf = (h: HowFarDef, place: StartPlace | undefined) =>
-  place?.across && h.across
-    ? t(h.across.go)
-    : t(h.one.go, { place: place?.name ? placeName(place) : t("this repository") });
 const whatOf = (h: HowFarDef, place: StartPlace | undefined) =>
   place?.across && h.across
     ? html`<b>${t(h.label)}</b> ${t("across services")} — ${t(h.across.what)}.`
@@ -202,7 +192,7 @@ ${groups.map(([title, ps]) => html`<div class="grp">${title}</div>${ps.map(optio
 function howFarHtml(chosen: StartPlace | undefined, on: HowFar): Html {
   return html`<div class="seg" role="radiogroup" aria-label="${t("How far")}">${HOW_FAR.map((h) => {
     const off = chosen?.across === true && !h.across;
-    return html`<label${off ? html` title="${t(ONE_SERVICE_ONLY)}"` : ""}><input type="radio" name="workflow" value="${h.id}" data-label="${t(h.label)}" data-one-go="${t(h.one.go)}" data-what="${t(h.one.what)}"${h.across ? html` data-across-go="${t(h.across.go)}" data-across-what="${t(h.across.what)}"` : " data-one-only"}${h.id === on ? " checked" : ""}${off ? " disabled" : ""}><span>${t(h.label)}</span></label>`;
+    return html`<label${off ? html` title="${t(ONE_SERVICE_ONLY)}"` : ""}><input type="radio" name="workflow" value="${h.id}" data-label="${t(h.label)}" data-what="${t(h.one.what)}"${h.across ? html` data-across-what="${t(h.across.what)}"` : " data-one-only"}${h.id === on ? " checked" : ""}${off ? " disabled" : ""}><span>${t(h.label)}</span></label>`;
   })}</div>`;
 }
 
@@ -226,7 +216,7 @@ export function newTaskHtml(start: StartForm, actions: Actions): Html {
 <h2 id="new-title">${t("New task")}</h2>
 <div class="composer">
 <textarea name="task" rows="3" required maxlength="4000" aria-label="${t("What to do")}" placeholder="${t("ABC-123 — or in words: what to find out, the bug, the change")}"></textarea>
-<div class="cbar">${whereHtml(start.places, chosen, start.homeDir)}${howFarHtml(chosen, on)}<span class="grow"></span><button type="submit" class="btn primary" data-go>${goOf(h, chosen)}</button></div>
+<div class="cbar">${whereHtml(start.places, chosen, start.homeDir)}${howFarHtml(chosen, on)}<span class="grow"></span><button type="submit" class="btn primary" data-go>${t("Run")}</button></div>
 </div>
 <p class="what" data-said aria-live="polite">${whatOf(h, chosen)}</p>
 ${kindLineHtml()}

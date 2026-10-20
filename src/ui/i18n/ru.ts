@@ -449,19 +449,13 @@ export const RU: Readonly<Record<string, string>> = {
   "Where it runs": "Где запускать",
   "Find a service or repository": "Найти сервис или репозиторий",
   "Nothing found": "Ничего не нашлось",
+  Run: "Запустить",
   // the four of New task keep their English names (the team says them so)
   Research: "Research",
   Specification: "Specification",
   Implementation: "Implementation",
   Bugfix: "Bugfix",
   "All services": "Все сервисы",
-  "Research in {place}": "Исследовать в {place}",
-  "Fix in {place}": "Исправить в {place}",
-  "Implement in {place}": "Реализовать в {place}",
-  "Write the spec in {place}": "Написать спеку в {place}",
-  "Research across services": "Исследовать по всем сервисам",
-  "Implement across services": "Реализовать во всех сервисах",
-  "Spec across services": "Спека на все сервисы",
   "find out what the task touches and what is unknown; nothing changes":
     "разобраться, что задевает задача и что неизвестно; ничего не меняется",
   "which services the task touches and what each needs; nothing changes":
