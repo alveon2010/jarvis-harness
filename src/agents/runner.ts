@@ -11,6 +11,8 @@ import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import { frameNamesOf, humanizeNodeIds } from "../design/frames.ts";
 import { NOTE_DELIVERED, notesOf, notesText } from "../interaction/notes.ts";
 import { questionsOf } from "../interaction/questions.ts";
+import { loadSkills } from "../knowledge/skills.ts";
+import { knowledgeRootsOf } from "../knowledge/sources.ts";
 import { ModelError } from "../models/errors.ts";
 import { resolveModel } from "../models/router.ts";
 import {
@@ -92,6 +94,8 @@ interface AgentResultDoc {
     rationale: string;
     evidence?: string[];
     proposal?: string;
+    /** skill-improvement: the skill it improves. */
+    skill?: string;
   }>;
 }
 
@@ -137,7 +141,23 @@ function storeCandidates(
   doc: AgentResultDoc,
   from: ArtifactVersion,
 ): void {
+  // a skill improvement must name a skill there is: it becomes an edit of that skill (src/app/candidates.ts)
+  const skills = new Set(loadSkills(knowledgeRootsOf(rt.loaded, ctx.workspace.ref.path)).map((s) => s.id));
   for (const [i, c] of (doc.candidates ?? []).entries()) {
+    if (c.kind === "skill-improvement" && (!c.skill || !skills.has(c.skill))) {
+      rt.events.emit({
+        kind: "candidate.dropped",
+        runId: ctx.run.id,
+        stepId: ctx.step.id,
+        iteration: ctx.iteration,
+        payload: {
+          agent: agentId,
+          title: c.title,
+          why: c.skill ? `no skill "${c.skill}"` : "a skill improvement names no skill",
+        },
+      });
+      continue;
+    }
     rt.artifacts.put({
       runId: ctx.run.id,
       type: "candidate",

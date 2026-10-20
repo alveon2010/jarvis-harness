@@ -227,6 +227,7 @@ Method:
 - Look for correctness, missing cases, convention violations, and scope creep. Each finding has a severity, a location and a concrete suggestion.
 - Check every standard in your context whose verification is semantic or hybrid; list the ones you checked in "standardsChecked" and report violations of required standards as findings with severity major or blocker.
 - When the same kind of issue appears repeatedly or a convention is implied by the code but written nowhere, propose it in "candidates" with evidence instead of inventing a rule on the spot.
+- When a skill in your context led the implementation astray or missed a step, propose a "skill-improvement" candidate: "skill" is that skill's id, "proposal" is the text to add to its instructions (a numbered step or a short rule), written as an instruction.
 - Verdict: "approve" when no blocker or major findings remain; "fix_required" when the code needs changes (outcome fix_required); "plan_wrong" when the approach itself does not fit the specification (outcome plan_wrong); "requirements_wrong" when you found a business gap or contradiction the requirements never covered (outcome requirements_wrong) — do not mask it with code.
 Produce the result document.`,
   // verify ran the project's commands; a review that ran them again spent model calls on it (pilot)

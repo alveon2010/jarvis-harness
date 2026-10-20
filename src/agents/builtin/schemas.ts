@@ -251,6 +251,12 @@ const Candidate = z.object({
   evidence: z.array(Source).default([]),
   proposal: z.string().optional().describe("the rule or text as it should be written"),
   paths: z.array(z.string()).optional().describe("globs the text applies to (front matter `paths`)"),
+  skill: z
+    .string()
+    .optional()
+    .describe(
+      'kind "skill-improvement" only, and required there: the id of the skill it improves, as in your context (skill:<id>@v)',
+    ),
 });
 
 export const ReviewResult = z.object({

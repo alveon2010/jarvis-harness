@@ -1,10 +1,12 @@
 import {
   type Candidate,
+  CandidateNotPromotable,
   CandidateTargetTaken,
   candidatesOf,
   documentOf,
   promoteCandidate,
   rejectCandidate,
+  skillEditOf,
   targetOf,
 } from "../../app/candidates.ts";
 import { createRuntime } from "../../app/runtime.ts";
@@ -127,6 +129,17 @@ export async function runCandidatesShow(ctx: CliContext, ref: string): Promise<v
   const runtime = createRuntime(loaded, { env: ctx.env });
   try {
     const c = find(ctx, candidatesOf(runtime), ref);
+    const root = loaded.project?.root ?? ctx.cwd;
+    // a skill improvement is an edit of its skill: what the instructions get, from which version to which
+    const skillEdit = (() => {
+      if (c.doc.kind !== "skill-improvement") return undefined;
+      try {
+        return skillEditOf(root, c.doc);
+      } catch (error) {
+        if (error instanceof CandidateNotPromotable) return error;
+        throw error;
+      }
+    })();
     ctx.out.result(
       {
         name: c.name,
@@ -139,6 +152,18 @@ export async function runCandidatesShow(ctx: CliContext, ref: string): Promise<v
         files: c.files,
         target: targetOf(loaded.project?.root ?? ctx.cwd, c, undefined),
         proposal: documentOf(c.doc),
+        ...(skillEdit instanceof CandidateNotPromotable
+          ? { cannotPromote: skillEdit.message }
+          : skillEdit
+            ? {
+                skill: {
+                  id: skillEdit.skill,
+                  from: skillEdit.version.from,
+                  to: skillEdit.version.to,
+                  fromBuiltin: skillEdit.fromBuiltin,
+                },
+              }
+            : {}),
       },
       () => {
         const st = ctx.out.style;
@@ -149,9 +174,12 @@ export async function runCandidatesShow(ctx: CliContext, ref: string): Promise<v
           : "open";
         ctx.out.line(`${st.name(c.name)}  ${st.muted(`${c.doc.kind} ·`)} ${state}`);
         ctx.out.line(st.muted(c.doc.rationale));
-        ctx.out.line(
-          `${st.muted("promote writes")} ${targetOf(loaded.project?.root ?? ctx.cwd, c, undefined)}`,
-        );
+        if (skillEdit instanceof CandidateNotPromotable) ctx.out.line(st.bad(skillEdit.message));
+        else if (skillEdit)
+          ctx.out.line(
+            `${st.muted("promote edits")} skill ${st.name(skillEdit.skill)} v${skillEdit.version.from} → v${skillEdit.version.to}: ${skillEdit.instructions}${skillEdit.fromBuiltin ? st.muted(" (a project copy of the built-in, which then overrides it)") : ""}`,
+          );
+        else ctx.out.line(`${st.muted("promote writes")} ${targetOf(root, c, undefined)}`);
         if (c.review.length > 0) {
           ctx.out.line();
           ctx.out.line(
@@ -163,7 +191,12 @@ export async function runCandidatesShow(ctx: CliContext, ref: string): Promise<v
         }
         ctx.out.line();
         ctx.out.line(st.muted("─".repeat(60)));
-        ctx.out.raw(renderMarkdown(documentOf(c.doc).trimEnd(), st));
+        if (skillEdit && !(skillEdit instanceof CandidateNotPromotable)) {
+          // the end of the instructions as they are, then what is added
+          for (const l of skillEdit.before.trimEnd().split("\n").slice(-4)) ctx.out.line(st.muted(`  ${l}`));
+          for (const l of skillEdit.after.slice(skillEdit.before.trimEnd().length).trim().split("\n"))
+            ctx.out.line(st.ok(`+ ${l}`));
+        } else ctx.out.raw(renderMarkdown(documentOf(c.doc).trimEnd(), st));
         ctx.out.line(st.muted("─".repeat(60)));
         ctx.out.line(`${st.muted("accept ")} ${st.cmd(`jarvis candidates promote ${c.name}`)}`);
         ctx.out.line(`${st.muted("decline")} ${st.cmd(`jarvis candidates reject ${c.name}`)}`);
@@ -205,6 +238,10 @@ export async function runCandidatesPromote(
         channel: "cli",
       });
     } catch (error) {
+      if (error instanceof CandidateNotPromotable) {
+        ctx.out.error(error.message);
+        throw new CliExit(EXIT.error);
+      }
       if (!(error instanceof CandidateTargetTaken)) throw error;
       ctx.out.error(
         `${error.file} already exists and was written by a person; --replace replaces it, --id <id> writes another file`,
@@ -222,6 +259,12 @@ export async function runCandidatesPromote(
       () => {
         const st = ctx.out.style;
         ctx.out.line(`${st.ok("✓")} promoted ${st.name(found.name)} ${st.muted("→")} ${file}`);
+        if (promoted.skill)
+          ctx.out.line(
+            st.muted(
+              `  skill ${promoted.skill.id} v${promoted.skill.from} → v${promoted.skill.to}${promoted.skill.fromBuiltin ? " — a project copy of the built-in, which it overrides from now on" : ""}; agents get it from the next run`,
+            ),
+          );
         if (promoted.replaced)
           ctx.out.line(
             st.muted(

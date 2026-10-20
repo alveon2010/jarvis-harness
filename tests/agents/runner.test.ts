@@ -287,6 +287,53 @@ describe("AgentRuntimeRunner", () => {
     expect(finish).toMatchObject({ status: "success", modelCalls: 2, finalizedFromLoop: false });
   });
 
+  it("keeps a review's skill improvement only when it names a skill there is", async () => {
+    rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
+    const improvement = (skill?: string) => ({
+      kind: "skill-improvement",
+      title: `improve ${skill ?? "nothing"}`,
+      rationale: "missed a step twice",
+      proposal: "5. Run the whole suite.",
+      ...(skill ? { skill } : {}),
+    });
+    server.respond(() =>
+      completion(
+        JSON.stringify({
+          summary: "Fine.",
+          findings: [],
+          verdict: "approve",
+          outcome: "ok",
+          candidates: [improvement("unit-testing"), improvement(), improvement("no-such-skill")],
+        }),
+      ),
+    );
+    const reviewOnly = workflowOf({
+      name: "rv",
+      entry: "review",
+      steps: [
+        {
+          id: "review",
+          kind: "agentic",
+          agent: "review",
+          outputs: ["review"],
+          transitions: { onSuccess: "DONE" },
+        },
+      ],
+    });
+    const run = createRun(rt, "rv");
+    expect((await engineWith(rt, reviewOnly).execute(run.id, { owner: "cli:t" })).run.state).toBe(
+      "COMPLETED",
+    );
+    const store = rt.artifacts;
+    const kept = store.listLatest(run.id, "candidate").map((a) => JSON.parse(store.text(a)).skill);
+    expect(kept).toEqual(["unit-testing"]);
+    const dropped = rt.events
+      .list({ runId: run.id })
+      .filter((e) => e.kind === "candidate.dropped")
+      .map((e) => (e.payload as { why: string }).why);
+    expect(dropped).toEqual(["a skill improvement names no skill", 'no skill "no-such-skill"']);
+  });
+
   it("sizes the knowledge layer from the window capped by context.maxContext (pilot)", async () => {
     sb.write(
       "home/.jarvis/config.yaml",

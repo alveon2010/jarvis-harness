@@ -272,7 +272,12 @@ flowchart LR
 `onboard --module` (карта модуля). Они хранятся артефактами `candidate` и ждут человека. Виды:
 - `standard` — пишется как `severity: recommended`, `verification: semantic`;
 - `knowledge` — документ в `.jarvis/knowledge/`;
-- `skill-improvement` — `.jarvis/skills/<id>/IMPROVEMENT.md`.
+- `skill-improvement` — правка навыка: кандидат обязан назвать навык (`skill: <id>`), иначе он не создаётся
+  (событие `candidate.dropped`). Принятие дописывает предложение в конец `instructions.md` этого навыка и поднимает
+  `version` в `skill.yaml` — агенты получают новую версию со следующего прогона, в provenance видно `skill:id@v`.
+  Встроенный навык сначала копируется в `.jarvis/skills/<id>/` и дальше его заменяет. Навык из документации
+  команды или `~/.jarvis/skills` так не правится — его меняют там, где он лежит. `jarvis candidates show` показывает
+  конец инструкции и добавляемые строки.
 
 Команды: `jarvis candidates list|show`, `promote <имя> [--id file-id] [--replace]`, `reject <имя>`. Файл,
 сгенерированный Jarvis (с маркером), заменяется без вопросов; написанный человеком — только с `--replace`. То же

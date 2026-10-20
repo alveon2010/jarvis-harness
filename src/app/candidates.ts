@@ -1,10 +1,11 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
-import { stringify } from "yaml";
+import { parse, parseDocument, stringify } from "yaml";
 import type { Actor } from "../core/domain/actor.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import type { Run } from "../core/domain/run.ts";
 import { layoutOf } from "../core/paths.ts";
+import { BUILTIN_SKILLS, type Skill } from "../knowledge/skills.ts";
 import { MODULE_MARKER, markSweeping, ONBOARD_MARKER } from "../onboarding/render.ts";
 import type { Dropped } from "../onboarding/verify.ts";
 import { shortRunId } from "../storage/runStore.ts";
@@ -35,6 +36,8 @@ export interface CandidateDoc {
   dropped?: Dropped[];
   /** What the person who asked said matters (onboard --note, the page's "What matters"). */
   note?: string;
+  /** skill-improvement: the id of the skill it improves. */
+  skill?: string;
 }
 
 export interface Candidate {
@@ -154,7 +157,86 @@ export function targetOf(root: string, c: Candidate, id: string | undefined): st
   if (c.doc.kind === "standard") return join(layout.jarvisDir, "standards", `${fileId}.md`);
   // a service's knowledge goes to its folder of the knowledge repository (ADR-0025 §1)
   if (c.doc.kind === "knowledge") return join(layout.knowledgeDir, `${fileId}.md`);
-  return join(layout.jarvisDir, "skills", fileId, "IMPROVEMENT.md");
+  // a skill improvement edits that skill's instructions (skillEditOf)
+  return join(layout.jarvisDir, "skills", c.doc.skill ?? fileId, "instructions.md");
+}
+
+/** A candidate that cannot be written where it would go (a skill improvement without its skill). */
+export class CandidateNotPromotable extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CandidateNotPromotable";
+  }
+}
+
+/** What accepting a skill improvement does to the skill: its instructions before and after, its version. */
+export interface SkillEdit {
+  readonly skill: string;
+  readonly dir: string;
+  readonly instructions: string;
+  readonly before: string;
+  readonly after: string;
+  readonly version: { readonly from: number; readonly to: number };
+  /** A built-in skill: written into the project as a copy that overrides it from now on. */
+  readonly fromBuiltin: boolean;
+}
+
+/**
+ * A skill improvement as an edit of the skill (ADR-0020 §6): its proposal goes at the end of the skill's
+ * `instructions.md` and the version goes up, so a run's provenance (`skill:id@v`) tells which text an
+ * agent had. A built-in skill is copied into `.jarvis/skills/<id>/` first; a skill read from the team's
+ * documentation or `~/.jarvis/skills` is not this project's to change. Pilot: the improvement went to
+ * `.jarvis/skills/<title>/IMPROVEMENT.md`, which no agent ever read.
+ */
+export function skillEditOf(root: string, doc: CandidateDoc): SkillEdit {
+  if (!doc.skill)
+    throw new CandidateNotPromotable(
+      "this skill improvement names no skill (proposed before improvements named theirs): reject it; review proposes it again",
+    );
+  const dir = join(layoutOf(root).jarvisDir, "skills", doc.skill);
+  const instructions = join(dir, "instructions.md");
+  const addition = (doc.proposal ?? doc.rationale).trim();
+  const edit = (before: string, from: number, fromBuiltin: boolean): SkillEdit => ({
+    skill: doc.skill as string,
+    dir,
+    instructions,
+    before,
+    after: `${before.trimEnd()}\n\n${addition}\n`,
+    version: { from, to: from + 1 },
+    fromBuiltin,
+  });
+  if (existsSync(join(dir, "skill.yaml"))) {
+    const manifest = parse(readFileSync(join(dir, "skill.yaml"), "utf8")) as { version?: unknown } | null;
+    const from = typeof manifest?.version === "number" ? manifest.version : 1;
+    return edit(existsSync(instructions) ? readFileSync(instructions, "utf8") : "", from, false);
+  }
+  const builtin = BUILTIN_SKILLS.find((s) => s.id === doc.skill);
+  if (builtin) return edit(builtin.instructions, builtin.version, true);
+  throw new CandidateNotPromotable(
+    `skill "${doc.skill}" is not one of this project's skills: change it where it lives (the team's documentation, ~/.jarvis/skills)`,
+  );
+}
+
+/** Writes the edit: the instructions, and the manifest with the new version (a built-in's, copied). */
+function writeSkillEdit(e: SkillEdit): void {
+  mkdirSync(e.dir, { recursive: true });
+  writeFileSync(e.instructions, e.after);
+  const manifestFile = join(e.dir, "skill.yaml");
+  if (e.fromBuiltin) {
+    const {
+      instructions: _i,
+      level: _l,
+      dir: _d,
+      source: _s,
+      ...manifest
+    } = BUILTIN_SKILLS.find((s) => s.id === e.skill) as Skill;
+    writeFileSync(manifestFile, stringify({ ...manifest, version: e.version.to }));
+    return;
+  }
+  // the person's file: only the version changes, comments and order stay
+  const doc = parseDocument(readFileSync(manifestFile, "utf8"));
+  doc.set("version", e.version.to);
+  writeFileSync(manifestFile, doc.toString());
 }
 
 /** A file `promote` may replace without asking: one jarvis wrote and nobody took over (the marker is there). */
@@ -225,6 +307,13 @@ export interface Promoted {
   readonly path: string;
   /** What was there before and got replaced. */
   readonly replaced?: "generated" | "written by a person";
+  /** A skill improvement: the skill edited, its version before and after. */
+  readonly skill?: {
+    readonly id: string;
+    readonly from: number;
+    readonly to: number;
+    readonly fromBuiltin: boolean;
+  };
 }
 
 /**
@@ -234,6 +323,7 @@ export interface Promoted {
  */
 export function promoteCandidate(runtime: Runtime, input: PromoteInput): Promoted {
   const c = input.candidate;
+  if (c.doc.kind === "skill-improvement") return promoteSkillEdit(runtime, input);
   const file = targetOf(input.root, c, input.id);
   const id = file.replace(/^.*[\\/]/, "").replace(/\.md$/, "");
   const before = existingAt(file);
@@ -270,6 +360,33 @@ export function promoteCandidate(runtime: Runtime, input: PromoteInput): Promote
     payload: { artifact: c.artifact.artifactId, file: path, ...(replaced ? { replaced } : {}) },
   });
   return { file, path, ...(replaced ? { replaced } : {}) };
+}
+
+function promoteSkillEdit(runtime: Runtime, input: PromoteInput): Promoted {
+  const c = input.candidate;
+  const e = skillEditOf(input.root, c.doc);
+  writeSkillEdit(e);
+  const path = relative(input.root, e.instructions).split("\\").join("/");
+  const notes = [
+    `skill ${e.skill} v${e.version.from} → v${e.version.to}${e.fromBuiltin ? " (the built-in, now overridden by the project's copy)" : ""}`,
+    input.channel ? `from the ${input.channel === "ui" ? "page" : "terminal"}` : "",
+  ].filter(Boolean);
+  runtime.artifacts.approve({
+    runId: c.artifact.runId,
+    stepId: c.artifact.stepId ?? "candidates",
+    artifactId: c.artifact.artifactId,
+    version: c.artifact.version,
+    actor: input.actor,
+    decision: "approve",
+    comment: notes.join("; "),
+  });
+  runtime.events.emit({
+    kind: "knowledge.promoted",
+    runId: c.artifact.runId,
+    actor: `${input.actor.kind}:${input.actor.id}`,
+    payload: { artifact: c.artifact.artifactId, file: path, skill: e.skill, version: e.version.to },
+  });
+  return { file: e.instructions, path, skill: { id: e.skill, ...e.version, fromBuiltin: e.fromBuiltin } };
 }
 
 export function rejectCandidate(runtime: Runtime, c: Candidate, actor: Actor, comment?: string): void {
