@@ -25,6 +25,7 @@ import { UnresolvedEffectError } from "./effects.ts";
 import { AgenticExecutor, ApprovalExecutor, CompositeExecutor, DeterministicExecutor } from "./executors.ts";
 import { InterruptedError, interruption } from "./interrupt.ts";
 import { HeldLease, type HeldLeaseOptions } from "./lease.ts";
+import { roundCostOf } from "./roundCost.ts";
 import {
   type ExecutionResult,
   LeaseHeldError,
@@ -434,6 +435,9 @@ export class LocalWorkflowEngine {
               maxIterations: max,
               lastOutcome: outcome.outcome,
               reason: outcome.reason,
+              // every round's reasons, not only the last: the next attempt (or the person) sees the
+              // whole story of what went back and why (ADR-0004 §3)
+              rounds: this.roundsOf(run.id, transition.edgeId, outcome),
               ...(stop ? { why: stop.why, round: stop.round, same: stop.same } : {}),
             },
             null,
@@ -471,6 +475,7 @@ export class LocalWorkflowEngine {
         edge: transition.edgeId,
         iteration: count,
         max,
+        ...(outcome.outcome ? { outcome: outcome.outcome } : {}),
         reasons: outcome.reason,
       });
     }
@@ -516,7 +521,58 @@ export class LocalWorkflowEngine {
       ...(headCommit ? { headCommit } : {}),
     });
     this.emit(updated, "step.next", { from: step.id, to: transition.to, iteration: nextIteration });
+    // ADR-0004 §5: a round the pool cannot pay for is not started, to stop halfway
+    if (transition.edgeId) {
+      const short = this.roundUnaffordable(updated, step.id, transition.to);
+      if (short) {
+        const target = this.workflow(run.workflow).steps.find((s) => s.id === transition.to) ?? step;
+        return { run: await this.park(updated, target, nextIteration, short, workspace), stop: true };
+      }
+    }
     return { run: updated, stop: false };
+  }
+
+  /** The reasons of every round of an edge, oldest first, the one ending now last. */
+  private roundsOf(
+    runId: string,
+    edge: string,
+    outcome: StepOutcome,
+  ): Array<{ round: number; outcome?: string; reason?: string }> {
+    const past = this.rt.events
+      .list({ runId, kind: "workflow.loop", limit: 10_000 })
+      .filter((e) => e.payload?.edge === edge)
+      .map((e, i) => ({
+        round: i + 1,
+        ...(typeof e.payload?.outcome === "string" ? { outcome: e.payload.outcome } : {}),
+        ...(typeof e.payload?.reasons === "string" ? { reason: e.payload.reasons } : {}),
+      }));
+    return [
+      ...past,
+      {
+        round: past.length + 1,
+        ...(outcome.outcome ? { outcome: outcome.outcome } : {}),
+        ...(outcome.reason ? { reason: outcome.reason } : {}),
+      },
+    ];
+  }
+
+  /** WAITING_BUDGET when the median past round of the loop does not fit what the pool has left. */
+  private roundUnaffordable(run: Run, from: string, to: string): SuspendRun | undefined {
+    const models = this.rt.loaded.config.models;
+    const cost = roundCostOf(
+      this.rt.events.list({ runId: run.id, limit: 100_000 }),
+      this.workflow(run.workflow),
+      { from, to },
+      (modelId) => models[modelId]?.quotaPool ?? `model:${modelId}`,
+    );
+    if (!cost) return undefined;
+    const decision = this.rt.budget.admit({ pool: cost.pool, estimatedOutputTokens: cost.outputTokens });
+    if (decision.allowed) return undefined;
+    return new SuspendRun(
+      "WAITING_BUDGET",
+      `one more round from ${to} costs about ${cost.outputTokens} output tokens (the median of ${cost.rounds}); pool ${cost.pool} has not that left: ${decision.reason ?? "its window is full"}`,
+      { resumeAfter: decision.resetAt, checkpointState: { roundCost: cost } },
+    );
   }
 
   /* ---- entering and parking ---- */

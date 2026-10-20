@@ -7,7 +7,7 @@ import { formatStepReport } from "../../src/cli/progress.ts";
 import { createStyle } from "../../src/cli/style.ts";
 import { ModelError } from "../../src/models/errors.ts";
 import { interruption } from "../../src/orchestration/interrupt.ts";
-import { LeaseHeldError } from "../../src/orchestration/types.ts";
+import { LeaseHeldError, type StepContext } from "../../src/orchestration/types.ts";
 import { loadWorkflows } from "../../src/workflows/load.ts";
 import { ACTOR, createRun, engineFor, testRuntime, workflowOf, writeArtifact } from "../helpers/engine.ts";
 import { type Sandbox, sandbox } from "../helpers/tmp.ts";
@@ -103,7 +103,95 @@ describe("LocalWorkflowEngine", () => {
     expect(
       rt.artifacts.versions(rt.artifacts.find(run.id, "research", "research.md")?.artifactId as string),
     ).toHaveLength(3);
-    expect(rt.artifacts.listLatest(run.id, "loop-exhausted")).toHaveLength(1);
+    const exhausted = rt.artifacts.listLatest(run.id, "loop-exhausted")[0];
+    expect(exhausted).toBeDefined();
+    // every round's reason, not only the last one (ADR-0004 §3)
+    const doc = JSON.parse(rt.artifacts.text(exhausted as never)) as {
+      rounds: Array<{ round: number; reason: string }>;
+    };
+    expect(doc.rounds.map((r) => `${r.round} ${r.reason}`)).toEqual([
+      "1 unknown module",
+      "2 unknown module",
+      "3 unknown module",
+    ]);
+  });
+
+  it("does not start a round the pool cannot pay for: the median past round against what is left (ADR-0004 §5)", async () => {
+    await rt.close();
+    sb.write(
+      "home/.jarvis/config.yaml",
+      `version: 1
+quotaPools:
+  corp: { window: { minutes: 60 }, limits: { outputTokens: 1000 } }
+models:
+  flash:
+    provider: openai-compatible
+    baseUrl: http://127.0.0.1:1/v1
+    model: flash
+    egress: private
+    quotaPool: corp
+    contextWindow: 32000
+    maxOutput: 2000
+`,
+    );
+    rt = await testRuntime(sb);
+    const wf = workflowOf({
+      name: "loop2",
+      entry: "implementation",
+      steps: [
+        {
+          id: "implementation",
+          kind: "agentic",
+          agent: "implementation",
+          transitions: { onSuccess: "verify" },
+        },
+        {
+          id: "verify",
+          kind: "agentic",
+          agent: "verify",
+          transitions: {
+            onSuccess: "DONE",
+            onOutcome: { defects_found: { to: "implementation", maxIterations: 5 } },
+          },
+        },
+      ],
+    });
+    // each round spends 300 output tokens of the pool's 1000
+    const spend = (ctx: StepContext) => {
+      ctx.runtime.events.emit({
+        kind: "model.call",
+        runId: ctx.run.id,
+        stepId: ctx.step.id,
+        iteration: ctx.iteration,
+        payload: { modelId: "flash", outputTokens: 300 },
+      });
+      ctx.runtime.usage.record({
+        pool: "corp",
+        model: "flash",
+        promptTokens: 10,
+        cachedTokens: 0,
+        outputTokens: 300,
+      });
+    };
+    let rounds = 0;
+    const engine = engineFor(rt, [wf], {
+      implementation: async (ctx) => {
+        rounds += 1;
+        spend(ctx);
+        return { status: "success" };
+      },
+      verify: async () => ({ status: "success", outcome: "defects_found", reason: "a test fails" }),
+    });
+    const run = createRun(rt, "loop2");
+    const result = await engine.execute(run.id, owner);
+    // 300 + 300 + 300 spent: a fourth round of 300 does not fit the 100 left — parked before it starts
+    expect(rounds).toBe(3);
+    expect(result.run.state).toBe("WAITING_BUDGET");
+    expect(result.run.currentStep).toBe("implementation");
+    expect(result.run.stateReason).toContain(
+      "one more round from implementation costs about 300 output tokens",
+    );
+    expect(rt.checkpoints.latest(run.id)?.state.resumeAfter).toBeDefined();
   });
 
   it("deletes scratch files an agent left and says so in the step's line", async () => {
