@@ -1484,6 +1484,23 @@ export const RU: Readonly<Record<string, string>> = {
   "The run waits for {what}": "Прогон ждёт: {what}",
   "Answer in the terminal: {cmd}": "Ответить в терминале: {cmd}",
   "a decision": "решение",
+  // ---- why a run is where it is (src/ui/reasons.ts)
+  "approve {type} ({doc})": "одобрить {type} ({doc})",
+  "clarification needed by {agent}: {thread}": "{agent} нужно уточнение: {thread}",
+  "waits for its subtasks: {done} of {all} done": "ждёт свои сабтаски: готово {done} из {all}",
+  "asks the master to change the contract: {item}": "просит мастер изменить контракт: {item}",
+  "model {model} is unavailable: {why}": "модель {model} недоступна: {why}",
+  "interrupted with Ctrl-C; `jarvis continue` goes on from here":
+    "прерван по Ctrl-C; `jarvis continue` продолжит отсюда",
+  "paused by {who}; Resume (or `jarvis continue`) goes on from here":
+    "на паузе ({who}); «Продолжить» (или `jarvis continue`) пойдёт отсюда",
+  "paused; Resume (or `jarvis continue`) goes on from here":
+    "на паузе; «Продолжить» (или `jarvis continue`) пойдёт отсюда",
+  "cancelled at a safe point": "отменён в безопасной точке",
+  "workflow done": "workflow пройден",
+  "went on without the failed checks": "пошёл дальше без упавших проверок",
+  "resumed from {state}": "возобновлён из {state}",
+  started: "запущен",
 };
 
 /**

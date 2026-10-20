@@ -52,6 +52,7 @@ import type {
 } from "./model.ts";
 import { RECENT_PAGE, RECENT_SIZES } from "./model.ts";
 import { newTaskHtml, type StartForm } from "./newTask.ts";
+import { reasonText } from "./reasons.ts";
 import { fileRefHtml, fileRefOf, openHref } from "./refs.ts";
 
 /**
@@ -461,7 +462,7 @@ function toolBudget(a: Activity | undefined, now: number): Html {
 }
 
 function recentState(run: Run): Html {
-  const why = run.stateReason ? ` · ${cut(run.stateReason, 48)}` : "";
+  const why = run.stateReason ? ` · ${cut(reasonText(run.stateReason), 48)}` : "";
   switch (run.state) {
     case "COMPLETED":
       return html`<span class="ok">✓ ${t("COMPLETED")}</span>`;
@@ -1237,7 +1238,7 @@ function nowHtml(page: RunPage, now: number, actions?: Actions): Html {
     const stopped =
       page.run.state === "SUSPENDED"
         ? page.run.stateReason?.startsWith("paused")
-          ? `${page.run.stateReason.split(";")[0]} — ${t("Resume goes on from where it stopped")}`
+          ? `${reasonText(page.run.stateReason).split(";")[0]} — ${t("Resume goes on from where it stopped")}`
           : t("stopped with Ctrl-C — it goes on from where it stopped")
         : page.run.state === "RUNNING"
           ? t("no process drives this run (interrupted or crashed)")
@@ -1246,7 +1247,7 @@ function nowHtml(page: RunPage, now: number, actions?: Actions): Html {
     if (page.resumable === "retry") {
       const cmd = `jarvis resume ${shortRunId(page.run.id)}`;
       return html`<section class="panel now" aria-label="${t("Now")}" data-live="card"><div class="row"><span class="bad">✗ ${t("the model failed the run — its work is kept")}</span></div>
-<p class="muted" style="margin:0;font-size:14px;overflow-wrap:anywhere">${cut(page.run.stateReason ?? "", 300)}</p>
+<p class="muted" style="margin:0;font-size:14px;overflow-wrap:anywhere">${cut(reasonText(page.run.stateReason ?? ""), 300)}</p>
 <div class="actions">${
         actions
           ? html`${resumeForm(actions, page.run, t("Try again"))}<span class="hint">${t("once the model answers again: the step goes on from its last checkpoint; or")} <code>${cmd}</code></span>`
@@ -1508,7 +1509,7 @@ export function runContent(
 <div class="runtext">
 <h1>${firstLine(r.task, 300)}</h1>
 ${rest ? html`<p class="muted" style="white-space:pre-wrap">${cut(rest, 600)}</p>` : ""}
-${r.stateReason && r.state !== "RUNNING" && r.state !== "WAITING_BUDGET" ? html`<p class="muted">${r.stateReason}</p>` : ""}
+${r.stateReason && r.state !== "RUNNING" && r.state !== "WAITING_BUDGET" ? html`<p class="muted">${reasonText(r.stateReason)}</p>` : ""}
 ${page.continuedFrom ? continuedFromHtml(page.continuedFrom) : ""}
 ${page.subtaskOf ? html`<p class="muted">${t("subtask {key} of {of}", { key: page.subtaskOf.key, of: page.subtaskOf.of })}${page.subtaskOf.service ? ` · ${page.subtaskOf.service}` : ""} ${t("of")} <a href="/runs/${shortRunId(page.subtaskOf.master.id)}">${firstLine(page.subtaskOf.master.task, 120)}</a> — ${t("the contract is the master's")}</p>` : ""}
 </div>
@@ -2113,7 +2114,7 @@ function otherCardHtml(what: string, page: RunPage): Html {
   return html`<section class="panel decision" aria-labelledby="decision" data-live="card">
 <span class="warn" style="font-size:13px;font-weight:500">${t("Waits for you")}</span>
 <h2 id="decision">${t("The run waits for {what}", { what: t(what) })}</h2>
-<p>${page.run.stateReason ?? ""}</p>
+<p>${reasonText(page.run.stateReason ?? "")}</p>
 <div class="actions"><span class="hint">${th("Answer in the terminal: {cmd}", { cmd: html`<code>${cmd}</code>` })}</span><button type="button" class="btn" data-copy="${cmd}">${t("Copy command")}</button></div>
 </section>`;
 }
