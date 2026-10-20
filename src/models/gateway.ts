@@ -12,7 +12,7 @@ import { type CassetteMode, type CassetteStore, cassetteKey, cassetteRequest } f
 import { ModelError } from "./errors.ts";
 import { type AdapterRegistry, adapterFor, defaultAdapters } from "./providers/index.ts";
 import { effortFor } from "./providers/openaiCompatible.ts";
-import { type AgentRequirements, rejectModel } from "./router.ts";
+import { type AgentRequirements, type ProbeSource, rejectModel } from "./router.ts";
 import { charsOfMessages, TokenEstimator } from "./tokens.ts";
 import type { Message, ModelRequest, ModelResponse, ProviderResult, StreamProgress } from "./types.ts";
 
@@ -57,6 +57,8 @@ export interface GatewayOptions {
   readonly clock?: () => Date;
   /** The output a call reserves in its pool (src/budget/outputReserve.ts); default: from this process's calls. */
   readonly reserve?: OutputReserve;
+  /** Probe results: failover skips a model the probe found lacking what the request needs. */
+  readonly probes?: ProbeSource;
 }
 
 class Semaphore {
@@ -104,6 +106,7 @@ export class ModelGateway implements ModelCaller {
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly clock: () => Date;
   private readonly reserve: OutputReserve;
+  private readonly probes: ProbeSource | undefined;
   private readonly semaphores = new Map<string, Semaphore>();
   /** The last prompt of each step (run, step, iteration, model): what the next call can reuse. */
   private readonly lastPrompts = new Map<string, readonly Message[]>();
@@ -126,6 +129,7 @@ export class ModelGateway implements ModelCaller {
     this.retry = { ...DEFAULT_RETRY, ...options.retry };
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.reserve = options.reserve ?? new OutputReserve();
+    this.probes = options.probes;
   }
 
   model(modelId: string): ModelConfig {
@@ -600,7 +604,7 @@ export class ModelGateway implements ModelCaller {
     for (const id of candidates.slice(from + 1)) {
       const model = this.config.models[id];
       if (!model || this.poolOf(id) === pool) continue;
-      if (rejectModel(id, model, requires, this.config)) continue;
+      if (rejectModel(id, model, requires, this.config, this.probes?.get(id))) continue;
       const prompt = this.estimator.estimateMessages(id, model.tokenizer, request.messages, request.tools);
       if (prompt + Math.min(request.maxOutput ?? model.maxOutput, model.maxOutput) > model.contextWindow)
         continue;

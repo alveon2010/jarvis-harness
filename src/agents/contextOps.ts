@@ -165,7 +165,7 @@ export async function reshapeContext(
   let summarizerModelId = modelId;
   let summarizerMaxOutput = model?.maxOutput ?? 1000;
   try {
-    const route = resolveModel(config, "compaction", { tools: false });
+    const route = resolveModel(config, "compaction", { tools: false }, { probes: rt.probes });
     summarizerModelId = route.modelId;
     summarizerMaxOutput = route.model.maxOutput;
   } catch {

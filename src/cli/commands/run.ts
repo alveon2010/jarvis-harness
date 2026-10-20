@@ -8,7 +8,7 @@ import { createEngine } from "../../app/engine.ts";
 import { canForget, forgetRuns } from "../../app/forget.ts";
 import { continuationStep, continuedBy, handOff } from "../../app/handoff.ts";
 import { duration } from "../../app/journey.ts";
-import { preflightMcp } from "../../app/preflight.ts";
+import { preflightMcp, preflightModels } from "../../app/preflight.ts";
 import { noteForStart, requestRedo } from "../../app/redo.ts";
 import { carriedSteps, RESTARTABLE, restartPlanOf } from "../../app/restart.ts";
 import { createRuntime, type Runtime } from "../../app/runtime.ts";
@@ -777,6 +777,9 @@ export async function runWork(
       );
       throw new CliExit(EXIT.error);
     }
+    // steps no model can serve: said now, not an hour into the run
+    for (const p of preflightModels(runtime, workflow))
+      ctx.out.note(`${ctx.out.errStyle.warn("!")} step ${p.step}: ${p.reason}`);
     const runId = newRunId();
     // a task across services runs in the knowledge repository and changes no code there (ADR-0025 §6)
     const workspace = CROSS_WORKFLOWS.has(workflowName)

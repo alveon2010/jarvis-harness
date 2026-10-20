@@ -187,7 +187,12 @@ export async function prepareSuggestions(
   ).join("\n\n");
   const started = Date.now();
   try {
-    const route = resolveModel(runtime.loaded.config, "research", { structuredOutput: "json" });
+    const route = resolveModel(
+      runtime.loaded.config,
+      "research",
+      { structuredOutput: "json" },
+      { probes: runtime.probes },
+    );
     const result = await generateStructured(runtime.gateway, {
       modelId: route.modelId,
       mode: route.structuredMode,

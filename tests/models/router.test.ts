@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { BudgetManager } from "../../src/budget/admission.ts";
 import { MemoryUsageStore } from "../../src/budget/usage.ts";
-import { resolveModel, validateRoles } from "../../src/models/router.ts";
+import type { ProbeResult } from "../../src/models/probe.ts";
+import { effectiveModel, resolveModel, validateRoles } from "../../src/models/router.ts";
 import { testConfig } from "../helpers/modelConfig.ts";
 
 const config = testConfig("http://127.0.0.1:1/v1");
@@ -50,5 +51,39 @@ describe("resolveModel", () => {
       { role: "missing" },
     ]);
     expect(problems.map((p) => p.modelId)).toEqual(["strict", "missing"]);
+  });
+
+  it("trusts a fresh probe over the configuration: what it found missing is missing, and said so", () => {
+    const probe = (
+      supports: Partial<ProbeResult["supports"]>,
+      at = new Date().toISOString(),
+    ): ProbeResult => ({
+      modelId: "private",
+      probedAt: at,
+      latencyMs: 10,
+      supports: { tools: true, jsonMode: true, jsonSchema: false, systemRole: true, ...supports },
+      errors: {},
+      outputTokens: 1,
+    });
+    const probes = (p: ProbeResult) => ({ get: (id: string) => (id === "private" ? p : undefined) });
+    // the probe found no tool calls: research needing tools goes to the next model
+    const noTools = probes(probe({ tools: false }));
+    expect(resolveModel(config, "research", { tools: true }, { probes: noTools }).modelId).toBe("schema");
+    expect(() => resolveModel(config, "strict", { tools: true }, { probes: noTools })).toThrow(
+      /does not support tool calling \(probe of \d{4}-\d\d-\d\d; the configuration claims tools/,
+    );
+    // no json mode: the structured mode the route reports goes down too
+    expect(
+      resolveModel(config, "strict", {}, { probes: probes(probe({ jsonMode: false })) }).structuredMode,
+    ).toBe("text");
+    // only down: a probe never adds what the configuration does not claim
+    expect(effectiveModel(config.models.private as never, probe({ jsonSchema: true })).lacks).toEqual([]);
+    // a stale probe or an undecided capability counts for nothing
+    const old = probe({ tools: false }, "2020-01-01T00:00:00.000Z");
+    expect(resolveModel(config, "strict", { tools: true }, { probes: probes(old) }).modelId).toBe("private");
+    const undecided = { ...probe({ tools: false }), inconclusive: ["tools" as const] };
+    expect(resolveModel(config, "strict", { tools: true }, { probes: probes(undecided) }).modelId).toBe(
+      "private",
+    );
   });
 });

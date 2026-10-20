@@ -138,7 +138,9 @@ export function createRuntime(loaded: LoadedConfig, options: RuntimeOptions = {}
         outputTokens: e.payload?.outputTokens as number,
       })),
   );
+  const probes = new ProbeStore(loaded.home.cacheDir);
   const gateway = new ModelGateway({
+    probes,
     reserve,
     config: loaded.config,
     secrets,
@@ -192,7 +194,7 @@ export function createRuntime(loaded: LoadedConfig, options: RuntimeOptions = {}
     usage,
     budget,
     gateway,
-    probes: new ProbeStore(loaded.home.cacheDir),
+    probes,
     runs: new SqliteRunStore(db.db),
     blobs,
     artifacts: new ArtifactStore(db.db, blobs),

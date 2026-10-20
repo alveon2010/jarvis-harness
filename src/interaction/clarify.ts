@@ -87,7 +87,7 @@ export function clarifierMessages(
 export async function clarifierTurn(rt: Runtime, run: Run, thread: Interaction): Promise<InteractionMessage> {
   const messages = rt.interactions.messages(thread.id);
   const config = rt.loaded.config;
-  const route = resolveModel(config, "research", { structuredOutput: "json" });
+  const route = resolveModel(config, "research", { structuredOutput: "json" }, { probes: rt.probes });
   const result = await generateStructured(rt.gateway, {
     modelId: route.modelId,
     mode: route.structuredMode,

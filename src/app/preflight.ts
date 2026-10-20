@@ -2,6 +2,7 @@ import { BUILTIN_AGENTS } from "../agents/builtin/index.ts";
 import { AgentRegistry } from "../agents/definition.ts";
 import type { WorkflowDefinition } from "../core/domain/workflow.ts";
 import { serversNeeded } from "../mcp/provider.ts";
+import { validateRoles } from "../models/router.ts";
 import type { Runtime } from "./runtime.ts";
 
 export interface McpPreflight {
@@ -44,4 +45,25 @@ export async function preflightMcp(runtime: Runtime, workflow: WorkflowDefinitio
   }
   runtime.registry.replace(runtime.mcp.provider);
   return { servers, ok: servers.every((s) => s.ok) };
+}
+
+/**
+ * ADR-0007 §3: the steps of a workflow no model can serve, said before the run starts — with what the
+ * configuration claims and what a probe found (src/models/router.ts effectiveModel). Said, not refused:
+ * a step may be skipped (`when`), and the run fails at that step with the same words anyway.
+ */
+export function preflightModels(
+  runtime: Runtime,
+  workflow: WorkflowDefinition,
+): Array<{ readonly step: string; readonly reason: string }> {
+  const agents = new AgentRegistry(BUILTIN_AGENTS, runtime.loaded.project?.root);
+  const out: Array<{ step: string; reason: string }> = [];
+  for (const step of workflow.steps) {
+    if (step.kind !== "agentic" || !step.agent) continue;
+    const def = agents.get(step.agent);
+    if (!def) continue;
+    for (const p of validateRoles(runtime.loaded.config, [{ role: def.role, requires: def.requires }], runtime.probes))
+      out.push({ step: step.id, reason: p.reason });
+  }
+  return out;
 }

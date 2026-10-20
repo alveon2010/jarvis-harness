@@ -189,7 +189,7 @@ export class AgentRuntimeRunner implements AgentRunner {
     const rt = ctx.runtime;
     const config = rt.loaded.config;
 
-    const route = resolveModel(config, def.role, def.requires);
+    const route = resolveModel(config, def.role, def.requires, { probes: rt.probes });
     const bound = rt.tools.bind({
       run: ctx.run,
       stepId: ctx.step.id,
@@ -337,7 +337,7 @@ export class AgentRuntimeRunner implements AgentRunner {
     });
     const summarizerRoute = (() => {
       try {
-        return resolveModel(config, "compaction", { tools: false });
+        return resolveModel(config, "compaction", { tools: false }, { probes: rt.probes });
       } catch {
         return route; // no `compaction` role configured: the agent's own model summarises
       }
