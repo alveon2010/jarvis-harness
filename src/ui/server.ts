@@ -50,6 +50,7 @@ import { resumableOf } from "../app/resumable.ts";
 import { roundsOf } from "../app/rounds.ts";
 import type { Runtime } from "../app/runtime.ts";
 import { servicesOf } from "../app/servicesView.ts";
+import { requestPauseAfter, setChecksAsk } from "../app/steer.ts";
 import {
   IN_KNOWLEDGE_REPO,
   isDone,
@@ -1507,7 +1508,7 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       });
     }
     const m =
-      /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|restart|redo|clarify|eval|note|pause|cleanup|apply|restore-branch|subtask|scope|tests)$/.exec(
+      /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|restart|redo|clarify|eval|note|pause|cleanup|apply|restore-branch|subtask|scope|tests|steer)$/.exec(
         r.url.pathname,
       );
     const run = m ? resolveRun(m[1] as string) : undefined;
@@ -1617,8 +1618,10 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
         return redirect(r, `/runs/${short}?notice=not-waiting`);
       const who = await actor();
       if (!who) return redirect(r, `/runs/${short}?notice=actor`);
-      const move = form.get("move");
-      const text = (form.get("text") ?? "").trim();
+      // one of the answers the agent offered: the same as typing it
+      const offered = (form.get("answer") ?? "").trim();
+      const move = form.get("move") ?? (offered ? "say" : undefined);
+      const text = offered || (form.get("text") ?? "").trim();
       const rule = (form.get("rule") ?? "").trim();
       if (move === "say") {
         if (!text) return redirect(r, `/runs/${short}?notice=no-answer#decision`);
@@ -1865,6 +1868,17 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
         grantBudget(runtime, run, stop, who, choice === "finish" ? { finish: true } : { more }, "ui");
       }
       goOn(run);
+      return redirect(r, `/runs/${short}`);
+    }
+    if (m[2] === "steer") {
+      // while it works: «ask me when tests fail» for this run, «stop after this step» (src/app/steer.ts)
+      if (isTerminal(run.state)) return redirect(r, `/runs/${short}?notice=already-ended`);
+      const who = await actor();
+      if (!who) return redirect(r, `/runs/${short}?notice=actor`);
+      const on = form.get("on") === "on";
+      const by = `${who.kind}:${who.id}`;
+      if (form.get("what") === "ask") setChecksAsk(runtime, run, on, by);
+      else if (form.get("what") === "stop-after") requestPauseAfter(runtime, run, by, !on);
       return redirect(r, `/runs/${short}`);
     }
     if (m[2] === "tests") {

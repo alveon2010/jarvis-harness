@@ -108,7 +108,10 @@ export class AgenticExecutor implements StepExecutor {
         ...(ref ? { contentRef: ref } : {}),
         origin: `agent:${ctx.step.agent}`,
         openedBy: `agent:${ctx.step.agent}`,
-        meta: { agent: ctx.step.agent },
+        meta: {
+          agent: ctx.step.agent,
+          ...((a) => (a.length > 0 ? { answers: a } : {}))(ref ? answersOf(rt, ref) : []),
+        },
         message: {
           role: "jarvis",
           actor: `agent:${ctx.step.agent}`,
@@ -132,6 +135,22 @@ export class AgenticExecutor implements StepExecutor {
 }
 
 export const CLARIFICATION_OUTCOME = "needs_clarification";
+
+/** The answers the agent sees to its question (`clarification.answers`): one click each on the page. */
+function answersOf(rt: StepContext["runtime"], ref: string): string[] {
+  const [id, version] = ref.split("@");
+  const artifact = rt.artifacts.get(id as string, Number(version));
+  if (!artifact) return [];
+  try {
+    const answers = (JSON.parse(rt.artifacts.text(artifact)) as { clarification?: { answers?: unknown } })
+      .clarification?.answers;
+    return Array.isArray(answers)
+      ? answers.filter((a): a is string => typeof a === "string" && a.trim() !== "").slice(0, 4)
+      : [];
+  } catch {
+    return [];
+  }
+}
 
 /** The blocking question of a result document (`clarification.question`, else the open questions). */
 function questionOf(rt: StepContext["runtime"], ref: string): string | undefined {

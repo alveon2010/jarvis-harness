@@ -1111,8 +1111,40 @@ ${page.fixing ? fixWidget(page.fixing) : page.planProgress ? planWidget(page.pla
 ${a.batch ? batchHtml(a.batch) : ""}
 ${toolBudget(a, now)}
 ${last ? html`<span class="meta">${last}</span>` : ""}
-${notesBox(page, a.step.id, actions)}
+${notesBox(page, a.step.id, actions, a.step.agent === "implementation")}
+${steerHtml(page, a.step, actions)}
 </section>`;
+}
+
+/**
+ * While a run works: «Ask me when tests fail» for this run and «Stop after this step» (src/app/steer.ts)
+ * — switches, each a form of its own, so they work without the script.
+ */
+function steerHtml(
+  page: RunPage,
+  step: { readonly id: string; readonly iteration: number },
+  actions?: Actions,
+): Html {
+  const s = page.steer;
+  if (!s || !actions) return html``;
+  const action = `${runHref(page.run)}/steer`;
+  const after = s.stopAfter;
+  const stopping = after !== undefined && after.step === step.id && after.iteration === step.iteration;
+  const sw = (what: string, on: boolean, label: string, title: string) =>
+    form(
+      actions,
+      action,
+      html`<input type="hidden" name="what" value="${what}"><input type="hidden" name="on" value="${on ? "off" : "on"}"><button type="submit" class="sw${on ? " on" : ""}" role="switch" aria-checked="${on ? "true" : "false"}" title="${title}"><i aria-hidden="true"></i>${label}</button>`,
+      html` class="swf"`,
+    );
+  return html`<div class="steer">${sw(
+    "ask",
+    s.askOnFailure,
+    "Ask me when tests fail",
+    s.askOnFailure
+      ? "every failed check stops this run for you"
+      : `the project's setting: ${s.projectAsk === "same-failure" ? "asks when a round fails as the one before" : s.projectAsk === "every-failure" ? "asks on every failure" : "asks when the rounds are used up"}`,
+  )}${sw("stop-after", stopping, `Stop after ${step.id}`, stopping ? `it pauses when ${step.id} ends${after?.by ? ` — asked by ${after.by}` : ""}` : `pause when ${step.id} ends, before the next step`)}<span class="hint">for this run</span></div>`;
 }
 
 /** A step on its second round: what it fixes, folded into one line like the plan. */
@@ -1144,10 +1176,10 @@ ${
  * A note to the running step: the agent gets it before its next model call, binding, and so does every
  * agent after it (src/interaction/notes.ts).
  */
-function notesBox(page: RunPage, step: string, actions?: Actions): Html {
+function notesBox(page: RunPage, step: string, actions?: Actions, hint = false): Html {
   const notes = page.notes ?? [];
   const add = actions
-    ? html`<details class="addnote" data-keep="addnote"><summary>✎ Add a note for ${step}</summary>
+    ? html`<details class="addnote" data-keep="${hint ? "hint" : "addnote"}"${hint ? " open" : ""}><summary>${hint ? `✎ A hint for ${step}` : `✎ Add a note for ${step}`}</summary>
 ${form(
   actions,
   `${runHref(page.run)}/note`,
@@ -1566,6 +1598,12 @@ ${form(
  * A clarification thread answered on the page (ADR-0019 §4): the same moves as `jarvis attach` — an
  * answer (Jarvis asks on or proposes the rule), accepting the proposed rule, or a rule of one's own.
  */
+/** The answers the agent offered with its question (src/orchestration/executors.ts). */
+const answersOfThread = (thread: ClarifyCard["thread"]): string[] =>
+  Array.isArray(thread.meta.answers)
+    ? thread.meta.answers.filter((a): a is string => typeof a === "string").slice(0, 4)
+    : [];
+
 function clarifyCardHtml(card: ClarifyCard, page: RunPage, actions?: Actions): Html {
   const r = page.run;
   const step = card.thread.stepId;
@@ -1599,7 +1637,12 @@ function clarifyCardHtml(card: ClarifyCard, page: RunPage, actions?: Actions): H
         html`${earlier}${
           card.exhausted
             ? html`<p class="hint">The thread's turns are used up (<code>human.clarification.maxTurns</code>): accept the proposed rule or write the rule yourself.</p>`
-            : html`<label class="field grow">Your answer<textarea name="text" rows="3" maxlength="4000" placeholder="Answer the question: Jarvis asks on or proposes the rule"${card.thinking ? " disabled" : ""}></textarea></label>`
+            : html`${((a) =>
+                a.length > 0 && !card.thinking
+                  ? html`<div class="answers" role="group" aria-label="The answers ${String(card.thread.meta.agent ?? "the agent")} sees">${a.map((x) => html`<button type="submit" name="answer" value="${x}" class="btn small">${x}</button>`)}</div>`
+                  : "")(
+                answersOfThread(card.thread),
+              )}<label class="field grow">Your answer<textarea name="text" rows="3" maxlength="4000" placeholder="${answersOfThread(card.thread).length > 0 ? "Or answer in your words" : "Answer the question: Jarvis asks on or proposes the rule"}"${card.thinking ? " disabled" : ""}></textarea></label>`
         }
 <div class="actions">${card.exhausted ? "" : html`<button type="submit" name="move" value="say" class="${p ? "btn" : "btn primary"}"${card.thinking ? " disabled" : ""}>Send the answer</button>`}${p ? html`<button type="submit" name="move" value="accept" class="btn primary"${card.thinking ? " disabled" : ""}>Accept the rule and go on</button>` : ""}</div>
 <details class="ownrule"${card.exhausted && !p ? " open" : ""}><summary>Write the rule yourself</summary>

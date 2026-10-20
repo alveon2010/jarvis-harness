@@ -4,6 +4,7 @@ import { pausedText, pauseRequested } from "../app/pause.ts";
 import { pendingRedo } from "../app/redo.ts";
 import { roundStop } from "../app/rounds.ts";
 import type { Runtime } from "../app/runtime.ts";
+import { checksAskOf, pauseAfterRequested } from "../app/steer.ts";
 import { BudgetExceededError, BudgetedGateway } from "../budget/runBudget.ts";
 import { EXIT } from "../cli/output.ts";
 import type { Run, RunState } from "../core/domain/run.ts";
@@ -180,6 +181,21 @@ export class LocalWorkflowEngine {
             step,
             iteration,
             new SuspendRun("SUSPENDED", pausedText(pause.by)),
+            workspace,
+          );
+          break;
+        }
+        // «stop after this step»: the step asked about ended, the next one waits for the person
+        const after = pauseAfterRequested(this.rt, run.id);
+        if (after && (after.step !== step.id || after.iteration !== iteration)) {
+          run = await this.park(
+            run,
+            step,
+            iteration,
+            new SuspendRun(
+              "SUSPENDED",
+              `paused after ${after.step}${after.iteration > 1 ? `#${after.iteration}` : ""}${after.by ? ` by ${after.by}` : ""}; Resume (or \`jarvis continue\`) goes on with ${step.id}`,
+            ),
             workspace,
           );
           break;
@@ -405,7 +421,7 @@ export class LocalWorkflowEngine {
       const stop =
         count > max || !this.runsChecks(run, step)
           ? undefined
-          : roundStop(this.rt, run, iteration, this.rt.loaded.config.human.checks.ask);
+          : roundStop(this.rt, run, iteration, checksAskOf(this.rt, run.id));
       if (count > max || stop) {
         const exhausted = this.rt.artifacts.put({
           runId: run.id,

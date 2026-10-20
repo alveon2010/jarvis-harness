@@ -221,7 +221,19 @@ export const ImplementationResult = z.object({
   ...Base,
   changedFiles: z.array(z.string()).default([]),
   notes: z.array(z.string()).default([]).describe("decisions, deviations from the plan, follow-ups"),
-  outcome: z.enum(["ok"]).default("ok"),
+  clarification: z
+    .object({
+      question: z.string().min(1).describe("the one question only a person can answer"),
+      context: z.string().optional().describe("what contradicts what: the test, the spec's words, the code"),
+      answers: z
+        .array(z.string().min(1))
+        .max(4)
+        .default([])
+        .describe("the answers you see, each a short action"),
+    })
+    .optional()
+    .describe("required when outcome is needs_clarification"),
+  outcome: z.enum(["ok", "needs_clarification"]).default("ok"),
 });
 
 export const TestResult = z.object({

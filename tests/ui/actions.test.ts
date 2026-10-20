@@ -577,6 +577,85 @@ describe("failed checks stop the run: the card and the choices", () => {
   });
 });
 
+describe("implementation asks, with the answers it sees", () => {
+  it("each answer is a button: one click answers as if typed", async () => {
+    const r = rt.runs.create({
+      task: "ABC-142 the order total is rounded twice after a discount",
+      workflow: "fix",
+      owner: DEV,
+      workspace: { mode: "cwd", repoRoot: sb.project, path: sb.project, baseRef: "HEAD" },
+      dataClass: "internal",
+    });
+    rt.runs.update(r.id, { currentStep: "implementation", currentIteration: 2 });
+    rt.runs.transition(r.id, "RUNNING");
+    const thread = rt.interactions.open({
+      runId: r.id,
+      kind: "clarification",
+      stepId: "implementation",
+      iteration: 2,
+      origin: "agent:implementation",
+      openedBy: "agent:implementation",
+      meta: {
+        agent: "implementation",
+        answers: ["Follow the spec: change RefundTest", "Keep refunds as they are"],
+      },
+      message: {
+        role: "jarvis",
+        actor: "agent:implementation",
+        text: "RefundTest expects the discount rounded on its own (99.89); the spec says round once at the end. Which is right?",
+      },
+    });
+    rt.runs.transition(r.id, "WAITING_HUMAN", {
+      reason: `clarification needed by implementation: ${thread.id}`,
+      waitingFor: { kind: "clarification", interactionId: thread.id },
+    });
+    rt.events.emit({ kind: "run.state", runId: r.id, payload: { state: "WAITING_HUMAN" } });
+    const short = r.id.slice(4, 12);
+    const page = await getPage(`/runs/${short}`);
+    expect(page).toContain('<div class="answers" role="group" aria-label="The answers implementation sees">');
+    expect(page).toContain('name="answer" value="Follow the spec: change RefundTest" class="btn small"');
+    expect(page).toContain('placeholder="Or answer in your words"');
+    await post(`/runs/${short}/clarify`, {
+      t: ui.token,
+      answer: "Follow the spec: change RefundTest",
+      text: "",
+    });
+    expect(rt.interactions.messages(thread.id)[1]).toMatchObject({
+      role: "human",
+      text: "Follow the spec: change RefundTest",
+    });
+  });
+});
+
+describe("steering a run from the page", () => {
+  it("the switches record who asked; a run that ended takes none", async () => {
+    const r = rt.runs.create({
+      task: "ABC-142 the order total",
+      workflow: "fix",
+      owner: DEV,
+      workspace: { mode: "cwd", repoRoot: sb.project, path: sb.project, baseRef: "HEAD" },
+      dataClass: "internal",
+    });
+    rt.runs.update(r.id, { currentStep: "implementation", currentIteration: 1 });
+    rt.runs.transition(r.id, "RUNNING");
+    const short = r.id.slice(4, 12);
+    await post(`/runs/${short}/steer`, { t: ui.token, what: "ask", on: "on" });
+    await post(`/runs/${short}/steer`, { t: ui.token, what: "stop-after", on: "on" });
+    expect(rt.events.list({ runId: r.id, kind: "run.checksAsk" })[0]).toMatchObject({
+      actor: "user:dev@example.com",
+      payload: { ask: "every-failure" },
+    });
+    expect(rt.events.list({ runId: r.id, kind: "run.pauseAfter" })[0]?.payload).toEqual({
+      step: "implementation",
+      iteration: 1,
+    });
+    rt.runs.transition(r.id, "CANCELLED");
+    expect((await post(`/runs/${short}/steer`, { t: ui.token, what: "ask", on: "off" })).location).toBe(
+      `/runs/${short}?notice=already-ended`,
+    );
+  });
+});
+
 describe("a stop on a budget, decided on the page", () => {
   function budgetStop(budget: Record<string, unknown>) {
     const run = rt.runs.create({

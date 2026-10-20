@@ -23,13 +23,14 @@ import { type Resumable, resumableOf } from "../app/resumable.ts";
 import { type RoundFailure, roundsOf, type StopWhy } from "../app/rounds.ts";
 import type { Runtime } from "../app/runtime.ts";
 import type { RunTokens } from "../app/status.ts";
+import { checksAskOf, pauseAfterRequested } from "../app/steer.ts";
 import { MASTER_WORKFLOW, masterOf, type SubtaskView, splitOf, subtasksOf } from "../app/subtasks.ts";
 import { type TimeSplit, timeSplitOf } from "../app/timeSplit.ts";
 import { type TryOut, tryOutOf } from "../app/tryOut.ts";
 import { type Change, changesIn, homePath } from "../cli/checkout.ts";
 import { changedFilesOf, type DocFacts, docFacts, reasonsOf } from "../cli/gate.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
-import type { Run } from "../core/domain/run.ts";
+import { isTerminal, type Run } from "../core/domain/run.ts";
 import type { WorkflowDefinition } from "../core/domain/workflow.ts";
 import { caseOfRun, casesRootOf } from "../evals/runToCase.ts";
 import {
@@ -685,6 +686,13 @@ export interface RunPage {
   readonly planProgress?: PlanProgress;
   /** A person's notes to the run while it works (src/interaction/notes.ts). */
   readonly notes?: readonly RunNote[];
+  /** Steering of this run (src/app/steer.ts): «ask me when tests fail», «stop after this step». */
+  readonly steer?: {
+    readonly askOnFailure: boolean;
+    /** The project's own setting, said next to the switch. */
+    readonly projectAsk: string;
+    readonly stopAfter?: { readonly step: string; readonly iteration: number; readonly by?: string };
+  };
   /** The step runs again on a back edge: what it fixes (the reasons of the steps that sent it back). */
   readonly fixing?: FixView;
   /** Pause asked, the process has not stopped yet (src/app/pause.ts). */
@@ -1100,6 +1108,18 @@ export async function runPage(
     ...redoOf(runtime, engine, run),
     ...evalOf(runtime, run),
     ...((n) => (n.length > 0 ? { notes: n } : {}))(notesOf(runtime, run.id)),
+    ...(isTerminal(run.state)
+      ? {}
+      : {
+          steer: {
+            askOnFailure: checksAskOf(runtime, run.id) === "every-failure",
+            projectAsk: runtime.loaded.config.human.checks.ask,
+            ...((p) =>
+              p
+                ? { stopAfter: { step: p.step, iteration: p.iteration, ...(p.by ? { by: p.by } : {}) } }
+                : {})(pauseAfterRequested(runtime, run.id)),
+          },
+        }),
     ...((p) => (p ? { pausing: p.by ? { by: p.by } : {} } : {}))(
       run.state === "RUNNING" ? pauseRequested(runtime, run.id) : undefined,
     ),

@@ -182,10 +182,11 @@ Method:
 - Run the project's commands (typecheck, tests) when available and fix what you broke.
 - UI with a design frame: the design input describes the task's frames (exact texts, layout, gaps and paddings, design-system components and their properties) — build from it instead of guessing; map sizes and components to the code with the project's design-system knowledge, not by copying values; figma.get only for a frame it does not have.
 - Record every changed file and every deviation from the plan.
+- Ask instead of guessing when only a person can decide: a failing test and the specification contradict each other (most often a test this task did not write expects the old behaviour), or after reading the failure, the test and the code you cannot tell which of them is right. Then stop: outcome needs_clarification, one question in "clarification" — the test by its name, what it expects, what the specification says — and up to four short answers you see in "answers" (for example «Follow the spec: change the test», «Keep the old behaviour for refunds»). Do not change a test you did not write to make it pass without asking; do not try the same fix twice.
 Produce the result document when the plan is implemented or when you are blocked (explain in notes).`,
   capabilities: [...READ_REPO, ...WRITE_REPO, "project.*", "figma.get", "plan.step"],
   requires: { tools: true, structuredOutput: "json" },
-  output: { type: "implementation", schema: ImplementationResult, outcomes: ["ok"] },
+  output: { type: "implementation", schema: ImplementationResult, outcomes: ["ok", "needs_clarification"] },
   limits: { maxToolCalls: 80, maxModelCalls: 100, checkpointEvery: 5 },
   // the design frames on request: the spec carries their texts, and 73 KB went with every call (pilot)
   contextInputs: ["spec", "plan"],

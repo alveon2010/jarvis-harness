@@ -764,7 +764,14 @@ describe("New task on the page", () => {
       '<span class="of">Round 2 of 3</span><span class="d">Fixing 2 defects verify found</span>',
     );
     expect(body).toContain("missing route for the courier app");
-    expect(body).toContain("✎ Add a note for implementation");
+    // open while implementation works: a hint for its next model call, and the switches of the run
+    expect(body).toContain(
+      '<details class="addnote" data-keep="hint" open><summary>✎ A hint for implementation</summary>',
+    );
+    expect(body).toContain(
+      'aria-checked="false" title="the project&#39;s setting: asks when a round fails as the one before"',
+    );
+    expect(body).toContain("Stop after implementation");
     expect((await post(`/runs/${short}/note`, { t: token, text: " " })).location).toContain("notice=no-note");
     expect(
       (await post(`/runs/${short}/note`, { t: token, text: "The method serves the courier app too" }))

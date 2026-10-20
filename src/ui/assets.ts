@@ -228,6 +228,16 @@ tr:last-child td{border-bottom:0}
 .tests-stop .choice .about{font-size:13px;color:var(--muted)}
 .tests-stop .choice:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
 .tests-stop .checkout-fold summary{cursor:pointer}
+.clarify .answers{display:flex;flex-wrap:wrap;gap:8px}
+.clarify .answers .btn{white-space:normal;text-align:left;height:auto;min-height:32px;padding:6px 12px}
+.steer{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;border-top:1px solid var(--line-soft);padding-top:10px}
+.steer .swf{display:inline}
+.sw{display:inline-flex;align-items:center;gap:8px;border:0;background:none;padding:2px 0;font:inherit;font-size:14px;color:var(--ink);cursor:pointer}
+.sw i{width:32px;height:18px;border-radius:999px;background:var(--border-btn);position:relative;display:inline-block;flex:none;transition:background .15s}
+.sw i::after{content:"";position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:var(--panel)}
+.sw.on i{background:var(--accent-fill)}
+.sw.on i::after{left:16px}
+.sw:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
 .tf-log{display:flex;flex-direction:column;gap:10px}
 .tf-log .log{margin:0;padding:12px 14px;border-radius:10px;background:var(--sunken);border:1px solid var(--line);font-family:var(--mono);font-size:12px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere;max-height:none}
 .tf-log mark{background:var(--bad-bg);color:var(--bad)}

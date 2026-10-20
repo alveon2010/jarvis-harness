@@ -3,6 +3,7 @@ import { goOnRequested, requestGoOn, requestRerun } from "../../src/app/decide.t
 import { requestRedo } from "../../src/app/redo.ts";
 import { failuresOf, roundStop, roundsOf } from "../../src/app/rounds.ts";
 import type { Runtime } from "../../src/app/runtime.ts";
+import { checksAskOf, pauseAfterRequested, requestPauseAfter, setChecksAsk } from "../../src/app/steer.ts";
 import { excerptOf, excerptText } from "../../src/orchestration/tools/excerpt.ts";
 import type { StepContext, StepOutcome } from "../../src/orchestration/types.ts";
 import { ACTOR, createRun, engineFor, testRuntime, workflowOf, writeArtifact } from "../helpers/engine.ts";
@@ -218,5 +219,45 @@ describe("the whole output, what broke kept", () => {
     expect(text.split("\n").length).toBeLessThan(40);
     // a runner's «0 failed» is no failure
     expect(excerptOf("Tests: 0 failed, 12 passed").hits).toBe(0);
+  });
+});
+
+describe("steering while it works", () => {
+  it("«ask me when tests fail» stops at the first failure of this run; off, the project's setting again", async () => {
+    const { engine, calls } = workflow([[rounding("99.89")], [rounding("99.80")], []]);
+    const run = createRun(rt, "rounds");
+    setChecksAsk(rt, run, true, "user:dev@example.com");
+    expect(checksAskOf(rt, run.id)).toBe("every-failure");
+    const first = await engine.execute(run.id, owner);
+    expect(first.run.state).toBe("WAITING_HUMAN");
+    expect(calls).toEqual(["implementation#1", "verify#1"]);
+    setChecksAsk(rt, run, false, "user:dev@example.com");
+    expect(checksAskOf(rt, run.id)).toBe("same-failure");
+  });
+
+  it("«stop after this step» parks when the step ends, before the next; taken back, nothing stops", async () => {
+    const { engine, calls } = workflow([[]]);
+    const run = createRun(rt, "rounds");
+    rt.runs.update(run.id, { currentStep: "implementation", currentIteration: 1 });
+    requestPauseAfter(rt, rt.runs.get(run.id) as never, "user:dev@example.com");
+    expect(pauseAfterRequested(rt, run.id)).toMatchObject({
+      step: "implementation",
+      iteration: 1,
+      by: "dev@example.com",
+    });
+    const paused = await engine.execute(run.id, owner);
+    expect(calls).toEqual(["implementation#1"]);
+    expect(paused.run.state).toBe("SUSPENDED");
+    expect(paused.run.stateReason).toContain("paused after implementation by dev@example.com");
+    // honoured: going on, it does not stop again
+    expect(pauseAfterRequested(rt, run.id)).toBeUndefined();
+    expect((await engine.execute(run.id, owner)).run.state).toBe("COMPLETED");
+
+    const other = workflow([[]]);
+    const r2 = createRun(rt, "rounds");
+    rt.runs.update(r2.id, { currentStep: "implementation", currentIteration: 1 });
+    requestPauseAfter(rt, rt.runs.get(r2.id) as never, "user:dev@example.com");
+    requestPauseAfter(rt, rt.runs.get(r2.id) as never, "user:dev@example.com", true);
+    expect((await other.engine.execute(r2.id, owner)).run.state).toBe("COMPLETED");
   });
 });
