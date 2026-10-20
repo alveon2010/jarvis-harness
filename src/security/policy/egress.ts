@@ -2,6 +2,7 @@ import type {
   DataClass,
   Egress,
   EgressException,
+  ModelEgressException,
   Network,
   ResolvedConfig,
 } from "../../core/config/schema.ts";
@@ -17,6 +18,26 @@ import { serverNetwork } from "../../mcp/provider.ts";
  */
 export function modelAllowed(dataClass: DataClass, egress: Egress): boolean {
   return dataClass === "public" || egress === "private";
+}
+
+/** The project's exception that lets this model out of its data class (ADR-0016 §6), if it needs one. */
+export function modelEgressExceptionFor(
+  config: Pick<ResolvedConfig, "dataClass" | "models" | "modelEgressExceptions">,
+  modelId: string,
+): ModelEgressException | undefined {
+  const model = config.models[modelId];
+  if (!model || modelAllowed(config.dataClass, model.egress)) return undefined;
+  return config.modelEgressExceptions.find((e) => e.model === modelId);
+}
+
+/** Whether the model may be called for this project: by its egress, or by the project's exception. */
+export function modelEgressAllowed(
+  config: Pick<ResolvedConfig, "dataClass" | "models" | "modelEgressExceptions">,
+  modelId: string,
+): boolean {
+  const model = config.models[modelId];
+  if (!model) return false;
+  return modelAllowed(config.dataClass, model.egress) || modelEgressExceptionFor(config, modelId) !== undefined;
 }
 
 export function networkAllowed(dataClass: DataClass, network: Network): boolean {
@@ -77,6 +98,26 @@ export function formatEgressNotice(n: EgressNotice): string {
   return `dataClass ${n.dataClass} — MCP server "${n.server}" goes to the ${n.network} by an exception (reads only): ${n.reason}`;
 }
 
+export interface ModelEgressNotice {
+  readonly model: string;
+  readonly dataClass: DataClass;
+  readonly reason: string;
+}
+
+/** The models that go out of the project's data class by an exception, and only those it needs. */
+export function modelEgressNotices(config: ResolvedConfig): ModelEgressNotice[] {
+  return config.modelEgressExceptions.flatMap((e) =>
+    modelEgressExceptionFor(config, e.model)
+      ? [{ model: e.model, dataClass: config.dataClass, reason: e.reason }]
+      : [],
+  );
+}
+
+/** `⚠ dataClass confidential — model "deepseek" is a cloud model, allowed by an exception: …` */
+export function formatModelEgressNotice(n: ModelEgressNotice): string {
+  return `dataClass ${n.dataClass} — model "${n.model}" is a cloud model, allowed by an exception: ${n.reason}`;
+}
+
 export interface EgressSummary {
   readonly dataClass: DataClass;
   readonly models: readonly EgressDecision[];
@@ -88,6 +129,8 @@ export function evaluateEgress(config: ResolvedConfig): EgressSummary {
   const dataClass = config.dataClass;
   const models = Object.entries(config.models).map(([id, model]): EgressDecision => {
     const allowed = modelAllowed(dataClass, model.egress);
+    const exception = modelEgressExceptionFor(config, id);
+    if (exception) return { id, allowed: true, exception: exception.reason };
     return allowed
       ? { id, allowed }
       : { id, allowed, reason: `egress: ${model.egress} is not allowed for dataClass ${dataClass}` };

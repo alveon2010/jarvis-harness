@@ -190,7 +190,9 @@ export async function runDoctor(ctx: CliContext): Promise<DoctorReport> {
     }
 
     // what the project expects of this machine and it does not have: no failure, a note
-    for (const warning of loaded.warnings.filter((w) => w.startsWith("egressExceptions")))
+    for (const warning of loaded.warnings.filter(
+      (w) => w.startsWith("egressExceptions") || w.startsWith("modelEgressExceptions"),
+    ))
       checks.push(
         check(
           "config.egress",
@@ -407,6 +409,15 @@ export async function runDoctor(ctx: CliContext): Promise<DoctorReport> {
     for (const m of egress.models) {
       if (!m.allowed)
         checks.push(check(`egress:model:${m.id}`, "warn", "egress", `model ${m.id}: ${m.reason}`));
+      else if (m.exception)
+        checks.push(
+          check(
+            `egress:exception:model:${m.id}`,
+            "warn",
+            "egress",
+            `model ${m.id}: a cloud model for dataClass ${egress.dataClass} by an exception: ${m.exception}`,
+          ),
+        );
     }
     for (const s of egress.servers) {
       if (!s.allowed)

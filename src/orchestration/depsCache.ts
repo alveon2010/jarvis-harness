@@ -80,7 +80,7 @@ async function copy(from: string, to: string): Promise<void> {
   for (const flags of attempts) {
     try {
       rmSync(to, { recursive: true, force: true });
-      await run("cp", [...flags, from, to], { maxBuffer: 1 << 20 });
+      await run("cp", [...flags, from, to], { maxBuffer: 1 << 20, windowsHide: true });
       return;
     } catch (error) {
       last = error;

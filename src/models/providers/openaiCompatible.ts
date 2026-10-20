@@ -45,14 +45,52 @@ interface ChatResponse {
   };
 }
 
-function toChatMessage(message: Message): ChatMessage {
+/**
+ * Tool names on the wire: OpenAI's API (and DeepSeek's, which checks it) takes `^[a-zA-Z0-9_-]{1,64}$`,
+ * while Jarvis names its tools `repo.read`, `mcp.jira.get`. Each name is sent in that alphabet, one to
+ * one within a request, and a call comes back under the name Jarvis knows.
+ */
+export interface ToolNames {
+  readonly toWire: (name: string) => string;
+  readonly fromWire: (name: string) => string;
+}
+
+const WIRE_NAME = /^[a-zA-Z0-9_-]{1,64}$/;
+
+export function toolNamesFor(request: ModelRequest): ToolNames {
+  const names = new Set<string>();
+  for (const t of request.tools ?? []) names.add(t.name);
+  for (const m of request.messages) for (const c of m.toolCalls ?? []) names.add(c.name);
+  const wire = new Map<string, string>();
+  const back = new Map<string, string>();
+  // names already valid keep themselves, so a mended one never takes theirs
+  for (const name of names)
+    if (WIRE_NAME.test(name)) {
+      wire.set(name, name);
+      back.set(name, name);
+    }
+  for (const name of names) {
+    if (wire.has(name)) continue;
+    const safe = name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64) || "tool";
+    let candidate = safe;
+    for (let i = 2; back.has(candidate); i += 1) candidate = `${safe.slice(0, 60)}_${i}`;
+    wire.set(name, candidate);
+    back.set(candidate, name);
+  }
+  return {
+    toWire: (name) => wire.get(name) ?? (WIRE_NAME.test(name) ? name : name.replace(/[^a-zA-Z0-9_-]/g, "_")),
+    fromWire: (name) => back.get(name) ?? name,
+  };
+}
+
+function toChatMessage(message: Message, names: ToolNames): ChatMessage {
   const out: ChatMessage = { role: message.role, content: message.content };
   if (message.toolCallId) out.tool_call_id = message.toolCallId;
   if (message.toolCalls && message.toolCalls.length > 0) {
     out.tool_calls = message.toolCalls.map((c) => ({
       id: c.id,
       type: "function",
-      function: { name: c.name, arguments: c.arguments },
+      function: { name: names.toWire(c.name), arguments: c.arguments },
     }));
     if (message.content === "") out.content = null;
   }
@@ -119,10 +157,11 @@ export function buildChatBody(
   request: ModelRequest,
   model: ModelConfig,
   stream = false,
+  names: ToolNames = toolNamesFor(request),
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {
     model: model.model,
-    messages: request.messages.map(toChatMessage),
+    messages: request.messages.map((m) => toChatMessage(m, names)),
     stream,
   };
   // usage comes in the last chunk only when asked for
@@ -135,7 +174,7 @@ export function buildChatBody(
   if (request.tools && request.tools.length > 0) {
     body.tools = request.tools.map((t) => ({
       type: "function",
-      function: { name: t.name, description: t.description, parameters: t.parameters },
+      function: { name: names.toWire(t.name), description: t.description, parameters: t.parameters },
     }));
   }
   const format = request.responseFormat;
@@ -285,7 +324,8 @@ export class OpenAiCompatibleAdapter implements ProviderAdapter {
     const url = `${baseUrl.replace(/\/+$/, "")}/chat/completions`;
     const serverKey = `${url}|${model.model}`;
     const stream = model.stream !== false && !NO_STREAM.has(serverKey);
-    const body = JSON.stringify(buildChatBody(request, model, stream));
+    const names = toolNamesFor(request);
+    const body = JSON.stringify(buildChatBody(request, model, stream, names));
     const timeout = AbortSignal.timeout(model.timeoutMs);
     const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
 
@@ -352,7 +392,7 @@ export class OpenAiCompatibleAdapter implements ProviderAdapter {
     }
     const toolCalls: ToolCall[] = (choice.message.tool_calls ?? []).map((c, i) => ({
       id: c.id ?? `call_${i}`,
-      name: c.function?.name ?? "",
+      name: names.fromWire(c.function?.name ?? ""),
       arguments: c.function?.arguments ?? "{}",
     }));
     const usage = parsed.usage ?? {};

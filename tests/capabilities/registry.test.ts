@@ -73,6 +73,14 @@ describe("CapabilityRegistry.discover (ADR-0021 §3, §7)", () => {
     });
     expect(caps.reasons).toEqual([]);
   });
+
+  it("is BASIC, not UNSUPPORTED, in a knowledge repository without commands (ADR-0025 §6)", async () => {
+    sb.write("project/.jarvis/project.yaml", "version: 1\n");
+    const loaded = await loadConfig({ cwd: sb.project, homeDir: sb.home, env: {} });
+    const caps = await new CapabilityRegistry().discover(loaded.config, sb.project, { knowledgeRepo: true });
+    expect(caps.level).toBe("BASIC");
+    expect(caps.reasons.some((r) => r.startsWith("knowledge repository"))).toBe(true);
+  });
 });
 
 describe("polyglot scopes (ADR-0021 §9)", () => {

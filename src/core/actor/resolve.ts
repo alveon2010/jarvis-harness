@@ -31,7 +31,10 @@ export async function resolveActor(
   }
   if (projectRoot) {
     try {
-      const { stdout } = await execFileAsync("git", ["config", "user.email"], { cwd: projectRoot });
+      const { stdout } = await execFileAsync("git", ["config", "user.email"], {
+        cwd: projectRoot,
+        windowsHide: true,
+      });
       const email = stdout.trim();
       if (email) return { actor: { kind: "user", id: email, verified: false }, source: "git:user.email" };
     } catch {

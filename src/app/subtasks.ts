@@ -319,6 +319,7 @@ const spawnCli: CliLauncher = ({ args, cwd, log, env }) => {
       cwd,
       detached: true,
       stdio: ["ignore", fd, fd],
+      windowsHide: true,
       env: { ...process.env, ...env, JARVIS_INTERACTIVE: "off", JARVIS_PROGRESS: "plain", NO_COLOR: "1" },
     });
     child.on("error", () => {});

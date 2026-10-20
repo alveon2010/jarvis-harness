@@ -1,6 +1,6 @@
 import type { BudgetManager } from "../budget/admission.ts";
 import type { ModelConfig, ResolvedConfig } from "../core/config/schema.ts";
-import { modelAllowed } from "../security/policy/egress.ts";
+import { modelAllowed, modelEgressExceptionFor } from "../security/policy/egress.ts";
 import { ModelError } from "./errors.ts";
 
 /** ADR-0007 §2 — what an agent needs from a model. */
@@ -47,10 +47,10 @@ export function rejectModel(
   modelId: string,
   model: ModelConfig,
   requires: AgentRequirements,
-  dataClass: ResolvedConfig["dataClass"],
+  policy: Pick<ResolvedConfig, "dataClass" | "models" | "modelEgressExceptions">,
 ): string | undefined {
-  if (!modelAllowed(dataClass, model.egress))
-    return `egress "${model.egress}" not allowed for dataClass "${dataClass}"`;
+  if (!modelAllowed(policy.dataClass, model.egress) && !modelEgressExceptionFor(policy, modelId))
+    return `egress "${model.egress}" not allowed for dataClass "${policy.dataClass}" (a team may allow it in .jarvis/project.yaml: modelEgressExceptions)`;
   if (requires.tools && !model.supports.tools) return "does not support tool calling";
   if (requires.reasoning && !model.supports.reasoning) return "does not support reasoning";
   if (requires.minContext !== undefined && model.contextWindow < requires.minContext) {
@@ -62,7 +62,6 @@ export function rejectModel(
   ) {
     return `structured output "${structuredModeOf(model)}" < required "${requires.structuredOutput}"`;
   }
-  void modelId;
   return undefined;
 }
 
@@ -86,7 +85,7 @@ export function resolveModel(
       rejections.push({ modelId, reason: "unknown model" });
       continue;
     }
-    const reason = rejectModel(modelId, model, requires, config.dataClass);
+    const reason = rejectModel(modelId, model, requires, config);
     if (reason) {
       rejections.push({ modelId, reason });
       continue;

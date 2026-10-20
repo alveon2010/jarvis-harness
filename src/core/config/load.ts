@@ -128,13 +128,24 @@ function crossChecks(
 
   // an egress exception is the project's decision: no personal config, variable or flag adds one
   for (const [path, source] of Object.entries(sources)) {
-    if (path.startsWith("egressExceptions") && !source.startsWith("project:"))
+    if (
+      (path.startsWith("egressExceptions") || path.startsWith("modelEgressExceptions")) &&
+      !source.startsWith("project:")
+    )
       issues.push({
         path,
         message: "egress exceptions belong to .jarvis/project.yaml only (ADR-0016 §6)",
         source,
       });
   }
+  // a model the project allows out that this developer has not configured (yet): it waits for it
+  config.modelEgressExceptions.forEach((e, i) => {
+    const model = config.models[e.model];
+    if (!model)
+      warnings.push(
+        `modelEgressExceptions[${i}].model: no model "${e.model}" in models — the exception applies once it is added`,
+      );
+  });
   // the project's exception for a server this developer has not connected (yet): it waits for it — the
   // project file travels with the repository, the servers live in each one's ~/.jarvis/config.yaml
   config.egressExceptions.forEach((e, i) => {

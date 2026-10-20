@@ -5,7 +5,7 @@ import { prefixReuse } from "../context/serialize.ts";
 import type { ModelConfig, ResolvedConfig } from "../core/config/schema.ts";
 import { EnvSecretResolver, type SecretRef, type SecretResolver } from "../core/config/secrets.ts";
 import { InterruptedError, interruption } from "../orchestration/interrupt.ts";
-import { modelAllowed } from "../security/policy/egress.ts";
+import { modelEgressAllowed } from "../security/policy/egress.ts";
 import { type EventSink, MemoryEventStore } from "../telemetry/events.ts";
 import { errorFields, type Logger, NULL_LOGGER } from "../telemetry/log.ts";
 import { type CassetteMode, type CassetteStore, cassetteKey, cassetteRequest } from "./cassette.ts";
@@ -150,7 +150,7 @@ export class ModelGateway implements ModelCaller {
         model.maxOutput,
       ),
     };
-    if (!modelAllowed(this.config.dataClass, model.egress)) {
+    if (!modelEgressAllowed(this.config, modelId)) {
       this.emitError(request, new ModelError("policy", "egress denied"), 0);
       throw new ModelError(
         "policy",
@@ -600,7 +600,7 @@ export class ModelGateway implements ModelCaller {
     for (const id of candidates.slice(from + 1)) {
       const model = this.config.models[id];
       if (!model || this.poolOf(id) === pool) continue;
-      if (rejectModel(id, model, requires, this.config.dataClass)) continue;
+      if (rejectModel(id, model, requires, this.config)) continue;
       const prompt = this.estimator.estimateMessages(id, model.tokenizer, request.messages, request.tools);
       if (prompt + Math.min(request.maxOutput ?? model.maxOutput, model.maxOutput) > model.contextWindow)
         continue;

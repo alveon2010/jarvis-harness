@@ -5,7 +5,7 @@ import { createRuntime } from "../../app/runtime.ts";
 import { ModelError } from "../../models/errors.ts";
 import { type ProbeResult, probeDrift, probeIsStale, probeModel } from "../../models/probe.ts";
 import { structuredModeOf } from "../../models/router.ts";
-import { modelAllowed } from "../../security/policy/egress.ts";
+import { modelEgressAllowed } from "../../security/policy/egress.ts";
 import type { CliContext } from "../context.ts";
 import { CliExit, EXIT, padEnd } from "../output.ts";
 import { loadForCli } from "./config.ts";
@@ -73,7 +73,7 @@ export async function runModelsList(ctx: CliContext): Promise<void> {
         provider: model.provider,
         model: model.model,
         egress: model.egress,
-        allowed: modelAllowed(loaded.config.dataClass, model.egress),
+        allowed: modelEgressAllowed(loaded.config, id),
         pool,
         contextWindow: model.contextWindow,
         maxOutput: model.maxOutput,
@@ -156,7 +156,7 @@ export async function runModelsProbe(ctx: CliContext, modelId: string): Promise<
     ctx.out.error(`unknown model "${modelId}"; see \`jarvis models list\``);
     throw new CliExit(EXIT.error);
   }
-  if (!modelAllowed(loaded.config.dataClass, model.egress)) {
+  if (!modelEgressAllowed(loaded.config, modelId)) {
     ctx.out.error(
       `model "${modelId}" has egress ${model.egress}, not allowed for dataClass ${loaded.config.dataClass}; probe refused (ADR-0016 §3)`,
     );

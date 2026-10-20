@@ -92,7 +92,7 @@ import { NOTE_MAX } from "../onboarding/deep.ts";
 import { findNode, type ModuleTree, moduleTree } from "../onboarding/tree.ts";
 import type { LocalWorkflowEngine } from "../orchestration/runtime.ts";
 import { deleteBranchKeepingTip, WorktreeError, WorktreeWorkspace } from "../orchestration/worktree.ts";
-import { egressNotices } from "../security/policy/egress.ts";
+import { egressNotices, modelEgressNotices } from "../security/policy/egress.ts";
 import { shortRunId } from "../storage/runStore.ts";
 import { git } from "../tools/local/exec.ts";
 import { type AskView, askContent, askOfRun, recentAsks } from "./ask.ts";
@@ -388,6 +388,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
   };
   // ADR-0016 §6: servers out of the data class's network by an exception, said on every page
   const egress = egressNotices(runtime.loaded.config);
+  const modelEgress = modelEgressNotices(runtime.loaded.config);
   const page = (
     r: Request,
     status: number,
@@ -405,6 +406,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
           ...(theme === "light" || theme === "dark" ? { theme } : {}),
           ...(options.launcher && actions ? { canStart: true } : {}),
           ...(egress.length > 0 ? { egress } : {}),
+          ...(modelEgress.length > 0 ? { modelEgress } : {}),
         },
         content,
       ),

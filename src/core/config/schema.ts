@@ -469,6 +469,16 @@ export const EgressExceptionSchema = z.strictObject({
 });
 export type EgressException = z.infer<typeof EgressExceptionSchema>;
 
+/**
+ * ADR-0016 §6: one model with `egress: cloud` allowed for a project whose data class keeps models
+ * private — the team's decision with its reason, only in project.yaml; every run says so at its start.
+ */
+export const ModelEgressExceptionSchema = z.strictObject({
+  model: z.string().min(1),
+  reason: z.string().min(10),
+});
+export type ModelEgressException = z.infer<typeof ModelEgressExceptionSchema>;
+
 export const SecurityConfigSchema = z.strictObject({
   secretPatterns: z.array(z.strictObject({ name: z.string().min(1), regex: z.string().min(1) })).default([]),
   secretEnv: z.array(z.string().min(1)).default([]),
@@ -597,6 +607,7 @@ const ProjectFieldsSchema = z.strictObject({
   context: ContextConfigSchema.optional(),
   security: SecurityConfigSchema.optional(),
   egressExceptions: z.array(EgressExceptionSchema).optional(),
+  modelEgressExceptions: z.array(ModelEgressExceptionSchema).optional(),
   humanGate: HumanGateModeSchema.optional(),
   knowledge: KnowledgeConfigSchema.optional(),
   human: HumanConfigSchema.optional(),
@@ -662,6 +673,7 @@ export const ResolvedConfigSchema = z.strictObject({
   context: ContextConfigSchema.prefault({}),
   security: SecurityConfigSchema.prefault({}),
   egressExceptions: z.array(EgressExceptionSchema).default([]),
+  modelEgressExceptions: z.array(ModelEgressExceptionSchema).default([]),
   telemetry: TelemetryConfigSchema.prefault({}),
   knowledge: KnowledgeConfigSchema.prefault({}),
   human: HumanConfigSchema.prefault({}),
