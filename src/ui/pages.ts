@@ -2097,7 +2097,7 @@ function conflictCardHtml(card: ConflictCard, page: RunPage, actions?: Actions):
 <ul class="reasons">${card.files.map((f) => html`<li>${fileRef(f)}</li>`)}</ul>
 <div class="checkout">
 <span class="muted" style="font-size:14px">${t("The run's checkout")}</span>
-<div class="row"><code class="path">${card.checkoutShown}</code>${actions ? form(actions, `${runHref(page.run)}/open`, html`<button type="submit" class="btn">${t("Open in editor")}</button>`) : ""}<button type="button" class="btn" data-copy="${card.checkout}">Copy path</button></div>
+<div class="row"><code class="path">${card.checkoutShown}</code>${actions ? form(actions, `${runHref(page.run)}/open`, html`<button type="submit" class="btn">${t("Open in editor")}</button>`) : ""}<button type="button" class="btn" data-copy="${card.checkout}">${t("Copy path")}</button></div>
 </div>
 ${
   card.resolved
@@ -2107,13 +2107,14 @@ ${
 </section>`;
 }
 
+// t("a decision")
 function otherCardHtml(what: string, page: RunPage): Html {
   const cmd = `jarvis continue ${shortRunId(page.run.id)}`;
   return html`<section class="panel decision" aria-labelledby="decision" data-live="card">
-<span class="warn" style="font-size:13px;font-weight:500">Waits for you</span>
-<h2 id="decision">The run waits for ${what}</h2>
+<span class="warn" style="font-size:13px;font-weight:500">${t("Waits for you")}</span>
+<h2 id="decision">${t("The run waits for {what}", { what: t(what) })}</h2>
 <p>${page.run.stateReason ?? ""}</p>
-<div class="actions"><span class="hint">Answer in the terminal: <code>${cmd}</code></span><button type="button" class="btn" data-copy="${cmd}">Copy command</button></div>
+<div class="actions"><span class="hint">${th("Answer in the terminal: {cmd}", { cmd: html`<code>${cmd}</code>` })}</span><button type="button" class="btn" data-copy="${cmd}">${t("Copy command")}</button></div>
 </section>`;
 }
 

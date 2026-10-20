@@ -1480,6 +1480,10 @@ export const RU: Readonly<Record<string, string>> = {
   "jarvis onboard failed for {name} — see {cmd}": "jarvis onboard для {name} не удался — см. {cmd}",
   "git commit failed — see {cmd}": "git commit не удался — см. {cmd}",
   "opened in {editor}": "открыто в {editor}",
+  // ---- the other wait card
+  "The run waits for {what}": "Прогон ждёт: {what}",
+  "Answer in the terminal: {cmd}": "Ответить в терминале: {cmd}",
+  "a decision": "решение",
 };
 
 /**
