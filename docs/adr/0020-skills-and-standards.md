@@ -155,7 +155,7 @@ L5 история инструментов
 
 **Ручной кандидат** — `jarvis candidates add <kind> <title> [text…]`: `kind ∈ {standard, knowledge,
 skill-improvement}`; текст — аргументом, `--file` или из stdin; `--path` (повторяемый), `--evidence`
-(повторяемый), `--why`. Для `skill-improvement` обязателен `--skill <id>`: навык должен существовать и
+(повторяемый), `--why`. Для `skill-improvement` обязателен `--skill <id>`: скилл должен существовать и
 быть редактируемым проектом (проектный или встроенный — как при promote, который дописывает шаг в его
 `instructions.md` и поднимает версию); иначе кандидат не создаётся. Provenance — `human` с актором.
 

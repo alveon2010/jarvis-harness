@@ -56,7 +56,7 @@ flowchart TB
 | Orchestration | движок workflow, исполнители шагов, worktree, аренда | `src/orchestration` |
 | Agents | определения агентов, слоистый контекст, цикл вызова инструментов | `src/agents` |
 | Tools | локальные инструменты, MCP-клиент и профили, политика, редактирование секретов | `src/tools`, `src/mcp`, `src/security` |
-| Knowledge | стандарты, навыки, знание, глоссарий, индекс, граф проекта | `src/knowledge` |
+| Knowledge | стандарты, скиллы, знание, глоссарий, индекс, граф проекта | `src/knowledge` |
 | Capabilities | детекция стеков, уровни поддержки, адаптеры языков | `src/capabilities`, `src/adapters` |
 | Interaction | треды с человеком: approval, clarification, review, conflict | `src/interaction` |
 | Onboarding | скан репозитория, дерево модулей, исследование модуля агентом | `src/onboarding` |
@@ -100,7 +100,7 @@ Run держит *аренду* с эпохой (ADR-0002 §5): один про�
 **Interaction** — тред с человеком: approval, clarification, review, conflict. У парковавшегося run
 есть `waitingFor` — что именно он ждёт. См. [human.md](human.md).
 
-**EngineeringContextPackage** — что агент получает от проекта на каждом вызове: навыки, стандарты,
+**EngineeringContextPackage** — что агент получает от проекта на каждом вызове: скиллы, стандарты,
 знание — выбранные по стеку, путям и виду задачи, уложенные в бюджет (ADR-0020). См.
 [knowledge.md](knowledge.md).
 
@@ -178,7 +178,7 @@ Run держит *аренду* с эпохой (ADR-0002 §5): один про�
 - [cli.md](cli.md) — все команды
 - [configuration.md](configuration.md) — все ключи конфигурации
 - [workflows.md](workflows.md) — граф `sdd`, агенты, исходы
-- [knowledge.md](knowledge.md) — стандарты, навыки, знание, поиск, граф
+- [knowledge.md](knowledge.md) — стандарты, скиллы, знание, поиск, граф
 - [human.md](human.md) — участие человека
 - [integrations.md](integrations.md) — модели, MCP, IDE, keychain
 - [ci.md](ci.md), [evals.md](evals.md), [security.md](security.md), [extending.md](extending.md)

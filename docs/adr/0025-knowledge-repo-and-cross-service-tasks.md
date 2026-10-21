@@ -4,7 +4,7 @@
   бюджет мастера — 2026-10-20; не сделано: создание PR при поставке
 - Дата: 2026-10-15
 - Основание: [ADR-0017](0017-models-and-mcp-configuration.md) (конфигурация: машина и проект),
-  [ADR-0020](0020-skills-and-standards.md) (знание, стандарты, навыки), [ADR-0021](0021-stack-agnostic-core.md)
+  [ADR-0020](0020-skills-and-standards.md) (знание, стандарты, скиллы), [ADR-0021](0021-stack-agnostic-core.md)
   (скан и граф), [ADR-0023](0023-editor-and-web-ui.md) и [ADR-0024](0024-knowledge-in-web-ui.md) (`jarvis ui`),
   [ADR-0012](0012-evals-and-record-replay.md) (evals); пилот на бэкенде из многих микросервисов
 - Код: `src/core/config/meta.ts` (поиск репы знаний, карта, сервис), `src/core/config/load.ts` (слои общее →

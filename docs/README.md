@@ -7,7 +7,7 @@
 | [cli.md](cli.md) | справочник всех команд |
 | [configuration.md](configuration.md) | все ключи `~/.jarvis/config.yaml` и `.jarvis/project.yaml`, env, профили |
 | [workflows.md](workflows.md) | движок, граф `sdd`, агенты и их контракты, контекст, события |
-| [knowledge.md](knowledge.md) | стандарты, навыки, документы, глоссарий, поиск, граф проекта, кандидаты |
+| [knowledge.md](knowledge.md) | стандарты, скиллы, документы, глоссарий, поиск, граф проекта, кандидаты |
 | [human.md](human.md) | гейты, уточнения, Review Mode, ручные правки |
 | [integrations.md](integrations.md) | модели, MCP-профили, `jarvis mcp serve`, keychain |
 | [ci.md](ci.md) | CI-режим, бандлы, закоммиченные утверждения |

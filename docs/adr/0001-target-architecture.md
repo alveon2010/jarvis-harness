@@ -84,7 +84,7 @@ Jarvis создаётся для закрытой корпоративной с�
 | Ports & adapters | Модели, MCP, storage и **языки программирования** являются сменными адаптерами. **[ADR-0011, ADR-0021]** Mastra не используется вовсе. |
 | Measure first | Новые агенты и retrieval-механизмы остаются только если evals показывают пользу. |
 | Human is first-class **[ADR-0019]** | Человеческое решение — версионируемый артефакт/тред, привязанный к хешу содержимого. |
-| Knowledge as data **[ADR-0020]** | Стандарты, навыки и знание — файлы в репозитории, выбираются детерминированно и проверяются. |
+| Knowledge as data **[ADR-0020]** | Стандарты, скиллы и знание — файлы в репозитории, выбираются детерминированно и проверяются. |
 | Stack-neutral core **[ADR-0021]** | Ядро не упоминает конкретные стеки; это проверяет архитектурный тест. |
 
 ## 2. Конечная модель системы
@@ -133,7 +133,7 @@ Developer / Git / CI / OpenCode / IDE
   .jarvis/
     project.yaml                    # политика команды (ADR-0017)
     knowledge/                      # документы знания + glossary.md   [ADR-0015, ADR-0020]
-    standards/  skills/             # типизированные правила и навыки  [ADR-0020]
+    standards/  skills/             # типизированные правила и скиллы  [ADR-0020]
     agents/  workflows/             # переопределения инструкций и графов
     approvals/<task>/<type>.json    # закоммиченные утверждения для CI [ADR-0009]
     specs/                          # зарезервировано под экспорт spec
@@ -289,7 +289,7 @@ L5 Tool history / conversational residue      EVICTABLE
 
 Слои L0–L5, byte-stable системный слой, fair-share бюджет слоя L4, загрузка по ссылке
 (`knowledge.read`) и самокалибрующаяся оценка токенов **реализованы**. L4 теперь — не «найденное»,
-а детерминированно выбранный пакет: навыки > стандарты > знание **[ADR-0020]**.
+а детерминированно выбранный пакет: скиллы > стандарты > знание **[ADR-0020]**.
 
 ### Context pressure policy **[ADR-0013]**
 
@@ -509,7 +509,7 @@ Jarvis измеряет не только latency и tokens, но и качес�
 **[ADR-0018]**. Внешний экспорт (`telemetry.export`) — схема и проверка egress есть, экспортёра
 **[не реализовано]**.
 
-Evals **[ADR-0012]** сравнивают конфигурации (модели, навыки, стандарты, пороги, retrieval) по task
+Evals **[ADR-0012]** сравнивают конфигурации (модели, скиллы, стандарты, пороги, retrieval) по task
 success, покрытию acceptance и file recall, циклам и стоимости; главная метрика — successes per 10k
 output tokens; режимы record/replay/live, baseline и diff с допуском; кейс из реального run
 (`run-to-case`). Сравнение порогов compaction 50/60/70% — отдельный прогон evals с `--variant` по `context.thresholds`.
@@ -592,7 +592,7 @@ jarvis/
 │   ├── workflows/      # SDD и smoke (YAML)
 │   ├── agents/         # определения агентов, схемы, слои контекста, цикл вызова инструментов
 │   ├── interaction/    # треды с человеком, кларификатор, Review Mode           [ADR-0019]
-│   ├── knowledge/      # стандарты, навыки, резолвер, граф, retrieval            [ADR-0008/0015/0020]
+│   ├── knowledge/      # стандарты, скиллы, резолвер, граф, retrieval            [ADR-0008/0015/0020]
 │   ├── capabilities/   # детекция стеков, реестр, уровни поддержки               [ADR-0021]
 │   ├── adapters/       # адаптеры языков (typescript)                            [ADR-0021]
 │   ├── models/         # gateway, router, провайдеры, кассеты
@@ -734,7 +734,7 @@ Roadmap не определяет архитектуру снизу вверх: 
 | 7. v0.1 workflow | Research → Implementation → Review. | ✔ (сразу полный `sdd`) |
 | 8. Context Engine | trimming/compaction/reset/manual controls. | ✔ `6a9c6d4` (слои, prefix-stable system layer, бюджет L4, пороги, trimming, compaction, reset, `context`/`compact`/`reset-context`) [ADR-0013]; не сделано: метрика cache-hit |
 | 9. SDD | Spec + Impact + Plan. | ✔ `8db955b` + участие человека [ADR-0019] |
-| 10. Knowledge | versioned docs + targeted injection. | ✔ `6887cf0` (стандарты, навыки, резолвер) [ADR-0020] |
+| 10. Knowledge | versioned docs + targeted injection. | ✔ `6887cf0` (стандарты, скиллы, резолвер) [ADR-0020] |
 | 11. Specialization | Tests/Metrics/Telemetry/Docs agents. | ✔ `ee23341` (Metrics объединён с Telemetry) |
 | 12. Dev workflow | pre-push + CI. | ✔ CI `0dd2b8f`, бандлы run; pre-push `f11ca47` (`hooks install`, `prepush`, workflow `review-diff`) |
 | 13. Project Graph | symbols/dependencies/tests/events + hybrid retrieval. | ✔ `474d113`, `9f72b44` (граф TS), `10fa9f5` (retrieval; embeddings выключены) [ADR-0008, 0015, 0021] |
@@ -801,7 +801,7 @@ clients независимо друг от друга, сохраняя глав
 | §5 | Линейный граф с ветвлением CODE/TESTS/METRICS/TELEMETRY | Фактический граф `sdd`: `discover`, `requirements`, composite `verify`, обратные рёбра с лимитами, `review-analysis`, `release-notes` | ADR-0004, ADR-0019 |
 | §6 | Агенты: Research, Spec, Impact, Impl, Test, Metrics, Telemetry, Docs, Review | Metrics объединён с Telemetry; добавлены Requirements, Plan, Review-analysis, Release-notes | ADR-0019 |
 | §7 | Слои L0–L5 + пороги + compaction | Реализовано: пороги от эффективного окна (по умолчанию 0,40/0,60/0,75/0,85, по фазе и модели), trimming с блобами, handoff-компакция, reset, ручные команды | ADR-0013 |
-| §8 | Hybrid retrieval, vector DB «если надо» | Лексический FTS5 + глоссарий + порт Embedder за флагом; стандарты и навыки как вид знания | ADR-0015, ADR-0020 |
+| §8 | Hybrid retrieval, vector DB «если надо» | Лексический FTS5 + глоссарий + порт Embedder за флагом; стандарты и скиллы как вид знания | ADR-0015, ADR-0020 |
 | §8 | Граф: ts-morph | Граф через адаптер языка, факты кэшируются по хешу, снимки на дерево git | ADR-0008, ADR-0021 |
 | §9 | Local + MCP | + GraphToolProvider; профили MCP с проверяемыми эффектами | ADR-0017, ADR-0002 |
 | §10, §13 | Model routing, security | Egress по `dataClass`, Redactor, capabilities моделей | ADR-0007, ADR-0010, ADR-0016 |
@@ -850,7 +850,7 @@ clients независимо друг от друга, сохраняя глав
 | 0017 | Конфигурация моделей и MCP | 3, 9, 10 |
 | 0018 | Терминальная наблюдаемость, пулы квот | 11, 14 |
 | 0019 | Человеческое взаимодействие | 1, 4, 5, 6, 18 |
-| 0020 | Навыки и стандарты | 7, 8 |
+| 0020 | Скиллы и стандарты | 7, 8 |
 | 0021 | Стек-нейтральное ядро | 1, 2, 8, 17 |
 | 0022 | Терминальный интерфейс | 14, 15 |
 | 0023 | Редактор и веб-интерфейс `jarvis ui` | 15, 18 |

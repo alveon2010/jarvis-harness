@@ -489,7 +489,7 @@ export const RU: Readonly<Record<string, string>> = {
   "by default": "по умолчанию",
   Auto: "Авто",
   "picks the skills and standards written for this kind of work":
-    "по нему подбираются навыки и стандарты для такой работы",
+    "по нему подбираются скиллы и стандарты для такой работы",
   "new feature": "новая функциональность",
   change: "изменение",
   "bug fix": "исправление бага",
@@ -497,7 +497,7 @@ export const RU: Readonly<Record<string, string>> = {
   tests: "тесты",
   docs: "документация",
   "the kind of task the skills and standards were picked by":
-    "тип задачи, по которому подобраны навыки и стандарты",
+    "тип задачи, по которому подобраны скиллы и стандарты",
   "The task names": "В задаче упомянуты",
   and: "и",
   "linked by": "связанные через",
@@ -509,7 +509,7 @@ export const RU: Readonly<Record<string, string>> = {
   Documents: "Документы",
   Architecture: "Архитектура",
   Standards: "Стандарты",
-  Skills: "Навыки",
+  Skills: "Скиллы",
   Glossary: "Глоссарий",
   Ask: "Спросить",
   "what the agents know about this project": "что агенты знают об этом проекте",
@@ -592,14 +592,14 @@ export const RU: Readonly<Record<string, string>> = {
   Yours: "Ваши",
   "Built-in": "Встроенные",
   "ship with jarvis; a project skill with the same id wins":
-    "идут с jarvis; навык проекта с тем же id главнее",
+    "идут с jarvis; скилл проекта с тем же id главнее",
   "How to do one kind of work. An agent call gets the best matching ones in full ({setting}); the rest are listed as available on request.":
     "Как делать определённый вид работы. Вызов агента получает самые подходящие целиком ({setting}), остальные — списком, их можно запросить.",
   overridden: "заменён",
   "overrides built-in": "заменяет встроенный",
   "Replaced by the project skill {id}: agents get that one, this one is not used.":
-    "Заменён навыком проекта {id}: агенты получают его, а этот не используется.",
-  "Replaces the built-in skill with the same id.": "Заменяет встроенный навык с тем же id.",
+    "Заменён скиллом проекта {id}: агенты получают его, а этот не используется.",
+  "Replaces the built-in skill with the same id.": "Заменяет встроенный скилл с тем же id.",
   "Read in place from the team's documentation — change it there; jarvis copies nothing.":
     "Читается прямо из документации команды — правьте его там, jarvis ничего не копирует.",
   "for agents": "для агентов",
@@ -611,7 +611,7 @@ export const RU: Readonly<Record<string, string>> = {
   "verified by": "чем проверяется",
   "Did it reach the agent?": "Дошёл ли до агента?",
   "Not used: the project version is picked instead.": "Не используется: вместо него берётся версия проекта.",
-  "Pick a skill.": "Выберите навык.",
+  "Pick a skill.": "Выберите скилл.",
   // ---- glossary
   "Add a term": "Добавить термин",
   "goes to {file} as a draft; agents use it from the next run":
@@ -1242,26 +1242,26 @@ export const RU: Readonly<Record<string, string>> = {
   "picked by {what}": "подобраны по {what}",
   "kind {kind}": "типу {kind}",
   "stack {stacks}": "стеку {stacks}",
-  "skills:": "навыки:",
-  "no such skill: {ids}": "нет такого навыка: {ids}",
+  "skills:": "скиллы:",
+  "no such skill: {ids}": "нет такого скилла: {ids}",
   "tool schemas {tokens} — {share}% of the input": "схемы инструментов {tokens} — {share}% входа",
   // ---- Agent Skills
   "Agent Skills format, shared with other agents": "Формат Agent Skills, общий с другими агентами",
   "Says nothing about where it applies, so it is never picked by itself: every agent sees it in the list of other skills and reads it when it fits; a workflow step can name it.":
-    "Не сказано, где он применим, поэтому сам он не подбирается: каждый агент видит его в списке остальных навыков и читает, когда тот подходит к работе; шаг workflow может назвать его явно.",
+    "Не сказано, где он применим, поэтому сам он не подбирается: каждый агент видит его в списке остальных скиллов и читает, когда тот подходит к работе; шаг workflow может назвать его явно.",
   // ---- ADR-0020 §6
   "standard — a rule to follow": "стандарт — правило, которому следуют",
   "knowledge — what is true about the project": "знание — что верно о проекте",
-  "skill improvement — a step to add to a skill": "улучшение навыка — шаг, который добавить в навык",
+  "skill improvement — a step to add to a skill": "улучшение скилла — шаг, который добавить в скилл",
   "Propose a candidate": "Предложить кандидата",
   "waits with the ones review proposed: {cmd}": "ждёт вместе с теми, что предложил review: {cmd}",
   Kind: "Вид",
-  Skill: "Навык",
+  Skill: "Скилл",
   Title: "Название",
   Text: "Текст",
   Paths: "Пути",
   Evidence: "Где видно",
-  "for a skill improvement": "для улучшения навыка",
+  "for a skill improvement": "для улучшения скилла",
   "the rule, the knowledge, or the step — as it should be written":
     "правило, знание или шаг — так, как это должно быть записано",
   "optional, comma-separated globs it applies to":
@@ -1538,13 +1538,13 @@ export const RU: Readonly<Record<string, string>> = {
   "Rejected {name} — nothing written; the decision is kept":
     "{name} отклонён — ничего не записано, решение сохранено",
   "Added to the skill in {file} (v{v}) — not committed yet":
-    "Добавлено в навык, {file} (v{v}) — ещё не закоммичено",
+    "Добавлено в скилл, {file} (v{v}) — ещё не закоммичено",
   "Not accepted: {why}": "Не принято: {why}",
   standard: "стандарт",
   knowledge: "знание",
-  "skill-improvement": "улучшение навыка",
+  "skill-improvement": "улучшение скилла",
   "Accepting copies the built-in skill {skill} into {dir} and adds this at the end of its instructions: v{from} → v{to}.":
-    "При принятии встроенный навык {skill} копируется в {dir}, а это дописывается в конец его инструкций: v{from} → v{to}.",
+    "При принятии встроенный скилл {skill} копируется в {dir}, а это дописывается в конец его инструкций: v{from} → v{to}.",
   "Accepting adds this at the end of the instructions of {skill}: v{from} → v{to}.":
     "При принятии это дописывается в конец инструкций {skill}: v{from} → v{to}.",
   "Accepting adds {symbols} to the term {term} in the glossary.":
@@ -1563,7 +1563,7 @@ export const RU: Readonly<Record<string, string>> = {
   "Why not": "Почему нет",
   "optional; kept with the decision": "необязательно; сохранится вместе с решением",
   "Proposed standards, knowledge, skill improvements and glossary terms: from review, from runs, from people. Accepted, one is written into the project, to commit as usual.":
-    "Предложенные стандарты, знания, улучшения навыков и термины глоссария — из review, из прогонов, от людей. Принятый кандидат записывается в проект, а коммитится как обычно.",
+    "Предложенные стандарты, знания, улучшения скиллов и термины глоссария — из review, из прогонов, от людей. Принятый кандидат записывается в проект, а коммитится как обычно.",
   "Module maps are decided on {modules}: {n} open.":
     "Карты модулей решаются на странице {modules}: открыто {n}.",
   "Open only": "Только открытые",
@@ -1571,7 +1571,7 @@ export const RU: Readonly<Record<string, string>> = {
   "Nothing waits: review and runs propose candidates as they find things; you can propose one on the Overview.":
     "Ничего не ждёт: review и прогоны предлагают кандидатов по мере находок; предложить своего можно на «Обзоре».",
   "proposed by": "кто предложил",
-  skill: "навык",
+  skill: "скилл",
   "Pick a candidate.": "Выберите кандидата.",
 };
 

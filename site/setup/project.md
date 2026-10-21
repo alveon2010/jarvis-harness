@@ -156,5 +156,5 @@ security:
 jarvis config show --sources   # итоговые настройки и откуда каждая взялась
 jarvis doctor           # что помешает запуску
 jarvis standards list   # какие стандарты увидит агент
-jarvis skills list      # какие навыки
+jarvis skills list      # какие скиллы
 ```
