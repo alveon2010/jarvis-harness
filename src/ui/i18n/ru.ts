@@ -1275,8 +1275,6 @@ export const RU: Readonly<Record<string, string>> = {
     "необязательно, через запятую: путь:строка, прогон, ссылка",
   Propose: "Предложить",
   "{n} open besides module maps": "открытых, кроме карт модулей: {n}",
-  "Proposed {name} — it waits with the other candidates: {cmd}":
-    "Предложен {name} — ждёт вместе с другими кандидатами: {cmd}",
   "Not proposed: {why}": "Не предложено: {why}",
   "pick a kind": "выберите вид",
   // ---- ADR-0012
@@ -1536,6 +1534,50 @@ export const RU: Readonly<Record<string, string>> = {
   "Remove the checkout": "Убрать рабочую копию",
   "Delete the branch": "Удалить ветку",
   "as {cmd} for this run": "как {cmd} для этого прогона",
+  // ---- the Candidates page
+  Candidates: "Кандидаты",
+  Reject: "Отклонить",
+  "… {n} more": "… и ещё {n}",
+  "Proposed {name} — it waits under {candidates}, or in the terminal: {cmd}":
+    "Предложено {name} — ждёт в {candidates} или в терминале: {cmd}",
+  "Rejected {name} — nothing written; the decision is kept":
+    "{name} отклонён — ничего не записано, решение сохранено",
+  "Added to the skill in {file} (v{v}) — not committed yet":
+    "Добавлено в навык, {file} (v{v}) — ещё не закоммичено",
+  "Not accepted: {why}": "Не принято: {why}",
+  standard: "стандарт",
+  knowledge: "знание",
+  "skill-improvement": "улучшение навыка",
+  "Accepting copies the built-in skill {skill} into {dir} and adds this at the end of its instructions: v{from} → v{to}.":
+    "При принятии встроенный навык {skill} копируется в {dir}, а это дописывается в конец его инструкций: v{from} → v{to}.",
+  "Accepting adds this at the end of the instructions of {skill}: v{from} → v{to}.":
+    "При принятии это дописывается в конец инструкций {skill}: v{from} → v{to}.",
+  "Accepting adds {symbols} to the term {term} in the glossary.":
+    "При принятии к термину {term} в глоссарии добавятся {symbols}.",
+  "Accepting adds the term {term} with {symbols} to the glossary.":
+    "При принятии в глоссарий добавится термин {term} с {symbols}.",
+  "Accepting writes {file} — not committed: it goes through the usual review.":
+    "При принятии записывается {file} — без коммита: дальше обычное review.",
+  "Jarvis wrote the file there now: it is replaced.":
+    "Сейчас там файл, который написал Jarvis: он заменится.",
+  "A person wrote the file there now: replace it, or give another name.":
+    "Сейчас там файл, который написал человек: замените его или дайте другое имя.",
+  "File name": "Имя файла",
+  "optional; without .md": "необязательно; без .md",
+  "replace the file a person wrote": "заменить файл, который написал человек",
+  "Why not": "Почему нет",
+  "optional; kept with the decision": "необязательно; сохранится вместе с решением",
+  "Proposed standards, knowledge, skill improvements and glossary terms: from review, from runs, from people. Accepted, one is written into the project, to commit as usual.":
+    "Предложенные стандарты, знания, улучшения навыков и термины глоссария — из review, из прогонов, от людей. Принятый кандидат записывается в проект, а коммитится как обычно.",
+  "Module maps are decided on {modules}: {n} open.":
+    "Карты модулей решаются на странице {modules}: открыто {n}.",
+  "Open only": "Только открытые",
+  "With decided ({n})": "С решёнными ({n})",
+  "Nothing waits: review and runs propose candidates as they find things; you can propose one on the Overview.":
+    "Ничего не ждёт: review и прогоны предлагают кандидатов по мере находок; предложить своего можно на «Обзоре».",
+  "proposed by": "кто предложил",
+  skill: "навык",
+  "Pick a candidate.": "Выберите кандидата.",
 };
 
 /**

@@ -24,6 +24,8 @@ export interface KnowledgeCounts {
   readonly standards: number;
   readonly skills: number;
   readonly terms: number;
+  /** Open candidates other than module maps (those are decided on Modules). */
+  readonly candidates?: number;
   /** Services of the knowledge repository's map; the tab shows only with one. */
   readonly services?: number;
 }
@@ -37,11 +39,12 @@ export type KnowledgeTab =
   | "architecture"
   | "standards"
   | "skills"
-  | "glossary";
+  | "glossary"
+  | "candidates";
 
 /** The architecture document, by name: `.jarvis/knowledge/`, or a service's folder of the knowledge repository. */
 export const ARCHITECTURE = "architecture.md";
-// the tabs' labels: t("Overview") t("Services") t("Ask") t("Modules") t("Documents") t("Architecture") t("Standards") t("Skills") t("Glossary")
+// the tabs' labels: t("Overview") t("Services") t("Ask") t("Modules") t("Documents") t("Architecture") t("Standards") t("Skills") t("Glossary") t("Candidates")
 
 export function knowledgeTabs(current: KnowledgeTab, counts?: KnowledgeCounts): Html {
   const tab = (id: KnowledgeTab, href: string, label: string, count?: number) =>
@@ -57,6 +60,7 @@ ${tab("architecture", `/knowledge/docs?doc=${encodeURIComponent(ARCHITECTURE)}`,
 ${tab("standards", "/knowledge/standards", "Standards", counts?.standards)}
 ${tab("skills", "/knowledge/skills", "Skills", counts?.skills)}
 ${tab("glossary", "/knowledge/glossary", "Glossary", counts?.terms)}
+${tab("candidates", "/knowledge/candidates", "Candidates", counts?.candidates)}
 </nav>`;
 }
 
@@ -507,5 +511,178 @@ ${s.problems.map((p) => html`<div class="banner bad">${p}</div>`)}
     : html`<section class="panel kbox"><p class="hint">${t("Pick a term to see what a query with it becomes and where its symbols are.")}</p></section>`
 }
 </aside>
+</div>`;
+}
+
+/* ---- candidates (ADR-0020 §6) ---- */
+
+/** A candidate as its page shows it: what it proposes and what accepting it writes. */
+export interface CandidateView {
+  readonly id: string;
+  readonly name: string;
+  readonly kind: "knowledge" | "standard" | "skill-improvement" | "glossary";
+  readonly title: string;
+  readonly rationale: string;
+  readonly proposal?: string;
+  readonly evidence: readonly string[];
+  readonly paths: readonly string[];
+  readonly createdAt: string;
+  /** A person who proposed it, or the run that did. */
+  readonly by: {
+    readonly person?: string;
+    readonly run?: { readonly id: string; readonly workflow: string };
+  };
+  readonly decision?: string;
+  /** standard, knowledge: the file accepting writes, and what is there now. */
+  readonly target?: { readonly path: string; readonly taken?: "generated" | "person"; readonly id: string };
+  /** skill-improvement: the skill and the version it goes to. */
+  readonly skillEdit?: {
+    readonly skill: string;
+    readonly from: number;
+    readonly to: number;
+    readonly fromBuiltin: boolean;
+  };
+  /** glossary: the term and the symbols it gets. */
+  readonly glossary?: { readonly term: string; readonly symbols: readonly string[]; readonly known: boolean };
+  /** Accepting cannot work, and why (a skill that is not this project's to change). */
+  readonly blocked?: string;
+}
+
+export interface CandidatesPage {
+  readonly counts: KnowledgeCounts;
+  readonly list: readonly CandidateView[];
+  readonly selected?: CandidateView;
+  /** Decided ones listed too. */
+  readonly all: boolean;
+  readonly decided: number;
+  /** Module maps waiting on Modules. */
+  readonly modules: number;
+}
+
+// t("standard") t("knowledge") t("skill-improvement") t("glossary")
+const KIND_PILL: Record<CandidateView["kind"], string> = {
+  standard: "bad",
+  knowledge: "info",
+  "skill-improvement": "wait",
+  glossary: "plain",
+};
+const kindPill = (k: CandidateView["kind"]) => html`<span class="pill ${KIND_PILL[k]}">${t(k)}</span>`;
+const candidateHref = (c: CandidateView, all: boolean) =>
+  `/knowledge/candidates?id=${encodeURIComponent(c.id)}${all ? "&all=1" : ""}`;
+
+function decisionPill(d: string | undefined): Html | string {
+  if (!d) return "";
+  return d === "approve"
+    ? html`<span class="pill ok">${t("accepted")}</span>`
+    : html`<span class="pill plain">${t("rejected")}</span>`;
+}
+
+/** What accepting writes, said before the button. */
+// t("Accepting copies the built-in skill {skill} into {dir} and adds this at the end of its instructions: v{from} → v{to}.")
+// t("Accepting adds this at the end of the instructions of {skill}: v{from} → v{to}.")
+// t("Accepting adds {symbols} to the term {term} in the glossary.")
+// t("Accepting adds the term {term} with {symbols} to the glossary.")
+function writesHtml(c: CandidateView): Html {
+  if (c.blocked) return html`<div class="banner bad">${c.blocked}</div>`;
+  if (c.skillEdit)
+    return html`<p class="hint">${th(
+      c.skillEdit.fromBuiltin
+        ? "Accepting copies the built-in skill {skill} into {dir} and adds this at the end of its instructions: v{from} → v{to}."
+        : "Accepting adds this at the end of the instructions of {skill}: v{from} → v{to}.",
+      {
+        skill: html`<code>${c.skillEdit.skill}</code>`,
+        dir: html`<code>.jarvis/skills/${c.skillEdit.skill}/</code>`,
+        from: c.skillEdit.from,
+        to: c.skillEdit.to,
+      },
+    )}</p>`;
+  if (c.glossary)
+    return html`<p class="hint">${th(
+      c.glossary.known
+        ? "Accepting adds {symbols} to the term {term} in the glossary."
+        : "Accepting adds the term {term} with {symbols} to the glossary.",
+      {
+        term: html`<b>${c.glossary.term}</b>`,
+        symbols: html`${c.glossary.symbols.map((x, i) => html`${i > 0 ? ", " : ""}<code>${x}</code>`)}`,
+      },
+    )}</p>`;
+  if (c.target)
+    return html`<p class="hint">${th("Accepting writes {file} — not committed: it goes through the usual review.", { file: html`<code>${c.target.path}</code>` })}${
+      c.target.taken === "generated"
+        ? html` ${t("Jarvis wrote the file there now: it is replaced.")}`
+        : c.target.taken === "person"
+          ? html` <b>${t("A person wrote the file there now: replace it, or give another name.")}</b>`
+          : ""
+    }</p>`;
+  return html``;
+}
+
+function decideHtml(c: CandidateView, back: string, actions?: Actions): Html | string {
+  if (!actions || c.decision) return "";
+  const at = `/knowledge/candidates/${encodeURIComponent(c.id)}`;
+  return html`<div class="kdecide">
+${writesHtml(c)}
+${
+  c.blocked
+    ? ""
+    : form(
+        actions,
+        `${at}/accept`,
+        html`<input type="hidden" name="back" value="${back}">${
+          c.target
+            ? html`<label class="field"><span>${t("File name")} <span class="hint">${t("optional; without .md")}</span></span><input type="text" name="id" value="${c.target.id}" maxlength="60" class="mono" pattern="[a-z0-9][a-z0-9._\-]{0,59}"></label>${
+                c.target.taken === "person"
+                  ? html`<label class="row"><input type="checkbox" name="replace" value="1"> ${t("replace the file a person wrote")}</label>`
+                  : ""
+              }`
+            : ""
+        }<div class="row"><button type="submit" class="btn primary">${t("Accept")}</button></div>`,
+      )
+}
+${form(
+  actions,
+  `${at}/reject`,
+  html`<input type="hidden" name="back" value="${back}"><label class="field"><span>${t("Why not")} <span class="hint">${t("optional; kept with the decision")}</span></span><input type="text" name="comment" maxlength="500"></label><div class="row"><button type="submit" class="btn">${t("Reject")}</button></div>`,
+)}
+</div>`;
+}
+
+export function candidatesContent(page: CandidatesPage, actions?: Actions, notice?: Html): Html {
+  const c = page.selected;
+  const back = c ? candidateHref(c, page.all) : "/knowledge/candidates";
+  return html`${knowledgeTabs("candidates", page.counts)}
+${notice ?? ""}
+<div class="row"><p class="hint grow">${t("Proposed standards, knowledge, skill improvements and glossary terms: from review, from runs, from people. Accepted, one is written into the project, to commit as usual.")}${page.modules > 0 ? html` ${th("Module maps are decided on {modules}: {n} open.", { modules: html`<a href="/knowledge/modules">${t("Modules")}</a>`, n: page.modules })}` : ""}</p>
+${page.decided > 0 ? html`<a class="btn small${page.all ? " strong" : ""}" href="/knowledge/candidates${page.all ? "" : "?all=1"}">${page.all ? t("Open only") : t("With decided ({n})", { n: page.decided })}</a>` : ""}</div>
+<div class="kdoccols kstd">
+<nav class="panel klist" aria-label="${t("Candidates")}">
+${page.list.map(
+  (x) =>
+    html`<a class="kli${x.decision ? " off" : ""}" href="${candidateHref(x, page.all)}"${x.id === c?.id ? html` aria-current="page"` : ""}><span><code>${x.name}</code><span class="hint">${x.title}</span></span><span class="kmeta">${kindPill(x.kind)}${decisionPill(x.decision)}</span></a>`,
+)}
+${page.list.length === 0 ? html`<p class="empty">${t("Nothing waits: review and runs propose candidates as they find things; you can propose one on the Overview.")}</p>` : ""}
+</nav>
+${
+  c
+    ? html`<article class="panel kdoc" aria-labelledby="cand-h">
+<div class="kdochead"><div class="row"><h2 id="cand-h"><code>${c.name}</code></h2>${kindPill(c.kind)}${decisionPill(c.decision)}</div>
+<p class="klead">${c.title}</p>
+<dl class="mfacts">
+<dt>${t("proposed by")}</dt><dd>${c.by.person ? c.by.person : c.by.run ? html`<a href="/runs/${encodeURIComponent(c.by.run.id)}">${c.by.run.workflow}</a>` : "—"} · ${c.createdAt.slice(0, 16).replace("T", " ")}</dd>
+${c.paths.length > 0 ? html`<dt>${t("paths")}</dt><dd><code>${c.paths.join(", ")}</code></dd>` : ""}
+${c.skillEdit ? html`<dt>${t("skill")}</dt><dd><a href="/knowledge/skills?id=${encodeURIComponent(c.skillEdit.skill)}"><code>${c.skillEdit.skill}</code></a></dd>` : ""}
+</dl>
+${c.rationale && c.rationale !== c.proposal && !(c.by.person && c.rationale.startsWith("Proposed by ")) ? html`<p>${c.rationale}</p>` : ""}
+</div>
+${c.proposal ? html`<div class="doc">${md(c.proposal)}</div>` : ""}
+${
+  c.evidence.length > 0
+    ? html`<section class="kfound"><h3>${t("Evidence")}</h3><ul>${c.evidence.slice(0, 40).map((e) => html`<li><code>${e}</code></li>`)}</ul>${c.evidence.length > 40 ? html`<p class="hint">${t("… {n} more", { n: c.evidence.length - 40 })}</p>` : ""}</section>`
+    : ""
+}
+${decideHtml(c, back, actions)}
+</article>`
+    : html`<p class="empty">${t("Pick a candidate.")}</p>`
+}
 </div>`;
 }

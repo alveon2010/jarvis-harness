@@ -2,8 +2,8 @@
 
 - Статус: принято; §6 реализован (кандидаты из review, вручную и из повторяющихся findings)
 - Дата: 2026-10-03
-- Не сделано: в `jarvis ui` решение по кандидатам не из карт модулей (ручным, из review, из повторов) —
-  только в терминале, `jarvis candidates promote|reject`; страница их предлагает и считает
+- Сделано: решение по любым кандидатам в `jarvis ui` — карты модулей на Knowledge → Modules, остальные
+  на Knowledge → Candidates
 - Основание: [ADR-0001](0001-target-architecture.md) §7 (контекст агентов), §9 (знания проекта);
   концепция «Jarvis Skills, Standards & Engineering Knowledge» (2026-10-03). Опирается на
   [ADR-0005](0005-artifact-versions-provenance.md) (provenance), [ADR-0012](0012-evals-and-record-replay.md)

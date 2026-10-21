@@ -289,4 +289,58 @@ describe("Knowledge pages", () => {
     expect(skill.location).toContain("notice=candidate-added");
     expect(candidatesOf(rt).map((x) => x.doc.skill ?? x.doc.kind)).toEqual(["standard", "unit-testing"]);
   });
+
+  it("decides candidates on the Candidates page, as `jarvis candidates promote|reject` does", async () => {
+    const propose = (kind: string, title: string, text: string, skill?: string) =>
+      post("/knowledge/candidates/add", [
+        ["kind", kind],
+        ["title", title],
+        ["text", text],
+        ...(skill ? [["skill", skill] as [string, string]] : []),
+      ]);
+    await propose("standard", "Money in minor units", "Amounts are integers in minor units.");
+    await propose("knowledge", "Order states", "An order goes draft → placed → paid.");
+    await propose("skill-improvement", "Fixtures", "5. Name the fixture after the case.", "unit-testing");
+    const [money, states, fixtures] = candidatesOf(rt);
+    const list = await page("/knowledge/candidates");
+    expect(list).toContain('Candidates <span class="muted">3</span>');
+    // newest first and shown: the skill improvement and what accepting it does
+    expect(list).toContain("Accepting copies the built-in skill");
+    expect(list).toContain("v1 → v2");
+    expect(await page(`/knowledge/candidates?id=${money?.artifact.artifactId}`)).toContain(
+      ".jarvis/standards/money-in-minor-units.md",
+    );
+
+    const accepted = await post(`/knowledge/candidates/${money?.artifact.artifactId}/accept`, [
+      ["id", "money"],
+    ]);
+    expect(accepted.location).toContain("notice=accepted");
+    expect(readFileSync(join(sb.project, ".jarvis/standards/money.md"), "utf8")).toContain(
+      "Amounts are integers in minor units.",
+    );
+    expect(await page(accepted.location as string)).toContain(
+      "Written to <code>.jarvis/standards/money.md</code>",
+    );
+
+    const skill = await post(`/knowledge/candidates/${fixtures?.artifact.artifactId}/accept`, []);
+    expect(skill.location).toContain("notice=candidate-skill");
+    expect(readFileSync(join(sb.project, ".jarvis/skills/unit-testing/instructions.md"), "utf8")).toContain(
+      "5. Name the fixture after the case.",
+    );
+
+    const rejected = await post(`/knowledge/candidates/${states?.artifact.artifactId}/reject`, [
+      ["comment", "already in orders.md"],
+    ]);
+    expect(rejected.location).toContain("notice=candidate-rejected");
+    expect(rt.artifacts.approvalsFor(states?.artifact.artifactId as string, 1)[0]).toMatchObject({
+      decision: "reject",
+      comment: "already in orders.md",
+    });
+    // decided: gone from the open list, on the list with decided ones, and not decided twice
+    const after = await page("/knowledge/candidates");
+    expect(after).toContain("Nothing waits");
+    expect(after).toContain("With decided (3)");
+    const again = await post(`/knowledge/candidates/${states?.artifact.artifactId}/accept`, []);
+    expect(again.location).toContain("notice=decided");
+  });
 });

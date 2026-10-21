@@ -8,14 +8,17 @@ import { applyRun } from "../app/applyRun.ts";
 import { budgetGranted, budgetStopOf, grantBudget } from "../app/budgetStop.ts";
 import {
   addCandidate,
+  CANDIDATES_WORKFLOW,
   type Candidate,
   CandidateInvalid,
+  CandidateNotPromotable,
   CandidateTargetTaken,
   candidatesOf,
   contentOf,
   existingAt,
   promoteCandidate,
   rejectCandidate,
+  skillEditOf,
   targetOf,
 } from "../app/candidates.ts";
 import { continuationOf, sameTask, startPointOf } from "../app/continuation.ts";
@@ -127,6 +130,8 @@ import { inLang, LANG_COOKIE, LANGS, type Lang, lang, langOf, plural, t, th } fr
 import { KIND_NAME, kindWhy } from "./kinds.ts";
 import {
   ARCHITECTURE,
+  type CandidateView,
+  candidatesContent,
   docsContent,
   glossaryContent,
   type KnowledgeCounts,
@@ -846,7 +851,10 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       "commit-failed": html`<div class="banner bad">${th("git commit failed — see {cmd}", { cmd: html`<code>jarvis logs --event ui.commit</code>` })}</div>`,
       opened: html`<div class="banner ok">↗ ${t("opened in {editor}", { editor: r.url.searchParams.get("editor") ?? t("your editor") })}</div>`,
       "no-editor": html`<div class="banner bad">${th("No editor found — set JARVIS_EDITOR (code, idea, webstorm…) where you start {cmd}", { cmd: html`<code>jarvis ui</code>` })}</div>`,
-      "candidate-added": html`<div class="banner ok">${th("Proposed {name} — it waits with the other candidates: {cmd}", { name: html`<code>${file}</code>`, cmd: html`<code>jarvis candidates promote ${file}</code>` })}</div>`,
+      "candidate-added": html`<div class="banner ok">${th("Proposed {name} — it waits under {candidates}, or in the terminal: {cmd}", { name: html`<code>${file}</code>`, candidates: html`<a href="/knowledge/candidates">${t("Candidates")}</a>`, cmd: html`<code>jarvis candidates promote ${file}</code>` })}</div>`,
+      "candidate-rejected": html`<div class="banner ok">${th("Rejected {name} — nothing written; the decision is kept", { name: html`<code>${file}</code>` })}</div>`,
+      "candidate-skill": html`<div class="banner ok">${th("Added to the skill in {file} (v{v}) — not committed yet", { file: html`<code>${file}</code>`, v: r.url.searchParams.get("v") ?? "?" })}</div>`,
+      "candidate-blocked": html`<div class="banner bad">${t("Not accepted: {why}", { why: file })}</div>`,
       "candidate-invalid": html`<div class="banner bad">${t("Not proposed: {why}", { why: file || t("pick a kind") })}</div>`,
       actor: html`<div class="banner bad">${t("Cannot determine who decides: set JARVIS_ACTOR, actor.id or git config user.email (ADR-0006)")}</div>`,
     };
@@ -989,6 +997,8 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
     const m = /^\/knowledge\/candidates\/([^/]+)\/(accept|reject)$/.exec(at);
     if (!m) return notFound(r, `Nothing to do at ${at}.`);
     const id = decodeURIComponent(m[1] as string);
+    const other = otherCandidates().find((x) => x.artifact.artifactId === id);
+    if (other) return decideOther(r, form, other, m[2] as "accept" | "reject");
     const all = candidatesOf(runtime, (run) => run.workflow === "onboard-module");
     const c = all.find((x) => x.artifact.artifactId === id);
     if (!c) return notFound(r, "No such candidate.");
@@ -1040,6 +1050,62 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
   };
 
   /* ---- Knowledge: overview, documents, standards, skills, glossary (read-only, a glossary term added) ---- */
+  /** Candidates other than module maps (those are decided on Modules): the Candidates page. */
+  const otherCandidates = (): Candidate[] =>
+    candidatesOf(runtime, (run) => run.workflow !== "onboard-module");
+  /** What the Candidates page shows of one: what it proposes and what accepting it writes. */
+  const candidateView = (c: Candidate): CandidateView => {
+    const dir = root as string;
+    const run = runtime.runs.get(c.artifact.runId);
+    const prov = c.artifact.provenance;
+    const by =
+      prov.kind === "human"
+        ? { person: prov.actor.display ?? prov.actor.id }
+        : run && run.workflow !== CANDIDATES_WORKFLOW
+          ? { run: { id: shortRunId(run.id), workflow: run.workflow } }
+          : {};
+    let extra: Partial<CandidateView> = {};
+    try {
+      if (c.doc.kind === "skill-improvement") {
+        const e = skillEditOf(dir, c.doc);
+        extra = {
+          skillEdit: { skill: e.skill, from: e.version.from, to: e.version.to, fromBuiltin: e.fromBuiltin },
+        };
+      } else if (c.doc.kind === "glossary") {
+        const g = c.doc.glossary;
+        extra = g
+          ? { glossary: { term: g.term, symbols: g.symbols, known: g.existing } }
+          : { blocked: "this glossary candidate carries no term" };
+      } else {
+        const file = targetOf(dir, c, undefined);
+        const before = existingAt(file);
+        extra = {
+          target: {
+            path: relative(dir, file).split(sep).join("/"),
+            id: file.replace(/^.*[\\/]/, "").replace(/\.md$/, ""),
+            ...(before ? { taken: before.generated ? ("generated" as const) : ("person" as const) } : {}),
+          },
+        };
+      }
+    } catch (error) {
+      if (!(error instanceof CandidateNotPromotable)) throw error;
+      extra = { blocked: error.message };
+    }
+    return {
+      id: c.artifact.artifactId,
+      name: c.name,
+      kind: c.doc.kind,
+      title: c.doc.title,
+      rationale: c.doc.rationale,
+      ...(c.doc.proposal ? { proposal: c.doc.proposal } : {}),
+      evidence: c.doc.evidence ?? [],
+      paths: c.doc.paths ?? [],
+      createdAt: c.artifact.createdAt,
+      by,
+      ...(c.decision ? { decision: c.decision } : {}),
+      ...extra,
+    };
+  };
   const countsOf = (): KnowledgeCounts => {
     const r = roots();
     const safe = (f: () => number) => {
@@ -1054,6 +1120,7 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       standards: safe(() => loadStandards(r).length),
       skills: safe(() => loadSkills(r).length),
       terms: safe(() => loadGlossary(root).length),
+      candidates: safe(() => otherCandidates().filter((c) => !c.decision).length),
       ...(runtime.loaded.meta ? { services: Object.keys(runtime.loaded.meta.repos).length } : {}),
     };
   };
@@ -1198,6 +1265,29 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       }
       return knowledgePage(r, "Knowledge · standards", content, r.url.pathname + r.url.search);
     }
+    if (at === "/knowledge/candidates") {
+      const all = q("all") === "1";
+      const every = otherCandidates();
+      // newest first: what came in last is on top
+      const shown = every.filter((c) => all || !c.decision).reverse();
+      const id = q("id");
+      const pick = (id ? every.find((c) => c.artifact.artifactId === id) : undefined) ?? shown[0];
+      const content = candidatesContent(
+        {
+          counts,
+          list: shown.map(candidateView),
+          ...(pick ? { selected: candidateView(pick) } : {}),
+          all,
+          decided: every.filter((c) => c.decision).length,
+          modules: candidatesOf(runtime, (run) => run.workflow === "onboard-module").filter(
+            (c) => !c.decision && c.doc.module,
+          ).length,
+        },
+        actions,
+        notice,
+      );
+      return knowledgePage(r, "Knowledge · candidates", content, r.url.pathname + r.url.search);
+    }
     if (at === "/knowledge/skills") {
       let content: Html;
       try {
@@ -1292,6 +1382,50 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       );
     }
     return notFound(r, `Nothing at ${r.url.pathname}.`);
+  };
+  /** Accept or reject a candidate on the Candidates page: `jarvis candidates promote|reject` from the page. */
+  const decideOther = async (
+    r: Request,
+    form: URLSearchParams,
+    c: Candidate,
+    how: "accept" | "reject",
+  ): Promise<void> => {
+    const page = `/knowledge/candidates?id=${encodeURIComponent(c.artifact.artifactId)}`;
+    const back = (form.get("back") ?? "").startsWith("/knowledge/candidates")
+      ? (form.get("back") as string)
+      : page;
+    const to = (notice: string, extra = "") =>
+      `${back}${back.includes("?") ? "&" : "?"}notice=${notice}${extra}`;
+    if (c.decision) return redirect(r, to("decided"));
+    const who = options.actor ? await options.actor() : undefined;
+    if (!who) return redirect(r, to("actor"));
+    if (how === "reject") {
+      rejectCandidate(runtime, c, who, (form.get("comment") ?? "").trim().slice(0, NOTE_MAX) || undefined);
+      return redirect(r, to("candidate-rejected", `&file=${encodeURIComponent(c.name)}`));
+    }
+    const fileId = (form.get("id") ?? "").trim();
+    try {
+      const done = promoteCandidate(runtime, {
+        root: root as string,
+        candidate: c,
+        actor: who,
+        ...(/^[a-z0-9][a-z0-9._-]{0,59}$/.test(fileId) ? { id: fileId } : {}),
+        replace: form.get("replace") === "1",
+        channel: "ui",
+      });
+      return redirect(
+        r,
+        to(
+          done.skill ? "candidate-skill" : "accepted",
+          `&file=${encodeURIComponent(done.path)}${done.skill ? `&v=${done.skill.to}` : ""}`,
+        ),
+      );
+    } catch (error) {
+      if (error instanceof CandidateTargetTaken) return redirect(r, to("taken"));
+      if (error instanceof CandidateNotPromotable)
+        return redirect(r, to("candidate-blocked", `&file=${encodeURIComponent(error.message)}`));
+      throw error;
+    }
   };
   /** «Propose a candidate» on the Overview: `jarvis candidates add` from the page (ADR-0020 §6). */
   const proposePost = async (r: Request, form: URLSearchParams): Promise<void> => {

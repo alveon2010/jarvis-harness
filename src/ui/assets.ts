@@ -735,6 +735,14 @@ p.sv-pair{margin:0;font-size:14px}
 .kunits li{display:flex;justify-content:space-between;gap:10px}
 .kfound{padding:16px 24px;border-top:1px solid var(--line-soft);display:flex;flex-direction:column;gap:8px}
 .kfound h3{margin:0;font-size:14px}
+.kdecide{padding:16px 24px;border-top:1px solid var(--line-soft);display:flex;flex-direction:column;gap:12px}
+.kdecide form{display:flex;flex-direction:column;gap:8px}
+.kdecide input[type=text]{height:40px;padding:0 12px;border-radius:8px;font-size:14px;max-width:480px}
+.kdecide input.mono{font-family:var(--mono);font-size:13px}
+.kdecide .row{gap:8px}
+.kdecide .field>span{color:var(--ink);font-weight:500}
+.kdecide .field>span .hint{font-weight:400;margin-left:4px}
+.kdecide form+form{padding-top:12px;border-top:1px dashed var(--line-soft)}
 .kfound ul{margin:0;padding-left:18px;font-size:13px;line-height:20px}
 .kadd>summary{padding:14px 20px;cursor:pointer}
 .kadd form{padding:0 20px 18px;display:flex;flex-direction:column;gap:12px}
