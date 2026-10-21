@@ -35,8 +35,12 @@ export interface StartForm {
   readonly notice?: Html;
 }
 
-/** How far a task goes: the same four in every place. */
-export type HowFar = "research" | "fix" | "sdd" | "spec";
+/**
+ * How far a task goes: the same three in every place. `research` alone is not offered: a spec starts
+ * with the same research and goes on to requirements a person approves; a question is for Ask, and
+ * `jarvis research` stays for the terminal and the runs made with it.
+ */
+export type HowFar = "fix" | "sdd" | "spec";
 
 interface HowFarDef {
   readonly id: HowFar;
@@ -48,20 +52,10 @@ interface HowFarDef {
 }
 
 /**
- * The four as the team names them, in English in every language and in the order a task grows: find
- * out, specify, build; a bug fix on its own.
+ * The three as the team names them, in English in every language and in the order a task grows:
+ * specify, build; a bug fix on its own.
  */
 export const HOW_FAR: readonly HowFarDef[] = [
-  {
-    id: "research",
-    label: "Research",
-    one: {
-      what: "find out what the task touches and what is unknown; nothing changes",
-    },
-    across: {
-      what: "which services the task touches and what each needs; nothing changes",
-    },
-  },
   {
     id: "spec",
     label: "Specification",
@@ -86,8 +80,7 @@ export const HOW_FAR: readonly HowFarDef[] = [
 ];
 
 export const ONE_SERVICE_ONLY = "In one service only — pick it in Where";
-// t("Research") t("Specification") t("Implementation") t("Bugfix") t("All services") t("In one service only — pick it in Where")
-// t("find out what the task touches and what is unknown; nothing changes") t("which services the task touches and what each needs; nothing changes")
+// t("Specification") t("Implementation") t("Bugfix") t("All services") t("In one service only — pick it in Where")
 // t("research, a spec to approve, the fix, checks, review") t("requirements, a spec to approve, impact, plan, code, checks, review")
 // t("one spec, a subtask per service, the contract between them, delivery in order") t("up to an approved spec; implement later")
 // t("one spec for all the services, approved; split later") t("Across services") t("One service") t("Other repositories with runs")
@@ -206,10 +199,10 @@ function kindLineHtml(): Html {
   return html`<div class="kindline" data-kind-line><span>${t("Kind of task")}</span><div class="kchip" role="radiogroup" aria-label="${t("Kind of task")}" title="${t("picks the skills and standards written for this kind of work")}"><label><input type="radio" name="kind" value="" checked><span><span class="ak">${t("Auto")} · </span><span data-kind-name>${t(KIND_NAME[first.kind])}</span></span></label>${TASK_KINDS.map((k) => html`<label><input type="radio" name="kind" value="${k}"><span>${t(KIND_NAME[k])}</span></label>`)}</div><span class="meta" data-kind-why>— ${kindWhy(first)}</span></div>`;
 }
 
-/** The form; research first and chosen in every place: find out before changing anything. */
+/** The form; a spec first and chosen in every place: agree on what to build before building it. */
 export function newTaskHtml(start: StartForm, actions: Actions): Html {
   const chosen = start.places.find((p) => p.root === start.current) ?? start.places[0];
-  const on: HowFar = "research";
+  const on: HowFar = "spec";
   const h = HOW_FAR.find((x) => x.id === on) as HowFarDef;
   return html`<section class="panel newtask" aria-labelledby="new-title" id="new">
 <form method="post" action="/runs/new" data-newtask data-here="${t("this repository")}" data-across-word="${t("across services")}" data-reads="${t("Reads {key} at the start, with its pages and frames.")}" data-one-only-title="${t(ONE_SERVICE_ONLY)}"><input type="hidden" name="t" value="${actions.token}">
@@ -224,7 +217,7 @@ ${kindLineHtml()}
 <details class="more"><summary>${t("More options")}</summary>
 <label class="check"><input type="checkbox" name="fresh" value="design"> ${t("Read the Figma frames again")} <span class="meta">— ${t("the design changed at the same link; past Jarvis's one-day cache, each frame is a Figma API call")}</span></label>
 </details>
-<p class="hint">${th("Runs in the background, as {cmd} (or the one chosen) would without a terminal; where it needs you, it waits here — decide on the page and it goes on.", { cmd: html`<code>jarvis research "…"</code>` })}</p>
+<p class="hint">${th("Runs in the background, as {cmd} (or the one chosen) would without a terminal; where it needs you, it waits here — decide on the page and it goes on.", { cmd: html`<code>jarvis spec "…"</code>` })}</p>
 </form>
 </section>`;
 }

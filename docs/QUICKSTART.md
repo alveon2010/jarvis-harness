@@ -140,7 +140,7 @@ jarvis approve <run> --commit --resume                      # решение к�
 `jarvis ui` — локальная страница (127.0.0.1, порт 4317):
 - прогоны и что ждёт вас;
 - решения по гейтам, бюджету и петлям; Resume и Cancel;
-- New task (research, fix, sdd, spec) в фоне;
+- New task (spec, sdd, fix) в фоне;
 - документы и дифф реализации с комментариями к строкам;
 - Knowledge: Overview, Modules (исследовать модуль и принять кандидата), Documents, Architecture, Standards,
   Skills, Glossary;

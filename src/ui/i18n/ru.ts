@@ -451,15 +451,10 @@ export const RU: Readonly<Record<string, string>> = {
   "Nothing found": "Ничего не нашлось",
   Run: "Запустить",
   // the four of New task keep their English names (the team says them so)
-  Research: "Research",
   Specification: "Specification",
   Implementation: "Implementation",
   Bugfix: "Bugfix",
   "All services": "Все сервисы",
-  "find out what the task touches and what is unknown; nothing changes":
-    "разобраться, что задевает задача и что неизвестно; ничего не меняется",
-  "which services the task touches and what each needs; nothing changes":
-    "какие сервисы задевает задача и что нужно каждому; ничего не меняется",
   "research, a spec to approve, the fix, checks, review":
     "research, спека на одобрение, исправление, проверки, review",
   "requirements, a spec to approve, impact, plan, code, checks, review":

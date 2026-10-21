@@ -246,9 +246,10 @@ describe("New task on the page", () => {
       '<a class="btn primary small newtask-btn" href="/#new" data-new-task title="New task (N)">',
     );
     expect(runs).toContain('action="/runs/new"');
-    // research first and chosen: find out before changing anything; the button names it and the place
-    expect(runs).toContain('<input type="radio" name="workflow" value="research" data-label="Research"');
-    expect(runs).toMatch(/value="research"[^>]* checked><span>Research<\/span>/);
+    // a spec first and chosen: agree on what to build before building it; research alone is not offered
+    expect(runs).toContain('<input type="radio" name="workflow" value="spec" data-label="Specification"');
+    expect(runs).toMatch(/value="spec"[^>]* checked><span>Specification<\/span>/);
+    expect(runs).not.toContain('name="workflow" value="research"');
     expect(runs).toMatch(/value="fix"[^>]* data-one-only><span>Bugfix<\/span>/);
     expect(runs).toContain("data-go>Run</button>");
     expect((await post("/runs/new", { task: "x", workflow: "fix" })).status).toBe(403); // no token
